@@ -1,5 +1,5 @@
-import { Hono } from 'hono';
-import { bySlug, detail, fail, json, save, validate } from '../pages';
+import { Hono, type Context } from 'hono';
+import { bySlug, detail, fail, save, validate } from '../pages';
 import type { AppEnv } from '../types';
 
 export const pages = new Hono<AppEnv>();
@@ -24,7 +24,7 @@ pages.get('/:slug', async (c) => {
   return c.json({ data: await detail(c.env.DB, row) });
 });
 
-async function parseBody(c: any) {
+async function parseBody(c: Context<AppEnv>) {
   if (!c.req.header('content-type')?.toLowerCase().startsWith('application/json')) fail(415, 'Use Content-Type: application/json.');
   const raw = await c.req.text();
   if (raw.length > 1_000_000) fail(413, 'JSON excede o limite de 1 MB.');
@@ -33,8 +33,8 @@ async function parseBody(c: any) {
   return validate(body);
 }
 
-pages.post('/', async (c) => save(c.env.DB, await parseBody(c)));
-pages.put('/:slug', async (c) => save(c.env.DB, await parseBody(c), c.req.param('slug')));
+pages.post('/', async (c) => { const result = await save(c.env.DB, await parseBody(c)); return c.json(result.data, result.status as 200 | 201); });
+pages.put('/:slug', async (c) => { const result = await save(c.env.DB, await parseBody(c), c.req.param('slug')); return c.json(result.data, result.status as 200 | 201); });
 
 pages.delete('/:slug', async (c) => {
   const row = await bySlug(c.env.DB, c.req.param('slug'));
