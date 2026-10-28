@@ -15,8 +15,9 @@ export class PageService {
   }
 
   private async detail(row: PageRecord) {
+    const { contentText, coverMediaId, isSearchable, isSponsored, createdBy, updatedBy, publishedAt, createdAt, updatedAt, ...publicFields } = row;
     return {
-      ...row,
+      ...publicFields,
       content_text: row.contentText,
       cover_media_id: row.coverMediaId,
       is_searchable: row.isSearchable,
