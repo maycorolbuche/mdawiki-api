@@ -13,8 +13,7 @@
     {
       "binding": "DB",
       "database_name": "mdawiki",
-      // Substituir pelo UUID retornado por: npx wrangler d1 create mdawiki
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "6ccfe558-4387-43ad-a705-904981bba6ab",
       "migrations_dir": "migrations"
     }
   ]
