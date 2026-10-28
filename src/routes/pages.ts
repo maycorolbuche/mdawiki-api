@@ -33,8 +33,8 @@ async function parseBody(c: Context<AppEnv>) {
   return validate(body);
 }
 
-pages.post('/', async (c) => { const result = await save(c.env.DB, await parseBody(c)); return c.json(result.data, result.status as 200 | 201); });
-pages.put('/:slug', async (c) => { const result = await save(c.env.DB, await parseBody(c), c.req.param('slug')); return c.json(result.data, result.status as 200 | 201); });
+pages.post('/', async (c) => { const result = await save(c.env.DB, await parseBody(c)); return c.json({ data: result.data.data }, result.status as 200 | 201); });
+pages.put('/:slug', async (c) => { const result = await save(c.env.DB, await parseBody(c), c.req.param('slug')); return c.json({ data: result.data.data }, result.status as 200 | 201); });
 
 pages.delete('/:slug', async (c) => {
   const row = await bySlug(c.env.DB, c.req.param('slug'));
