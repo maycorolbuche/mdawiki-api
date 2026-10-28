@@ -48,3 +48,15 @@ Consulte [docs/database.md](docs/database.md). A migration inicial cria somente 
 
 Referências oficiais: [D1 migrations](https://developers.cloudflare.com/d1/reference/migrations/), [Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/) e [TypeScript](https://developers.cloudflare.com/workers/languages/typescript/).
 
+
+## Organização do código
+
+- `src/db/schema.ts`: mapeamento Drizzle das tabelas D1 existentes.
+- `src/db/index.ts`: conexão com D1 e execução atômica de lotes.
+- `src/models/`: acesso tipado às entidades.
+- `src/services/PageService.ts`: regras de negócio e gravações.
+- `src/controllers/PageController.ts`: validação HTTP e respostas JSON.
+- `src/routes/pages.ts`: definição das rotas Hono.
+- `src/validators/page.ts`: validação do payload de páginas.
+
+O esquema Drizzle reflete a migration SQL existente; **não** execute geração automática de migrations sobre um banco existente sem revisar o diff. O lockfile precisa ser atualizado com `npm install` antes de usar `npm ci`.
