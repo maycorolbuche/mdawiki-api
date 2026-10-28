@@ -20,6 +20,10 @@
     "@types/node": "^26.6.6",
     "esbuild": "0.28.2",
     "miniflare": "5.20261023.1-beta",
+    "esbuild": "0.28.2"
+  },
+  "dependencies": {
+    "hono": "^4.10.0"
     "typescript": "^5.9.3",
     "wrangler": "^4.0.0"
   }
