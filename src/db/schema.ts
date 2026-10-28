@@ -1,4 +1,5 @@
-import { integer, primaryKey, sqliteTable, text, uniqueIndex, index } from 'drizzle-orm/sqlite-core';
+import { integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
 
 export const pages = sqliteTable('pages', {
   id: integer('id').primaryKey({ autoIncrement: true }),
@@ -16,8 +17,8 @@ export const pages = sqliteTable('pages', {
   createdBy: integer('created_by'),
   updatedBy: integer('updated_by'),
   publishedAt: text('published_at'),
-  createdAt: text('created_at').notNull().default(''),
-  updatedAt: text('updated_at').notNull().default(''),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
 export const categories = sqliteTable('categories', {
@@ -26,8 +27,8 @@ export const categories = sqliteTable('categories', {
   slug: text('slug').notNull().unique(),
   description: text('description'),
   parentId: integer('parent_id'),
-  createdAt: text('created_at').notNull().default(''),
-  updatedAt: text('updated_at').notNull().default(''),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
 export const media = sqliteTable('media', {
@@ -43,8 +44,8 @@ export const media = sqliteTable('media', {
   credit: text('credit'),
   license: text('license'),
   uploadedBy: integer('uploaded_by'),
-  createdAt: text('created_at').notNull().default(''),
-  updatedAt: text('updated_at').notNull().default(''),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
 export const pageCategories = sqliteTable('page_categories', {
@@ -65,7 +66,7 @@ export const pageRevisions = sqliteTable('page_revisions', {
   snapshot: text('snapshot', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
   changeSummary: text('change_summary'),
   createdBy: integer('created_by'),
-  createdAt: text('created_at').notNull().default(''),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
 }, t => [uniqueIndex('page_revisions_page_version').on(t.pageId, t.version)]);
 
 export const users = sqliteTable('users', {
@@ -79,8 +80,8 @@ export const users = sqliteTable('users', {
   bio: text('bio'),
   emailVerifiedAt: text('email_verified_at'),
   lastLoginAt: text('last_login_at'),
-  createdAt: text('created_at').notNull().default(''),
-  updatedAt: text('updated_at').notNull().default(''),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
 export const pageDailyStats = sqliteTable('page_daily_stats', {
@@ -93,5 +94,5 @@ export const legacyPageMappings = sqliteTable('legacy_page_mappings', {
   legacyIdent: text('legacy_ident').primaryKey(),
   legacyUrl: text('legacy_url').notNull(),
   pageId: integer('page_id').notNull(),
-  migratedAt: text('migrated_at').notNull().default(''),
+  migratedAt: text('migrated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
 });
