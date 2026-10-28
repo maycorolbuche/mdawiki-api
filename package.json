@@ -17,7 +17,8 @@
     "test": "node tests/crud.mjs"
   },
   "dependencies": {
-    "hono": "^4.10.0"
+    "hono": "^4.10.0",
+    "drizzle-orm": "^0.44.7"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
