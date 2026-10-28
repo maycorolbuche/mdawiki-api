@@ -1,6 +1,6 @@
 # MDAWiki API
 
-Estrutura inicial em TypeScript para Cloudflare Workers e D1. Ainda não há rotas de negócio, CRUD, autenticação, upload ou importação do legado. O Worker responde 404 a todas as requisições.
+API em TypeScript para Cloudflare Workers e D1, com CRUD público de páginas, categorias vinculadas, histórico e redirecionamentos. Nesta etapa não há autenticação, upload ou importação do legado. Consulte [rotas e exemplos para Postman](docs/api.md).
 
 ## Desenvolvimento
 
@@ -19,6 +19,7 @@ O banco local é persistido em `.wrangler/`, que não deve ser versionado.
 ```sh
 npm run check
 npm run build
+npm test
 ```
 
 `check` gera os tipos do ambiente a partir da configuração Wrangler e executa o TypeScript. `build` empacota o Worker sem publicar.
@@ -46,3 +47,4 @@ O deploy não aplica migrations automaticamente. Os comandos remotos exigem aces
 Consulte [docs/database.md](docs/database.md). A migration inicial cria somente estruturas, sem registros de exemplo ou dados legados. Não edite migrations já aplicadas: crie arquivos SQL numerados novos em `migrations/`.
 
 Referências oficiais: [D1 migrations](https://developers.cloudflare.com/d1/reference/migrations/), [Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/) e [TypeScript](https://developers.cloudflare.com/workers/languages/typescript/).
+
