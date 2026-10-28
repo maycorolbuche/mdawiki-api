@@ -10,8 +10,6 @@ export class HttpError extends Error {
 export const fail = (status: number, message: string): never => {
   throw new HttpError(status, message);
 };
-export const json = (data: unknown, status = 200, headers = {}) =>
-  Response.json(data, { status, headers });
 type Row = Record<string, any>;
 export async function bySlug(db: D1Database, slug: string) {
   return db
@@ -280,8 +278,5 @@ export async function save(db: D1Database, body: Row, routeSlug?: string) {
       ),
     );
   await db.batch(stmts);
-  return json(
-    { data: await detail(db, (await bySlug(db, slug))!) },
-    existing ? 200 : 201,
-  );
+  return { data: await detail(db, (await bySlug(db, slug))!), status: existing ? 200 : 201 };
 }
