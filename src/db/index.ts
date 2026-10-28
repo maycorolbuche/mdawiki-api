@@ -12,6 +12,6 @@ export async function atomic(binding: D1Database, statements: Array<{ toSQL(): {
   if (!statements.length) return;
   await binding.batch(statements.map(statement => {
     const { sql, params } = statement.toSQL();
-    return binding.prepare(sql).bind(...params);
+    return binding.prepare(sql).bind(...(params as D1PreparedStatement['bind'] extends (...args: infer A) => any ? A : never));
   }));
 }
