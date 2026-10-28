@@ -3,6 +3,12 @@
   "name": "mdawiki-api",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-27",
+  "routes": [
+    {
+      "pattern": "api.mda.wiki.br",
+      "custom_domain": true
+    }
+  ],
   "d1_databases": [
     {
       "binding": "DB",
