@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { atomic, database } from '../db';
 import { Page, type PageRecord, type PageInput } from '../models/Page';
+import { pages } from '../db/schema';
 import { cleanContent, slugify } from '../content';
 import { fail } from '../errors';
 
@@ -110,7 +111,7 @@ export class PageService {
         ...values,
         updatedAt: sql`CURRENT_TIMESTAMP` as unknown as string,
         publishedAt: data.status === 'published'
-          ? sql`coalesce(${sql.raw('published_at')}, CURRENT_TIMESTAMP)` as unknown as string
+          ? sql`coalesce(${pages.publishedAt}, CURRENT_TIMESTAMP)` as unknown as string
           : existing.publishedAt,
       }));
       if (slug !== source) {
