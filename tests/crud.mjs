@@ -25,7 +25,7 @@ try {
     // D1 exec() splits on newlines, so execute each complete SQL statement
     // as a single line. Migration statements are separated by semicolons.
     for (const statement of sql.split(';').map(part => part.trim()).filter(Boolean)) {
-      await db.prepare(statement.replace(/\\s+/g, ' ')).run();
+      await db.prepare(statement.replace(/\s+/g, ' ')).run();
     }
   }
   async function req(method,path,body,status=200) {
