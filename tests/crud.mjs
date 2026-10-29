@@ -221,6 +221,24 @@ try {
   await req('PUT','/pages/origem-de-links',{title:'Origem de links',content:'<a href="/alvo">Alvo</a>'});
   await req('DELETE','/pages/origem-de-links',undefined,204);
   assert.equal((await db.prepare('SELECT count(*) AS total FROM page_links WHERE page_id=?').bind(linked.data.id).first()).total,0);
+  const origin = await req('POST','/pages',{title:'Origem destino',content:'<a href="/Especialidade-de-C%C3%A3es">Especialidade de Cães</a><a href="https://externo">Site</a>'},201);
+  assert.equal(origin.data.links[0].href,'/especialidade-de-caes');
+  assert.equal(origin.data.links[0].target_page_id,null);
+  assert.equal(origin.data.links[0].exists,false);
+  assert.equal(origin.data.links[1].exists,null);
+  const target = await req('POST','/pages',{title:'Especialidade de Cães'},201);
+  let backlinks = await req('GET','/pages/origem-destino');
+  assert.equal(backlinks.data.links[0].target_page_id,target.data.id);
+  assert.equal(backlinks.data.links[0].exists,true);
+  await req('PUT','/pages/especialidade-de-caes',{title:'Especialidade de Cães nova'});
+  backlinks = await req('GET','/pages/origem-destino');
+  assert.equal(backlinks.data.links[0].target_page_id,target.data.id);
+  await req('DELETE','/pages/especialidade-de-caes-nova',undefined,204);
+  backlinks = await req('GET','/pages/origem-destino');
+  assert.equal(backlinks.data.links[0].exists,false);
+  const recreated = await req('POST','/pages',{title:'Especialidade de Cães'},201);
+  backlinks = await req('GET','/pages/origem-destino');
+  assert.equal(backlinks.data.links[0].target_page_id,recreated.data.id);
   const first = await req(
     "POST",
     "/pages",
@@ -322,4 +340,5 @@ try {
   if (mf) await mf.dispose();
   rmSync(state, { recursive: true, force: true });
 }
+
 

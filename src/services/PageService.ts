@@ -42,6 +42,7 @@ export class PageService {
       created_at: row.createdAt,
       updated_at: row.updatedAt,
       categories: await this.model.categories(row.id),
+      links: await this.model.links(row.id),
     };
   }
 
@@ -158,6 +159,7 @@ export class PageService {
     const snapshot = {
       ...data,
       media: undefined,
+      links: undefined,
       categories: selected.map((c) => ({ name: c.name, slug: c.slug })),
     };
     const statements: Array<{ toSQL(): { sql: string; params: unknown[] } }> =
@@ -237,4 +239,5 @@ export class PageService {
     ]);
   }
 }
+
 

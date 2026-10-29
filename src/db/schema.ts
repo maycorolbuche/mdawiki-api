@@ -105,4 +105,6 @@ export const pageLinks = sqliteTable('page_links', {
   linkText: text('link_text').notNull().default(''),
   isExternal: integer('is_external', { mode: 'boolean' }).notNull(),
   targetSlug: text('target_slug'),
+  targetPageId: integer('target_page_id').references(() => pages.id, { onDelete: 'set null' }),
 }, t => [primaryKey({ columns: [t.pageId, t.position] }), index('page_links_target_slug').on(t.targetSlug).where(sql`${t.isExternal} = 0`), index('page_links_href').on(t.href)]);
+

@@ -58,3 +58,10 @@ As relações principais utilizam foreign keys. Exclusões de páginas removem v
 
 Hierarquias de categorias precisam de validação de ciclos na aplicação. Não há triggers para regras de negócio, motor wiki, FTS, permissões, tokens ou filas nesta etapa. A busca será definida com as rotas; `content_text` já está disponível para esse fim. Não há migração automática dos registros legados.
 
+
+
+## Existência do destino dos links
+
+A migration 0004 adiciona target_page_id (FK com ON DELETE SET NULL) e triggers que resolvem destinos internos, inclusive aliases, ao inserir links ou criar/renomear páginas. Exclusões invalidam os destinos; recriações voltam a resolvê-los sem editar as origens. Links externos não possuem destino local. href de artigos internos é armazenado como /slug-normalizado; link_text mantém o texto visível. Query e âncora permanecem no HTML, mas não no href indexado da tabela.
+
+As respostas de páginas incluem links com href, link_text, is_external, target_slug, target_page_id e exists. exists é null para links externos, âncoras e rotas que não são artigos; false para artigo inexistente e true para destino resolvido. O frontend marca como vermelho somente exists=false. A migration resolve também registros já existentes em page_links; artigos ainda não indexados continuam exigindo uma gravação.

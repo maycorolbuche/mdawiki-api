@@ -19,7 +19,7 @@ export function extractPageLinks(html: string): PageLink[] {
             if (!path.includes('/')) { const slug = slugify(path); if (slug.length >= 2) targetSlug = slug; }
           } catch { /* URL inválida permanece registrada sem destino inferido. */ }
         }
-        links.push({ position: links.length, href, linkText: text(node), isExternal, targetSlug });
+        links.push({ position: links.length, href: targetSlug ? "/" + targetSlug : href, linkText: text(node), isExternal, targetSlug });
       }
       if ('children' in node) walk(node.children);
     }
@@ -27,3 +27,4 @@ export function extractPageLinks(html: string): PageLink[] {
   walk(parseDocument(html).children);
   return links;
 }
+

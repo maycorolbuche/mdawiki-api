@@ -84,6 +84,10 @@ export class Page {
       mediaId: id,
     });
   }
+  async links(pageId: number) {
+    const rows = await this.db.select({ position: pageLinks.position, href: pageLinks.href, link_text: pageLinks.linkText, is_external: pageLinks.isExternal, target_slug: pageLinks.targetSlug, target_page_id: pageLinks.targetPageId }).from(pageLinks).where(eq(pageLinks.pageId, pageId)).orderBy(pageLinks.position).all();
+    return rows.map(row => ({ ...row, exists: row.is_external || !row.target_slug ? null : row.target_page_id !== null }));
+  }
   clearLinks(slug: string) {
     return this.db.delete(pageLinks).where(eq(pageLinks.pageId, sql`(select id from pages where slug = ${slug})`));
   }
@@ -95,4 +99,5 @@ export class Page {
   }
   deleteById(id: number) { return this.db.delete(pages).where(eq(pages.id, id)); }
 }
+
 
