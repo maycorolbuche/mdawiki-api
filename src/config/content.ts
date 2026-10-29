@@ -8,7 +8,7 @@ export const contentConfig = {
     img: ["src", "alt", "title", "data-media-id"],
     th: ["colspan", "rowspan"],
     td: ["colspan", "rowspan"],
-    ol: ["start"],
+    ol: ["start", "type"],
   } as Record<string, string[]>,
   urls: {
     protocols: ["http:", "https:"],
