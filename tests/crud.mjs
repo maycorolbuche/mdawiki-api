@@ -22,7 +22,11 @@ try {
       .filter(line => !/^\s*--/.test(line))
       .join('\n')
       .trim();
-    if (sql) await db.exec(sql);
+    // D1 exec() splits on newlines, so execute each complete SQL statement
+    // as a single line. Migration statements are separated by semicolons.
+    for (const statement of sql.split(';').map(part => part.trim()).filter(Boolean)) {
+      await db.prepare(statement.replace(/\\s+/g, ' ')).run();
+    }
   }
   async function req(method,path,body,status=200) {
     const r=await mf.dispatchFetch(base+path,{method,redirect:'manual',headers:{'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
