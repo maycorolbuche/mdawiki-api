@@ -36,6 +36,14 @@ export async function cleanContent(html: string) {
             else el.removeAttribute(key);
           }
         }
+        if (el.tagName === "a") {
+          const href = el.getAttribute("href") || "";
+          el.removeAttribute("target"); el.removeAttribute("rel");
+          if (/^https?:\/\//i.test(href) && isAllowedUrl(href, "href")) {
+            el.setAttribute("target", "_blank");
+            el.setAttribute("rel", "noopener noreferrer");
+          }
+        }
       },
     })
     .transform(new Response(html))
@@ -54,3 +62,4 @@ export async function cleanContent(html: string) {
     .text();
   return { content, content_text: text.replace(/\s+/g, " ").trim(), media };
 }
+
