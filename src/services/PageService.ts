@@ -1,3 +1,4 @@
+import { extractPageLinks } from "../pageLinks";
 import { sql } from "drizzle-orm";
 import { atomic, database } from "../db";
 import { Page, type PageRecord, type PageInput } from "../models/Page";
@@ -219,6 +220,8 @@ export class PageService {
     statements.push(this.model.clearMedia(slug));
     for (const id of mediaIds)
       statements.push(this.model.attachMedia(slug, id));
+    statements.push(this.model.clearLinks(slug));
+    for (const link of extractPageLinks(data.content)) statements.push(this.model.attachLink(slug, link));
     await atomic(this.binding, statements);
     const saved = await this.model.findBySlug(slug);
     if (!saved) throw new Error("Página não encontrada após gravação.");
@@ -234,3 +237,4 @@ export class PageService {
     ]);
   }
 }
+

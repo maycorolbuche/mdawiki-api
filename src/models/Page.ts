@@ -1,6 +1,6 @@
 import { and, eq, ne, sql } from 'drizzle-orm';
 import { database, type Database } from '../db';
-import { categories, legacyPageMappings, media, pageCategories, pageMedia, pageRevisions, pages } from '../db/schema';
+import { categories, legacyPageMappings, media, pageCategories, pageMedia, pageRevisions, pageLinks, pages } from '../db/schema';
 
 export type PageRecord = typeof pages.$inferSelect;
 export type PageInput = typeof pages.$inferInsert;
@@ -84,8 +84,15 @@ export class Page {
       mediaId: id,
     });
   }
+  clearLinks(slug: string) {
+    return this.db.delete(pageLinks).where(eq(pageLinks.pageId, sql`(select id from pages where slug = ${slug})`));
+  }
+  attachLink(slug: string, link: { position: number; href: string; linkText: string; isExternal: boolean; targetSlug: string | null }) {
+    return this.db.insert(pageLinks).values({ ...link, pageId: sql`(select id from pages where slug = ${slug})` as unknown as number });
+  }
   removeRedirectsTo(pageId: number) {
     return this.db.delete(pages).where(and(eq(pages.type, 'redirect'), sql`json_extract(${pages.metadata}, '$.redirect') = ${pageId}`));
   }
   deleteById(id: number) { return this.db.delete(pages).where(eq(pages.id, id)); }
 }
+
