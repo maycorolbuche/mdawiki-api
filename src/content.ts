@@ -1,15 +1,6 @@
-const tags = new Set(
-  "p br h2 h3 h4 h5 h6 strong em b i u s blockquote pre code ul ol li table thead tbody tfoot tr th td a img hr figure figcaption sup sub".split(
-    " ",
-  ),
-);
-const attrs: Record<string, string[]> = {
-  a: ["href", "title"],
-  img: ["src", "alt", "title", "data-media-id"],
-  th: ["colspan", "rowspan"],
-  td: ["colspan", "rowspan"],
-  ol: ["start"],
-};
+import { contentConfig, isAllowedUrl } from "./config/content";
+const tags = new Set(contentConfig.tags);
+const attrs = contentConfig.attributes;
 export function slugify(title: string): string {
   return title
     .normalize("NFD")
@@ -23,17 +14,7 @@ export async function cleanContent(html: string) {
   const content = await new HTMLRewriter()
     .on("*", {
       element(el) {
-        if (
-          [
-            "script",
-            "style",
-            "iframe",
-            "object",
-            "svg",
-            "math",
-            "template",
-          ].includes(el.tagName)
-        ) {
+        if (contentConfig.dropContents.includes(el.tagName)) {
           el.remove();
           return;
         }
@@ -47,12 +28,7 @@ export async function cleanContent(html: string) {
             continue;
           }
           if (key === "href" || key === "src") {
-            const safe =
-              !/[\u0000-\u0020\u007f]/.test(value) &&
-              (/^https?:\/\//i.test(value) ||
-                /^\/(?!\/)/.test(value) ||
-                (key === "href" && /^(#|mailto:)/i.test(value)));
-            if (!safe) el.removeAttribute(key);
+            if (!isAllowedUrl(value, key)) el.removeAttribute(key);
           }
           if (key === "data-media-id") {
             if (/^[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value)))
