@@ -97,3 +97,8 @@ O frontend obtém as diretrizes junto da primeira leitura, reutiliza na sessão 
 Tipos iniciais: article, specialty, person e club. Metadados desconhecidos são rejeitados, inclusive após trocar o tipo. Metadata substitui o objeto inteiro: envie todos os campos que deseja manter, e `{}` para limpar. Campos são opcionais salvo `required: true`; null limpa um campo opcional. Números são inteiros, booleanos precisam ser booleanos e datas usam YYYY-MM-DD com calendário válido. Falecimento não pode anteceder nascimento. IDs de mídia precisam existir. Campos e opções definitivos devem ser mantidos no catálogo, sem duplicar as regras nos formulários.
 
 Esta alteração não aplica migrations remotas nem altera dados existentes. Registros antigos com tipos/metadados fora do catálogo permanecem legíveis; configure seus campos antes de editá-los.
+
+
+## Normalização obrigatória de links
+
+Ao salvar, a API converte texto HTTP/HTTPS em links mesmo quando o usuário removeu a marcação no editor. Quando o texto visível de um link é uma URL, o destino é corrigido para essa URL, inclusive em conteúdo enviado diretamente à API. Links externos recebem target="_blank" e rel="noopener noreferrer". Links com rótulo descritivo continuam permitidos. Blocos pre/code são tratados como texto literal.
