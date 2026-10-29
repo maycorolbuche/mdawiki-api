@@ -1,1 +1,1 @@
-export type AppEnv = { Bindings: Env };
+export type AppEnv = { Bindings: Env & { CORS_ORIGINS?: string } };
