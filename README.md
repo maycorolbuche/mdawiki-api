@@ -48,7 +48,6 @@ Consulte [docs/database.md](docs/database.md). A migration inicial cria somente 
 
 Referências oficiais: [D1 migrations](https://developers.cloudflare.com/d1/reference/migrations/), [Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/) e [TypeScript](https://developers.cloudflare.com/workers/languages/typescript/).
 
-
 ## Organização do código
 
 - `src/db/schema.ts`: mapeamento Drizzle das tabelas D1 existentes.
@@ -60,3 +59,7 @@ Referências oficiais: [D1 migrations](https://developers.cloudflare.com/d1/refe
 - `src/validators/page.ts`: validação do payload de páginas.
 
 O esquema Drizzle reflete a migration SQL existente; **não** execute geração automática de migrations sobre um banco existente sem revisar o diff. O lockfile precisa ser atualizado com `npm install` antes de usar `npm ci`.
+
+## Integração com o frontend
+
+`GET /page-schema` publica limites, HTML permitido e o catálogo de tipos/metadados. As configurações estão em `src/config/` e alimentam também a validação do servidor. Consulte `docs/api.md` para CORS, ETag e o contrato de gravação. POST sem old_slug cria; PUT /pages/:slug edita. Título e slug gerado exigem pelo menos dois caracteres. Não há autenticação nesta etapa.
