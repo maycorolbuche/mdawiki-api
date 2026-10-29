@@ -16,6 +16,8 @@ export const pages = sqliteTable('pages', {
   isSponsored: integer('is_sponsored', { mode: 'boolean' }).notNull().default(false),
   createdBy: integer('created_by'),
   updatedBy: integer('updated_by'),
+  deletedBy: integer('deleted_by'),
+  deletedAt: text('deleted_at'),
   publishedAt: text('published_at'),
   createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),

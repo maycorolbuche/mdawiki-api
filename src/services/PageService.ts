@@ -25,6 +25,8 @@ export class PageService {
       isSponsored,
       createdBy,
       updatedBy,
+      deletedBy,
+      deletedAt,
       publishedAt,
       createdAt,
       updatedAt,
@@ -41,6 +43,8 @@ export class PageService {
       published_at: row.publishedAt,
       created_at: row.createdAt,
       updated_at: row.updatedAt,
+      deleted_at: row.deletedAt,
+      deleted_by: row.deletedBy,
       categories: await this.model.categories(row.id),
       links: await this.model.links(row.id),
     };
@@ -64,6 +68,7 @@ export class PageService {
       if (!dest) fail(404, "Destino não encontrado.");
       return { redirect: dest.slug };
     }
+    if (row.deletedAt) return { data: { id: row.id, title: row.title, slug: row.slug, deleted_at: row.deletedAt, deleted_by: row.deletedBy, exists: false } };
     return { data: await this.detail(row) };
   }
 
@@ -73,9 +78,9 @@ export class PageService {
     const slug = slugify(body.title);
     const source = routeSlug || body.old_slug || slug;
     const existing = await this.model.findBySlug(source);
-    if (!routeSlug && !body.old_slug && existing)
+    if (!routeSlug && !body.old_slug && existing && !existing.deletedAt)
       fail(409, "Já existe uma página neste endereço. Use a edição.");
-    if ((routeSlug || body.old_slug) && !existing)
+    if ((routeSlug || body.old_slug) && (!existing || existing.deletedAt))
       fail(404, "Página original não encontrada.");
     if (existing?.type === "redirect")
       fail(
@@ -85,7 +90,8 @@ export class PageService {
     if (slug !== source && (await this.model.findBySlug(slug)))
       fail(409, "O novo slug já está ocupado.");
 
-    const previous: Input = existing ? await this.detail(existing) : {};
+    const restoring = !!existing?.deletedAt;
+    const previous: Input = existing && !restoring ? await this.detail(existing) : {};
     const data: Input = {
       type: pageConfig.defaultType,
       content: "",
@@ -177,6 +183,8 @@ export class PageService {
       statements.push(
         this.model.update(existing.id, {
           ...values,
+          deletedAt: null,
+          deletedBy: null,
           updatedAt: sql`CURRENT_TIMESTAMP` as unknown as string,
           publishedAt:
             data.status === "published"
@@ -227,15 +235,16 @@ export class PageService {
     await atomic(this.binding, statements);
     const saved = await this.model.findBySlug(slug);
     if (!saved) throw new Error("Página não encontrada após gravação.");
-    return { data: await this.detail(saved), status: existing ? 200 : 201 };
+    return { data: await this.detail(saved), status: existing && !restoring ? 200 : 201 };
   }
 
   async delete(slug: string) {
     const row = await this.model.findBySlug(slug);
     if (!row) fail(404, "Página não encontrada.");
+    if (row.type === 'redirect') fail(409, 'Não é possível excluir diretamente um redirecionamento.');
+    if (row.deletedAt) fail(404, 'Página já excluída.');
     await atomic(this.binding, [
-      this.model.removeRedirectsTo(row.id),
-      this.model.deleteById(row.id),
+      this.model.update(row.id, { content: null, contentText: null, deletedAt: sql`CURRENT_TIMESTAMP` as unknown as string, deletedBy: null, updatedAt: sql`CURRENT_TIMESTAMP` as unknown as string }),
     ]);
   }
 }
