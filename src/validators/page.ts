@@ -1,5 +1,6 @@
-import { slugify } from '../content';
-import { fail } from '../errors';
+import { pageConfig, pageTypes } from "../config/page";
+import { slugify } from "../content";
+import { fail } from "../errors";
 type Row = Record<string, any>;
 function object(value: unknown): value is Row {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -14,20 +15,25 @@ export function validate(body: unknown): Row {
   );
   for (const key of Object.keys(b))
     if (!allowed.has(key)) fail(422, `Campo desconhecido: ${key}`);
-  if (typeof b.title !== "string" || !b.title.trim() || b.title.length > 250)
-    fail(422, "title deve ter entre 1 e 250 caracteres.");
-  if (!slugify(b.title) || slugify(b.title).length > 250)
+  if (
+    typeof b.title !== "string" ||
+    b.title.trim().length < pageConfig.titleMinLength ||
+    b.title.trim().length > pageConfig.titleMaxLength
+  )
+    fail(
+      422,
+      `title deve ter entre ${pageConfig.titleMinLength} e ${pageConfig.titleMaxLength} caracteres.`,
+    );
+  if (
+    slugify(b.title).length < pageConfig.slugMinLength ||
+    slugify(b.title).length > pageConfig.slugMaxLength
+  )
     fail(422, "O título não gera um slug válido.");
   for (const key of ["content", "summary", "change_summary"])
     if (key in b && b[key] !== null && typeof b[key] !== "string")
       fail(422, `${key} deve ser texto ou null.`);
-  if (
-    "type" in b &&
-    (typeof b.type !== "string" ||
-      !/^[a-z][a-z0-9_]{0,49}$/.test(b.type) ||
-      b.type === "redirect")
-  )
-    fail(422, "type inválido; redirect é gerado pela renomeação.");
+  if ("type" in b && !pageTypes.some((type) => type.value === b.type))
+    fail(422, "Tipo de página não permitido.");
   if (
     "old_slug" in b &&
     (typeof b.old_slug !== "string" || !b.old_slug || b.old_slug.length > 250)
@@ -49,7 +55,7 @@ export function validate(body: unknown): Row {
   if (
     "categories" in b &&
     (!Array.isArray(b.categories) ||
-      b.categories.length > 100 ||
+      b.categories.length > pageConfig.maxCategories ||
       b.categories.some(
         (c: unknown) =>
           !(typeof c === "string" && c.trim() && c.length <= 250) &&
