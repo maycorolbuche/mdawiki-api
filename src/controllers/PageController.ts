@@ -5,6 +5,12 @@ import { fail } from '../errors';
 import { validate } from '../validators/page';
 
 export class PageController {
+  private static requiredSlug(c: Context<AppEnv>): string {
+    const slug = c.req.param('slug');
+    if (!slug) fail(400, 'Slug obrigatório.');
+    return slug;
+  }
+
   static async list(c: Context<AppEnv>) {
     const limit = Number(c.req.query('limit') ?? 20);
     const offset = Number(c.req.query('offset') ?? 0);
@@ -12,12 +18,12 @@ export class PageController {
     return c.json(await new PageService(c.env.DB).list(limit, offset, c.req.query('type') ?? null));
   }
   static async show(c: Context<AppEnv>) {
-    const result = await new PageService(c.env.DB).get(c.req.param('slug'));
+    const result = await new PageService(c.env.DB).get(PageController.requiredSlug(c));
     if ('redirect' in result) return c.json(result, 301, { Location: `/pages/${result.redirect}` });
     return c.json(result);
   }
   static async store(c: Context<AppEnv>) { return PageController.write(c); }
-  static async update(c: Context<AppEnv>) { return PageController.write(c, c.req.param('slug')); }
+  static async update(c: Context<AppEnv>) { return PageController.write(c, PageController.requiredSlug(c)); }
   private static async write(c: Context<AppEnv>, slug?: string) {
     if (!c.req.header('content-type')?.toLowerCase().startsWith('application/json')) fail(415, 'Use Content-Type: application/json.');
     const raw = await c.req.text();
@@ -28,7 +34,7 @@ export class PageController {
     return c.json({ data: result.data }, result.status as 200 | 201);
   }
   static async destroy(c: Context<AppEnv>) {
-    await new PageService(c.env.DB).delete(c.req.param('slug'));
+    await new PageService(c.env.DB).delete(PageController.requiredSlug(c));
     return c.body(null, 204);
   }
 }
