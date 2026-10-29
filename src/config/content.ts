@@ -4,7 +4,7 @@ export const contentConfig = {
     " ",
   ),
   attributes: {
-    a: ["href", "title"],
+    a: ["href", "title", "target", "rel"],
     img: ["src", "alt", "title", "data-media-id"],
     th: ["colspan", "rowspan"],
     td: ["colspan", "rowspan"],
@@ -46,3 +46,4 @@ export function isAllowedUrl(value: string, attribute: string): boolean {
       value.startsWith("#"))
   );
 }
+
