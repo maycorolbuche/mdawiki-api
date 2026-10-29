@@ -1,9 +1,33 @@
+import { cors } from "hono/cors";
+import { defaultOrigins } from "./config/http";
+import { getPageSchema } from "./pageSchema";
 import { Hono } from "hono";
 import { pages } from "./routes/pages";
 import { HttpError } from "./errors";
 import type { AppEnv } from "./types";
 
 const app = new Hono<AppEnv>();
+app.use("*", async (c, next) => {
+  const origins =
+    c.env.CORS_ORIGINS?.split(",")
+      .map((item) => item.trim())
+      .filter(Boolean) ?? defaultOrigins;
+  return cors({
+    origin: (origin) => (origins.includes(origin) ? origin : undefined),
+    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowHeaders: ["Content-Type", "If-None-Match"],
+    exposeHeaders: ["ETag", "Location"],
+    maxAge: 600,
+  })(c, next);
+});
+app.get("/page-schema", async (c) => {
+  const data = await getPageSchema();
+  const etag = `"${data.version}"`;
+  c.header("ETag", etag);
+  c.header("Cache-Control", "no-cache");
+  if (c.req.header("If-None-Match") === etag) return c.body(null, 304);
+  return c.json({ data });
+});
 app.get("/", (c) => c.json([]));
 app.route("/pages", pages);
 app.notFound((c) => c.json({ error: "Rota não encontrada." }, 404));
