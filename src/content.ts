@@ -1,3 +1,4 @@
+import { normalizeLinks } from "./normalizeLinks";
 import { contentConfig, isAllowedUrl } from "./config/content";
 const tags = new Set(contentConfig.tags);
 const attrs = contentConfig.attributes;
@@ -11,7 +12,7 @@ export function slugify(title: string): string {
 }
 export async function cleanContent(html: string) {
   const media = new Set<number>();
-  const content = await new HTMLRewriter()
+  const sanitized = await new HTMLRewriter()
     .on("*", {
       element(el) {
         if (contentConfig.dropContents.includes(el.tagName)) {
@@ -48,6 +49,7 @@ export async function cleanContent(html: string) {
     })
     .transform(new Response(html))
     .text();
+  const content = normalizeLinks(sanitized);
   let text = "";
   await new HTMLRewriter()
     .on("*", {
@@ -62,4 +64,5 @@ export async function cleanContent(html: string) {
     .text();
   return { content, content_text: text.replace(/\s+/g, " ").trim(), media };
 }
+
 
