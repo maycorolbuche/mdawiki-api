@@ -22,10 +22,27 @@ try {
       .filter(line => !/^\s*--/.test(line))
       .join('\n')
       .trim();
-    // D1 exec() splits on newlines, so execute each complete SQL statement
-    // as a single line. Migration statements are separated by semicolons.
-    for (const statement of sql.split(';').map(part => part.trim()).filter(Boolean)) {
-      await db.prepare(statement.replace(/\s+/g, ' ')).run();
+    // A trigger contains semicolons inside BEGIN ... END; keep it intact.
+    const statements = [];
+    let buffer = '';
+    let inTrigger = false;
+    for (const line of sql.split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      if (/^\s*CREATE\s+TRIGGER\b/i.test(line)) inTrigger = true;
+      buffer += line.trim() + ' ';
+      if (inTrigger ? /^\s*END\s*;\s*$/i.test(line) : /;\s*$/.test(line)) {
+        statements.push(buffer.trim().replace(/;\s*$/, ''));
+        buffer = '';
+        inTrigger = false;
+      }
+    }
+    assert.equal(buffer.trim(), '', `Incomplete SQL in ${filename}: ${buffer}`);
+    for (const [index, statement] of statements.entries()) {
+      try {
+        await db.prepare(statement).run();
+      } catch (error) {
+        throw new Error(`Migration ${filename}, statement ${index + 1} failed: ${statement}`, { cause: error });
+      }
     }
   }
   async function req(method,path,body,status=200) {
