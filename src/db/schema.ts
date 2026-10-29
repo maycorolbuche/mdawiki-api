@@ -1,4 +1,4 @@
-import { integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 
 export const pages = sqliteTable('pages', {
@@ -96,3 +96,13 @@ export const legacyPageMappings = sqliteTable('legacy_page_mappings', {
   pageId: integer('page_id').notNull(),
   migratedAt: text('migrated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+
+export const pageLinks = sqliteTable('page_links', {
+  pageId: integer('page_id').notNull().references(() => pages.id, { onDelete: 'cascade' }),
+  position: integer('position').notNull(),
+  href: text('href').notNull(),
+  linkText: text('link_text').notNull().default(''),
+  isExternal: integer('is_external', { mode: 'boolean' }).notNull(),
+  targetSlug: text('target_slug'),
+}, t => [primaryKey({ columns: [t.pageId, t.position] }), index('page_links_target_slug').on(t.targetSlug).where(sql`${t.isExternal} = 0`), index('page_links_href').on(t.href)]);
