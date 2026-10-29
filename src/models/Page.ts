@@ -19,7 +19,7 @@ export class Page {
 
   async list(limit: number, offset: number, type: string | null) {
     return this.db.select().from(pages)
-      .where(type ? and(ne(pages.type, 'redirect'), eq(pages.type, type)) : ne(pages.type, 'redirect'))
+      .where(type ? and(ne(pages.type, 'redirect'), sql`${pages.deletedAt} IS NULL`, eq(pages.type, type)) : and(ne(pages.type, 'redirect'), sql`${pages.deletedAt} IS NULL`))
       .orderBy(pages.id).limit(limit).offset(offset).all();
   }
 
@@ -85,8 +85,8 @@ export class Page {
     });
   }
   async links(pageId: number) {
-    const rows = await this.db.select({ position: pageLinks.position, href: pageLinks.href, link_text: pageLinks.linkText, is_external: pageLinks.isExternal, target_slug: pageLinks.targetSlug, target_page_id: pageLinks.targetPageId }).from(pageLinks).where(eq(pageLinks.pageId, pageId)).orderBy(pageLinks.position).all();
-    return rows.map(row => ({ ...row, exists: row.is_external || !row.target_slug ? null : row.target_page_id !== null }));
+    const rows = await this.db.select({ position: pageLinks.position, href: pageLinks.href, link_text: pageLinks.linkText, is_external: pageLinks.isExternal, target_slug: pageLinks.targetSlug, target_page_id: pageLinks.targetPageId, target_deleted_at: pages.deletedAt }).from(pageLinks).leftJoin(pages, eq(pageLinks.targetPageId, pages.id)).where(eq(pageLinks.pageId, pageId)).orderBy(pageLinks.position).all();
+    return rows.map(({ target_deleted_at, ...row }) => ({ ...row, exists: row.is_external ? null : row.target_page_id !== null && target_deleted_at === null }));
   }
   clearLinks(slug: string) {
     return this.db.delete(pageLinks).where(eq(pageLinks.pageId, sql`(select id from pages where slug = ${slug})`));
