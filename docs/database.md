@@ -57,3 +57,4 @@ O CRUD e os redirecionamentos estão implementados. A migration garante unicidad
 As relações principais utilizam foreign keys. Exclusões de páginas removem vínculos, revisões e estatísticas; mapeamentos legados impedem exclusão física enquanto existirem. Arquivamento deve ser preferido para preservar referências e histórico. Mídias em uso por `page_media` não podem ser excluídas; avatares e capas são anulados quando a mídia é removida. A exclusão de usuários preserva conteúdo e autoria nullable.
 
 Hierarquias de categorias precisam de validação de ciclos na aplicação. Não há triggers para regras de negócio, motor wiki, FTS, permissões, tokens ou filas nesta etapa. A busca será definida com as rotas; `content_text` já está disponível para esse fim. Não há migração automática dos registros legados.
+
