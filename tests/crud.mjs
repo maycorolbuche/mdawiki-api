@@ -209,6 +209,18 @@ try {
     { title: "Campo inválido", type: "specialty", metadata: { level: 4 } },
     422,
   );
+  const linked = await req('POST', '/pages', {title:'Origem de links', content:'<p><a href="/Especialidade-de-C%C3%A3es?x=1#topo">Cães <strong>texto</strong></a><a href="/Especialidade-de-C%C3%A3es">Outro texto</a> https://qqcoisa</p>'}, 201);
+  const linkRows = (await db.prepare('SELECT * FROM page_links WHERE page_id=? ORDER BY position').bind(linked.data.id).all()).results;
+  assert.equal(linkRows.length, 3);
+  assert.equal(linkRows[0].target_slug, 'especialidade-de-caes');
+  assert.equal(linkRows[0].link_text, 'Cães texto');
+  assert.equal(linkRows[0].is_external, 0);
+  assert.equal(linkRows[2].is_external, 1);
+  await req('PUT','/pages/origem-de-links',{title:'Origem de links',content:''});
+  assert.equal((await db.prepare('SELECT count(*) AS total FROM page_links WHERE page_id=?').bind(linked.data.id).first()).total,0);
+  await req('PUT','/pages/origem-de-links',{title:'Origem de links',content:'<a href="/alvo">Alvo</a>'});
+  await req('DELETE','/pages/origem-de-links',undefined,204);
+  assert.equal((await db.prepare('SELECT count(*) AS total FROM page_links WHERE page_id=?').bind(linked.data.id).first()).total,0);
   const first = await req(
     "POST",
     "/pages",
@@ -310,3 +322,4 @@ try {
   if (mf) await mf.dispose();
   rmSync(state, { recursive: true, force: true });
 }
+
