@@ -1,19 +1,25 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { readFileSync, readdirSync } from 'node:fs';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { build } from 'esbuild';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 const state = mkdtempSync(join(tmpdir(), 'mdawiki-test-'));
-const cli = 'node_modules/wrangler/bin/wrangler.js';
 const base = 'http://127.0.0.1:8791';
 let mf;
 try {
-  const migrate = spawnSync(process.execPath,[cli,'d1','migrations','apply','DB','--local','--persist-to',state],{encoding:'utf8',input:'y\n'});
-  assert.equal(migrate.status,0,migrate.stderr + migrate.stdout);
   const bundle = await build({entryPoints:['src/index.ts'],bundle:true,format:'esm',write:false,target:'es2022'});
-  mf = new Miniflare(convertV4MiniflareOptions({ modules:true,script:bundle.outputFiles[0].text,compatibilityDate:'2026-10-27',d1Databases:{DB:'00000000-0000-0000-0000-000000000000'},resourcePersistencePath:join(state,'v3') }));
+  mf = new Miniflare(convertV4MiniflareOptions({ modules:true,script:bundle.outputFiles[0].text,compatibilityDate:'2026-10-27',d1Databases:{DB:'00000000-0000-0000-0000-000000000000'},resourcePersistencePath:state }));
+  // Apply schema to the same D1 instance used by the Worker, avoiding
+  // Wrangler/Miniflare persistence layout mismatches.
+  const db = await mf.getD1Database('DB');
+  const migrations = readdirSync('migrations').filter(name => name.endsWith('.sql')).sort();
+  assert.ok(migrations.length > 0, 'Nenhuma migration SQL encontrada.');
+  for (const filename of migrations) {
+    const sql = readFileSync(join('migrations', filename), 'utf8');
+    await db.exec(sql);
+  }
   async function req(method,path,body,status=200) {
     const r=await mf.dispatchFetch(base+path,{method,redirect:'manual',headers:{'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
     const raw=await r.text(); assert.equal(r.status,status,raw); return raw?JSON.parse(raw):null;
@@ -41,7 +47,6 @@ try {
   await req('PUT','/pages/ausente',{title:'Ausente'},404);
   const list=await req('GET','/pages?type=specialty'); assert.equal(list.data.length,1); assert.equal(list.data[0].categories.length,0);
   await req('GET','/pages?limit=0',undefined,422);
-  const db = await mf.getD1Database('DB');
   const history = await db.prepare('SELECT COUNT(*) AS total FROM page_revisions WHERE page_id=?').bind(id).first();
   assert.equal(history.total,4);
   await db.prepare('INSERT INTO legacy_page_mappings(legacy_ident,legacy_url,page_id) VALUES(?,?,?)').bind('legacy','legacy',id).run();
