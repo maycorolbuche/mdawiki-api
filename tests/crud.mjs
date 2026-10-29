@@ -236,9 +236,15 @@ try {
   await req('DELETE','/pages/especialidade-de-caes-nova',undefined,204);
   backlinks = await req('GET','/pages/origem-destino');
   assert.equal(backlinks.data.links[0].exists,false);
-  const recreated = await req('POST','/pages',{title:'Especialidade de Cães'},201);
+  const deletedTarget = await req('GET', '/pages/especialidade-de-caes-nova');
+  assert.equal(deletedTarget.data.exists, false);
+  assert.equal(deletedTarget.data.id, target.data.id);
+  assert.equal((await db.prepare('SELECT count(*) AS total FROM page_revisions WHERE page_id=?').bind(target.data.id).first()).total > 0, true);
+  const recreated = await req('POST','/pages',{title:'Especialidade de Cães nova'},201);
+  assert.equal(recreated.data.id, target.data.id);
   backlinks = await req('GET','/pages/origem-destino');
   assert.equal(backlinks.data.links[0].target_page_id,recreated.data.id);
+  assert.equal(backlinks.data.links[0].exists,true);
   const first = await req(
     "POST",
     "/pages",
@@ -326,13 +332,20 @@ try {
     )
     .bind("legacy", "legacy", id)
     .run();
-  await req("DELETE", "/pages/repteis-atuais", undefined, 409);
+  await req("DELETE", "/pages/repteis-atuais", undefined, 204);
   await req("GET", "/pages/especialidade-de-repteis", undefined, 301);
   await db.prepare("DELETE FROM legacy_page_mappings").run();
-  await req("DELETE", "/pages/repteis-atuais", undefined, 204);
-  await req("GET", "/pages/especialidade-de-repteis", undefined, 404);
-  await req("GET", "/pages/repteis-e-anfibios", undefined, 404);
-  await req("GET", "/pages/repteis-atuais", undefined, 404);
+  const deleted = await req('GET', '/pages/repteis-atuais');
+  assert.equal(deleted.data.exists, false);
+  assert.equal(deleted.data.id, id);
+  assert.equal((await db.prepare('SELECT COUNT(*) AS total FROM page_revisions WHERE page_id=?').bind(id).first()).total, 4);
+  await req("GET", "/pages/especialidade-de-repteis", undefined, 301);
+  await req("GET", "/pages/repteis-e-anfibios", undefined, 301);
+  await req("GET", "/pages/repteis-atuais");
+  const revived = await req('POST', '/pages', {title:'Répteis atuais',content:'<p>Voltou</p>'}, 201);
+  assert.equal(revived.data.id,id);
+  assert.equal(revived.data.deleted_at,null);
+  assert.equal((await db.prepare('SELECT COUNT(*) AS total FROM page_revisions WHERE page_id=?').bind(id).first()).total,5);
   console.log(
     "CRUD integration checks passed (real local Worker + D1, no authentication).",
   );
