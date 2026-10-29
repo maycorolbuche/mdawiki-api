@@ -17,8 +17,12 @@ try {
   const migrations = readdirSync('migrations').filter(name => name.endsWith('.sql')).sort();
   assert.ok(migrations.length > 0, 'Nenhuma migration SQL encontrada.');
   for (const filename of migrations) {
-    const sql = readFileSync(join('migrations', filename), 'utf8');
-    await db.exec(sql);
+    const sql = readFileSync(join('migrations', filename), 'utf8')
+      .split(/\r?\n/)
+      .filter(line => !/^\s*--/.test(line))
+      .join('\n')
+      .trim();
+    if (sql) await db.exec(sql);
   }
   async function req(method,path,body,status=200) {
     const r=await mf.dispatchFetch(base+path,{method,redirect:'manual',headers:{'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
