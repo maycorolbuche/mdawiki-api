@@ -244,9 +244,11 @@ export class PageService {
     if (row.type === 'redirect') fail(409, 'Não é possível excluir diretamente um redirecionamento.');
     if (row.deletedAt) fail(404, 'Página já excluída.');
     await atomic(this.binding, [
+      this.model.clearLinks(row.slug),
       this.model.update(row.id, { content: null, contentText: null, deletedAt: sql`CURRENT_TIMESTAMP` as unknown as string, deletedBy: null, updatedAt: sql`CURRENT_TIMESTAMP` as unknown as string }),
     ]);
   }
 }
+
 
 
