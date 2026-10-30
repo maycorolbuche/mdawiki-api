@@ -1,3 +1,4 @@
+import { errorDetails } from "./errorDiagnostics";
 import { cors } from "hono/cors";
 import { defaultOrigins } from "./config/http";
 import { getPageSchema } from "./pageSchema";
@@ -47,7 +48,14 @@ app.onError((error, c) => {
       },
       409,
     );
-  console.error(error);
-  return c.json({ error: "Erro interno." }, 500);
+  const errorId = crypto.randomUUID();
+  console.error({ error_id: errorId, error });
+  c.header("Cache-Control", "no-store");
+  return c.json({
+    error: "Erro interno.",
+    error_id: errorId,
+    ...(c.env.DEBUG_ERRORS === "true" ? { details: errorDetails(error) } : {}),
+  }, 500);
 });
 export default app;
+
