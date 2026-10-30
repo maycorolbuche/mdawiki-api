@@ -33,14 +33,33 @@ npx wrangler d1 create mdawiki
 
 Substitua o `database_id` de exemplo em `wrangler.jsonc` pelo UUID retornado. O identificador composto apenas por zeros é um placeholder para desenvolvimento local; não é um banco remoto existente.
 
-Depois da configuração, aplique explicitamente a migration remota e publique:
+Depois da configuração, publique com:
 
 ```sh
-npm run db:migrate:remote
 npm run deploy
 ```
 
-O deploy não aplica migrations automaticamente. Os comandos remotos exigem acesso à conta Cloudflare. Nenhum recurso remoto foi criado ou publicado nesta entrega.
+Esse comando aplica primeiro as migrations pendentes no D1 remoto e publica o Worker somente se todas terminarem com sucesso. O histórico de migrations do D1 impede reaplicar arquivos já executados. Migrations já aplicadas não devem ser editadas.
+
+### Deploy automático por commit no Cloudflare Workers Builds
+
+No Worker da API, abrir Settings → Builds → Build configuration e configurar:
+
+| Campo | Valor |
+| --- | --- |
+| Branch de produção | main |
+| Build command | npm run check && npm test && npm run build |
+| Deploy command | npm run deploy |
+
+A integração Git do Cloudflare executará validações, migrations remotas e publicação a cada push/merge na branch de produção. Usar `npx wrangler deploy` diretamente ignora a etapa de migrations. O token usado pelo build precisa permitir a edição do D1, além do deploy do Worker.
+
+Não executar esse deploy em builds de preview apontados ao banco de produção. O binding DB de wrangler.jsonc identifica o banco remoto que será atualizado. Para ambientes separados, configurar banco e comando próprios.
+
+`npm run build` continua sendo somente empacotamento dry-run, sem migrations remotas. A CI do GitHub valida tipos, testes isolados e esse build; ela não migra o banco de produção.
+
+Uma falha de migration interrompe o comando antes do deploy, mas migrations anteriores que já terminaram podem ter sido aplicadas. Também não há rollback automático do banco se o deploy posterior falhar. Usar migrations incrementais compatíveis com o Worker ainda publicado.
+
+Os comandos remotos exigem acesso à conta Cloudflare. Nenhuma migration remota nem publicação foi executada durante a preparação desta alteração.
 
 ## Banco
 
