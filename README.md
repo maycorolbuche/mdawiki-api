@@ -82,3 +82,12 @@ O esquema Drizzle reflete a migration SQL existente; **não** execute geração 
 ## Integração com o frontend
 
 `GET /page-schema` publica limites, HTML permitido e o catálogo de tipos/metadados. As configurações estão em `src/config/` e alimentam também a validação do servidor. Consulte `docs/api.md` para CORS, ETag e o contrato de gravação. POST sem old_slug cria; PUT /pages/:slug edita. Título e slug gerado exigem pelo menos dois caracteres. Não há autenticação nesta etapa.
+
+## Diagnóstico de erros no Worker
+
+Erros internos retornam `error` e `error_id`. O mesmo identificador acompanha o erro completo nos logs do Worker, permitindo correlacionar a resposta.
+
+Para diagnóstico temporário, configurar **DEBUG_ERRORS=true** em Workers & Pages → Worker da API → Settings → Variables and Secrets e publicar/aplicar a alteração. Essa configuração pertence ao Worker em execução, não apenas às variáveis do build. Localmente pode ser definida em .dev.vars.
+
+Com essa variável, a resposta também inclui `details: { type, message }`, com a causa final (por exemplo, D1_ERROR: no such column: deleted_at), sem stack nem parâmetros do wrapper SQL. Não depende de query string pública. Esses detalhes podem revelar a estrutura interna do sistema; voltar para false/remover a variável após o diagnóstico. Erros esperados de validação continuam com seu contrato atual. As respostas 500 têm Cache-Control: no-store.
+
