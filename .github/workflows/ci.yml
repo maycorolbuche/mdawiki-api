@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   validate:
-    name: TypeScript, integration tests and build
+    name: "CI / Validação"
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
