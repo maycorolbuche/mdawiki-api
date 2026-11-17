@@ -2,6 +2,8 @@
 
 Uma página retorna `{ "data": { "id", "slug", "title", "html", "description", "updated_at", "canonical_url" } }`.
 
+Também retorna cinco arrays de links `{ "id": "...", "slug": "...", "title": "..." }`: `categories`, `mentions`, `related_pages`, `category_members` e `missing_links`. Estão presentes tanto na consulta individual quanto na exportação, inclusive quando vazios. Categorias preservam a ordem do legado; menções são deduplicadas; relacionados compartilham categorias, excluem o próprio artigo e são limitados aos primeiros cinco em ordem alfabética estável. Membros de categoria e destinos existentes respeitam os filtros públicos. Links inexistentes são os destinos ainda sem registro, não os artigos privados. `missing_links.slug` pode conter um fragmento `#`; os demais slugs são nomes de páginas.
+
 A listagem retorna `{ "data": [páginas], "next_cursor": "..." }`. Envie o cursor como `after` até receber `null`; `limit` aceita inteiros de 1 a 500. IDs são opacos. Não os derive do título. Slugs preservam o formato `NOME_URL` legado e devem ser enviados com `encodeURIComponent`.
 
 Erros: `{ "error": { "code": "...", "message": "...", "request_id": "..." } }`. O identificador aparece em falhas internas; detalhes ficam nos logs. Artigo não publicado ou inexistente: 404. Falha de conexão/configuração: 503, jamais 404. Métodos de escrita: 405 nesta base.

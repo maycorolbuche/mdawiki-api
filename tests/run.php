@@ -81,6 +81,8 @@ foreach ([['28000', 1045, 'database_access_denied'], ['42000', 1049, 'database_n
 if (in_array('sqlite', PDO::getAvailableDrivers(), true)) {
     $db = new PDO('sqlite::memory:', null, null, [PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
     $db->exec('CREATE TABLE PAGINAS (IDENT TEXT PRIMARY KEY, NOME_URL TEXT, NOME TEXT, CONTEUDO TEXT, CONTEUDO_TXT TEXT, DT_ATUALIZACAO TEXT, BUSCA TEXT, NIVEL INTEGER)');
+    $db->exec('CREATE TABLE PAGINAS_CATEGORIAS (IDENT TEXT, NOME_URL TEXT, CATEGORIA TEXT, CATEGORIA_IDENT TEXT, CATEGORIA_URL TEXT, ORDEM INTEGER)');
+    $db->exec('CREATE TABLE PAGINAS_LINKS (IDENT TEXT, NOME_URL TEXT, ID INTEGER, LINK TEXT, LINK_IDENT TEXT, LINK_URL TEXT, LINK_HASH TEXT, LINK_TXT TEXT)');
     $insert = $db->prepare('INSERT INTO PAGINAS VALUES (?, ?, ?, ?, ?, NULL, ?, ?)');
     foreach ([['a', 'Cães', 'S', 1], ['b', 'Restrito', 'S', 5], ['c', 'Oculto', 'N', 1], ['page@login', 'Login', 'S', 1], ['imagem@foto', 'Foto', 'S', 1]] as [$id, $slug, $search, $level]) {
         $insert->execute([$id, $slug, $slug, '<p>Conteúdo</p>', 'Conteúdo', $search, $level]);
@@ -102,6 +104,27 @@ if (in_array('sqlite', PDO::getAvailableDrivers(), true)) {
     check($absent->body['error']['details']['lookup']['record_found'] === false, 'Distinguish no row from filtered row');
     $private = new Application(static fn () => $legacy, $config);
     check(!isset($private->handle('GET', '/v1/pages/Restrito', [])->body['error']['details']['lookup']), 'Publication diagnostics disabled by default');
+    // Real relation queries, including duplicate mentions and private sources.
+    $insert->execute(['cat', 'Animais', 'Animais &amp; Natureza', '<p>Categoria</p>', '', 'S', 1]);
+    $category = $db->prepare('INSERT INTO PAGINAS_CATEGORIAS VALUES (?, ?, ?, ?, ?, ?)');
+    foreach ([['a', 'Cães'], ['b', 'Restrito'], ['c', 'Oculto']] as [$id, $slug]) $category->execute([$id, $slug, 'Animais &amp; Natureza', 'cat', 'Animais', 1]);
+    $link = $db->prepare('INSERT INTO PAGINAS_LINKS VALUES (?, ?, ?, ?, ?, ?, NULL, ?)');
+    foreach (['cat', 'cat', 'b', 'c'] as $index => $id) $link->execute([$id, 'Source', $index, 'Cães', 'a', 'Cães', 'Cães']);
+    $link->execute(['a', 'Cães', 10, 'Novo', 'novo', 'Novo#Seção', 'Página nova']);
+    for ($i = 1; $i <= 7; $i++) {
+        $insert->execute(['r' . $i, 'Relacionado_' . $i, 'Relacionado ' . $i, '<p>Relacionado</p>', '', 'S', 1]);
+        $category->execute(['r' . $i, 'Relacionado_' . $i, 'Animais', 'cat', 'Animais', 1]);
+    }
+    $data = $diagnostic->handle('GET', '/v1/pages/Cães', [])->body['data'];
+    check($data['categories'][0]['title'] === 'Animais & Natureza', 'Category title is decoded and original URL retained');
+    check(count($data['mentions']) === 1 && $data['mentions'][0]['slug'] === 'Animais', 'Deduplicate mentions and exclude restricted/hidden sources');
+    check(count($data['related_pages']) === 5 && $data['related_pages'][0]['slug'] === 'Relacionado_1', 'Five stable related pages, without current/private/hidden articles');
+    check($data['missing_links'][0]['slug'] === 'Novo#Seção', 'Preserve missing link anchor');
+    $members = $legacy->find('Animais')['category_members'];
+    check(count($members) === 8 && count(array_filter($members, static fn ($row) => in_array($row['slug'], ['Restrito', 'Oculto'], true))) === 0, 'Category members respect publication rules');
+    $export = $legacy->list(100, '');
+    $exported = array_values(array_filter($export, static fn ($row) => $row['id'] === 'a'))[0];
+    check($exported['categories'] === $data['categories'] && $exported['mentions'] === $data['mentions'] && $exported['related_pages'] === $data['related_pages'], 'Static export and individual lookup return the same relations');
     $db->exec('DROP TABLE PAGINAS');
     $queryFailure = $diagnostic->handle('GET', '/v1/pages/Cães', []);
     check($queryFailure->status === 503 && $queryFailure->body['error']['details']['stage'] === 'page_lookup_query', 'Failed query identified separately from connection failure');
@@ -110,3 +133,4 @@ if (in_array('sqlite', PDO::getAvailableDrivers(), true)) {
     echo "PDO SQLite unavailable: repository integration checks skipped (CI requires it).\n";
 }
 echo "API contract checks passed.\n";
+
