@@ -6,7 +6,7 @@ namespace MDAWiki;
 use PDO;
 use InvalidArgumentException;
 
-final class LegacyPageRepository implements PageRepository
+final class LegacyPageRepository implements DiagnosablePageRepository
 {
     private const COLUMNS = 'IDENT AS id, NOME_URL AS slug, NOME AS title, CONTEUDO AS html, CONTEUDO_TXT AS text, DT_ATUALIZACAO AS updated_at';
     private const PUBLIC_FILTER = "BUSCA = 'S' AND COALESCE(NIVEL, 1) <= :level AND IDENT NOT LIKE 'page@%' AND IDENT NOT LIKE 'imagem@%'";
@@ -54,6 +54,40 @@ final class LegacyPageRepository implements PageRepository
         $query->execute();
         $row = $query->fetch();
         return $row ? $this->normalize($row) : null;
+    }
+
+    public function diagnose(string $slug): array
+    {
+        $query = $this->db->prepare('SELECT IDENT, NOME_URL, BUSCA, NIVEL FROM PAGINAS WHERE NOME_URL = :slug OR IDENT = :ident ORDER BY CASE WHEN NOME_URL = :exact THEN 0 ELSE 1 END LIMIT 1');
+        $value = $this->databaseValue($slug);
+        $query->execute(['slug' => $value, 'ident' => $value, 'exact' => $value]);
+        $row = $query->fetch();
+        if (!$row) {
+            return ['record_found' => false, 'reason' => 'no_matching_record', 'lookup_field' => 'NOME_URL'];
+        }
+        $row = $this->normalize($row);
+        $reasons = [];
+        if ($row['NOME_URL'] !== $slug) {
+            $reasons[] = 'identifier_is_not_url_slug';
+        }
+        if ($row['BUSCA'] !== 'S') {
+            $reasons[] = 'not_searchable';
+        }
+        if ((int) ($row['NIVEL'] ?? 1) > $this->maxLevel) {
+            $reasons[] = 'level_above_public_max';
+        }
+        if (str_starts_with(strtolower($row['IDENT']), 'page@')) {
+            $reasons[] = 'special_page_not_exported';
+        }
+        if (str_starts_with(strtolower($row['IDENT']), 'imagem@')) {
+            $reasons[] = 'media_page_not_exported';
+        }
+        return [
+            'record_found' => true,
+            'lookup_field' => 'NOME_URL',
+            'reasons' => $reasons ?: ['database_comparison_requires_investigation'],
+            'public_max_level' => $this->maxLevel,
+        ];
     }
 
     private function databaseValue(string $value): string

@@ -28,6 +28,7 @@ if (is_file($envFile)) {
 }
 
 return [
+    'debug' => filter_var(getenv('APP_DEBUG') ?: 'false', FILTER_VALIDATE_BOOLEAN),
     'origins' => array_values(array_filter(array_map('trim', explode(',', getenv('ALLOWED_ORIGINS') ?: '')))),
     'frontend_url' => rtrim(getenv('FRONTEND_URL') ?: 'https://mda.wiki.br', '/'),
     'media_url' => rtrim(getenv('LEGACY_MEDIA_URL') ?: 'https://mda.wiki.br/site', '/'),

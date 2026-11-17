@@ -29,8 +29,13 @@ final class Application
             return new Response(405, ['error' => ['code' => 'method_not_allowed', 'message' => 'Método não permitido.']], $headers + ['Allow' => 'GET, OPTIONS']);
         }
         if ($path === '/health') {
-            return new Response(200, ['status' => 'ok', 'service' => 'mdawiki-api', 'version' => '1'], $headers);
+            return new Response(200, ['status' => 'ok', 'service' => 'mdawiki-api', 'version' => '1', 'database' => 'not_checked'], $headers);
         }
+        if ($path === '/') {
+            return new Response(200, ['service' => 'mdawiki-api', 'version' => '1', 'database' => 'not_checked', 'routes' => $this->routes()], $headers);
+        }
+        $stage = 'routing';
+        $debug = (bool) ($this->config['debug'] ?? false);
         try {
             if ($path === '/v1/pages') {
                 $limit = filter_var($query['limit'] ?? 100, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 500]]);
@@ -41,7 +46,10 @@ final class Application
                 if (mb_strlen($after) > 250) {
                     return new Response(400, ['error' => ['code' => 'invalid_pagination', 'message' => 'Cursor inválido.']], $headers);
                 }
-                $rows = ($this->repository)()->list($limit + 1, $after);
+                $stage = 'database_connection';
+                $repository = ($this->repository)();
+                $stage = 'page_export_query';
+                $rows = $repository->list($limit + 1, $after);
                 $hasMore = count($rows) > $limit;
                 $rows = array_slice($rows, 0, $limit);
                 return new Response(200, ['data' => array_map($this->present(...), $rows), 'next_cursor' => $hasMore ? end($rows)['id'] : null], $headers);
@@ -51,17 +59,35 @@ final class Application
                 if ($slug === '' || mb_strlen($slug) > 250 || strpbrk($slug, "/\\\0") !== false || preg_match('/[\x00-\x1f\x7f]/', $slug)) {
                     return new Response(400, ['error' => ['code' => 'invalid_slug', 'message' => 'Endereço inválido.']], $headers);
                 }
-                $row = ($this->repository)()->find($slug);
+                $stage = 'database_connection';
+                $repository = ($this->repository)();
+                $stage = 'page_lookup_query';
+                $row = $repository->find($slug);
                 if ($row !== null) {
                     return new Response(200, ['data' => $this->present($row)], $headers);
                 }
+                $details = ['layer' => 'article', 'stage' => $stage, 'database' => 'query_succeeded', 'lookup_field' => 'NOME_URL', 'reason' => 'not_found_or_not_public'];
+                if ($debug) {
+                    $details['slug'] = $slug;
+                    if ($repository instanceof DiagnosablePageRepository) {
+                        $stage = 'page_diagnostic_query';
+                        $details['lookup'] = $repository->diagnose($slug);
+                    }
+                }
+                return new Response(404, ['error' => ['code' => 'not_found', 'message' => 'Artigo não encontrado ou não disponível para consulta pública.', 'details' => $details]], $headers);
             }
-            return new Response(404, ['error' => ['code' => 'not_found', 'message' => 'Página não encontrada.']], $headers);
+            return new Response(404, ['error' => ['code' => 'route_not_found', 'message' => 'Rota da API não encontrada. O banco de dados não foi consultado.', 'details' => ['layer' => 'routing', 'method' => $method, 'path' => $path, 'database' => 'not_checked', 'routes' => $this->routes()]]], $headers);
         } catch (Throwable $error) {
             $id = bin2hex(random_bytes(8));
             error_log('[' . $id . '] ' . $error);
-            return new Response(503, ['error' => ['code' => 'service_unavailable', 'message' => 'Não foi possível consultar o conteúdo.', 'request_id' => $id]], $headers);
+            $details = ErrorDetails::describe($error, $stage, $debug, $this->config);
+            return new Response(503, ['error' => ['code' => 'service_unavailable', 'message' => $details['layer'] === 'database' ? 'Falha no acesso ao banco de dados.' : 'Falha ao processar a consulta.', 'request_id' => $id, 'details' => $details]], $headers);
         }
+    }
+
+    private function routes(): array
+    {
+        return ['GET /health', 'GET /v1/pages', 'GET /v1/pages/{NOME_URL}'];
     }
 
     private function present(array $row): array
