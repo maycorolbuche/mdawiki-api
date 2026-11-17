@@ -9,11 +9,11 @@ use Throwable;
 final class Application
 {
     /** @param Closure(): PageRepository $repository */
-    public function __construct(private readonly Closure $repository, private readonly array $config)
+    public function __construct(private readonly Closure $repository, private readonly array $config, private readonly ?Closure $features = null)
     {
     }
 
-    public function handle(string $method, string $path, array $query, string $origin = ''): Response
+    public function handle(string $method, string $path, array $query, string $origin = '', array $body = [], string $csrf = '', string $ip = ''): Response
     {
         $headers = $origin !== '' ? ['Vary' => 'Origin'] : [];
         if ($origin !== '') {
@@ -21,9 +21,20 @@ final class Application
                 return new Response(403, ['error' => ['code' => 'origin_not_allowed', 'message' => 'Origem não autorizada.']], $headers);
             }
             $headers['Access-Control-Allow-Origin'] = $origin;
+            $headers['Access-Control-Allow-Credentials'] = 'true';
         }
         if ($method === 'OPTIONS') {
-            return new Response(204, [], $headers + ['Access-Control-Allow-Methods' => 'GET, OPTIONS', 'Access-Control-Allow-Headers' => 'Accept, Content-Type']);
+            return new Response(204, [], $headers + ['Access-Control-Allow-Methods' => 'GET, POST, PUT, OPTIONS', 'Access-Control-Allow-Headers' => 'Accept, Content-Type, X-CSRF-Token']);
+        }
+        if ($this->features !== null && (preg_match('~^/v1/(auth/|profile(?:/|$)|media$|search$|catalog$|statistics$|home$|view/|users(?:/|$))~', $path) || preg_match('~^/v1/pages/[^/]+/(editor|history|preview|restore|rebuild)$~D', $path) || ($method === 'PUT' && str_starts_with($path, '/v1/pages/')))) {
+            if ($method !== 'GET' && $origin === '') return new Response(403, ['error'=>['code'=>'origin_required','message'=>'Origem da solicitação ausente.']], $headers);
+            try {
+                $response = (($this->features)())->handle($method,$path,$query,$body,$csrf,$ip);
+                return new Response($response->status,$response->body,$headers+$response->headers);
+            } catch (Throwable $error) {
+                $id=bin2hex(random_bytes(8));error_log('['.$id.'] '.$error);
+                return new Response(503,['error'=>['code'=>'service_unavailable','message'=>'Falha ao processar a solicitação.','request_id'=>$id,'details'=>ErrorDetails::describe($error,'feature_request',(bool)($this->config['debug'] ?? false),$this->config)]],$headers);
+            }
         }
         if ($method !== 'GET') {
             return new Response(405, ['error' => ['code' => 'method_not_allowed', 'message' => 'Método não permitido.']], $headers + ['Allow' => 'GET, OPTIONS']);
@@ -90,10 +101,19 @@ final class Application
         return ['GET /health', 'GET /v1/pages', 'GET /v1/pages/{NOME_URL}'];
     }
 
-    private function present(array $row): array
+    public function present(array $row): array
     {
         $slug = $row['slug'];
-        $html = str_replace(['{{{url_site}}}', '{{{url_diretorio}}}'], [$this->config['frontend_url'] . '/', $this->config['media_url'] . '/'], $row['html'] ?? '');
+        $html = str_replace(['{{{url_site}}}', '{{{url_diretorio}}}'], [$this->config['frontend_url'] . '/', ($this->config['media_public_url'] ?? $this->config['media_url']) . '/'], $row['html'] ?? '');
+        if (isset($this->config['media_public_url'])) {
+            $media=rtrim($this->config['media_public_url'],'/');
+            $html=str_replace(['https://mda.wiki.br/site/@imgs_wiki/','http://mda.wiki.br/site/@imgs_wiki/','https://mda.wiki.br/site/@imgs_user/','https://mda.wiki.br/site/@imgs/',$media.'/@imgs_wiki/',$media.'/@imgs_user/',$media.'/@imgs/'],[$media.'/wiki/',$media.'/wiki/',$media.'/users/',$media.'/assets/',$media.'/wiki/',$media.'/users/',$media.'/assets/'],$html);
+            if (str_starts_with(strtolower($row['id']),'imagem@')) {
+                $file=json_decode($html,true);
+                if (is_array($file) && !empty($file['url'])) { $url=$file['url'];if (!preg_match('~^https?://~',$url)) $url=$media.'/'.ltrim(str_replace('@imgs_wiki/','wiki/',$url),'/');$html='<figure><img src="'.htmlspecialchars($url,ENT_QUOTES,'UTF-8').'" alt="'.htmlspecialchars($row['title'] ?? '',ENT_QUOTES,'UTF-8').'"></figure>'; }
+            }
+            $html=preg_replace_callback('~(href=[\'"])(?:https?://mda\.wiki\.br)/([^\'"<>]*)~i',fn($m)=>$m[1].$this->config['frontend_url'].'/'.$m[2],$html);
+        }
         return [
             'id' => $row['id'], 'slug' => $slug, 'title' => html_entity_decode($row['title'] ?? $slug, ENT_QUOTES | ENT_HTML5, 'UTF-8'),
             'html' => $html,
@@ -105,7 +125,9 @@ final class Application
             'related_pages' => $row['related_pages'] ?? [],
             'category_members' => $row['category_members'] ?? [],
             'missing_links' => $row['missing_links'] ?? [],
+            'redirect_slug' => $row['redirect_slug'] ?? null,
         ];
     }
 }
+
 

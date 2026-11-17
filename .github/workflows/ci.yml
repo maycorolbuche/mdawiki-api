@@ -13,3 +13,6 @@ jobs:
           extensions: pdo_mysql, pdo_sqlite, mbstring
       - run: find config src public tests -name '*.php' -print0 | xargs -0 -n1 php -l
       - run: php tests/run.php
+      - run: php tests/features.php
+      - run: composer install --no-interaction --no-progress --prefer-dist
+
