@@ -24,6 +24,8 @@ Em produção a raiz do site deve apontar exclusivamente para `public/`. `.env`,
 - `GET /v1/pages/{slug}`: consulta atual no navegador; slug percent-encoded.
 - `OPTIONS`: preflight apenas das origens explicitamente configuradas.
 
+Acesse `/` para conferir as rotas válidas. `/health` verifica somente o processo, não o banco. Erros distinguem rota inválida, busca de artigo, conexão e consulta SQL. Para receber a mensagem original da exceção e o motivo de exclusão pelos filtros, use temporariamente `APP_DEBUG=true` no `.env`. Veja os campos e classificações em [docs/api.md](docs/api.md#diagnóstico-de-erros).
+
 Somente `BUSCA=S`, nível até `PUBLIC_MAX_LEVEL`, sem páginas especiais `page@` e páginas de mídia `imagem@`. Todas as consultas possuem parâmetros. O build usa apenas dados públicos. Listagem ordenada por `IDENT`, com cursor opaco; o navegador consulta por `NOME_URL`, preservando acentos e sublinhados.
 
 API não retorna senhas, tokens, fonte wiki ou dados cadastrais. Leitura não registra acessos, não reprocessa artigos e não executa o cron. HTML é tratado como conteúdo não confiável pelo frontend e sanitizado antes da renderização.
