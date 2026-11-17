@@ -1,7 +1,4 @@
-node_modules/
-.wrangler/
-dist/
-.dev.vars
 .env
-.env.*
-worker-configuration.d.ts
+/vendor/
+/var/
+*.log
