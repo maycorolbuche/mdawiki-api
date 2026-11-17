@@ -100,6 +100,12 @@ final class Application
             'description' => mb_substr(trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($row['text'] ?? ''), ENT_QUOTES | ENT_HTML5, 'UTF-8'))), 0, 240),
             'updated_at' => $row['updated_at'] ?? null,
             'canonical_url' => $this->config['frontend_url'] . '/' . rawurlencode($slug) . '/',
+            'categories' => $row['categories'] ?? [],
+            'mentions' => $row['mentions'] ?? [],
+            'related_pages' => $row['related_pages'] ?? [],
+            'category_members' => $row['category_members'] ?? [],
+            'missing_links' => $row['missing_links'] ?? [],
         ];
     }
 }
+

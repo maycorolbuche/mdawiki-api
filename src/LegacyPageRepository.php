@@ -43,7 +43,7 @@ final class LegacyPageRepository implements DiagnosablePageRepository
         $query->bindValue(':after', $this->databaseValue($after));
         $query->bindValue(':limit', $limit, PDO::PARAM_INT);
         $query->execute();
-        return array_map($this->normalize(...), $query->fetchAll());
+        return $this->withRelations(array_map($this->normalize(...), $query->fetchAll()));
     }
 
     public function find(string $slug): ?array
@@ -53,7 +53,55 @@ final class LegacyPageRepository implements DiagnosablePageRepository
         $query->bindValue(':slug', $this->databaseValue($slug));
         $query->execute();
         $row = $query->fetch();
-        return $row ? $this->normalize($row) : null;
+        return $row ? $this->withRelations([$this->normalize($row)])[0] : null;
+    }
+
+    /** Fetch relations once per export batch, preserving the existing tables. */
+    private function withRelations(array $rows): array
+    {
+        if (!$rows) return [];
+        $ids = array_map(fn ($row) => $this->databaseValue($row['id']), $rows);
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $public = "p.BUSCA = 'S' AND COALESCE(p.NIVEL, 1) <= ? AND p.IDENT NOT LIKE 'page@%' AND p.IDENT NOT LIKE 'imagem@%'";
+        $queries = [
+            'categories' => ["SELECT c.IDENT AS owner, c.CATEGORIA_IDENT AS id, c.CATEGORIA_URL AS slug, c.CATEGORIA AS title FROM PAGINAS_CATEGORIAS c LEFT JOIN PAGINAS p ON p.IDENT = c.CATEGORIA_IDENT WHERE c.IDENT IN ($placeholders) AND (p.IDENT IS NULL OR ($public)) ORDER BY c.ORDEM, c.CATEGORIA", true],
+            'mentions' => ["SELECT DISTINCT l.LINK_IDENT AS owner, p.IDENT AS id, p.NOME_URL AS slug, p.NOME AS title FROM PAGINAS_LINKS l JOIN PAGINAS p ON p.IDENT = l.IDENT WHERE l.LINK_IDENT IN ($placeholders) AND $public ORDER BY p.NOME, p.IDENT", true],
+            'related_pages' => ["SELECT DISTINCT related.CATEGORIA_IDENT AS owner, p.IDENT AS id, p.NOME_URL AS slug, p.NOME AS title FROM PAGINAS_CATEGORIAS related JOIN PAGINAS p ON p.IDENT = related.IDENT WHERE related.CATEGORIA_IDENT IN (SELECT CATEGORIA_IDENT FROM PAGINAS_CATEGORIAS WHERE IDENT IN ($placeholders)) AND $public ORDER BY p.NOME, p.IDENT", true],
+            'category_members' => ["SELECT DISTINCT c.CATEGORIA_IDENT AS owner, p.IDENT AS id, p.NOME_URL AS slug, p.NOME AS title FROM PAGINAS_CATEGORIAS c JOIN PAGINAS p ON p.IDENT = c.IDENT WHERE c.CATEGORIA_IDENT IN ($placeholders) AND $public ORDER BY p.NOME, p.IDENT", true],
+            'missing_links' => ["SELECT DISTINCT l.IDENT AS owner, l.LINK_IDENT AS id, l.LINK_URL AS slug, l.LINK_TXT AS title FROM PAGINAS_LINKS l LEFT JOIN PAGINAS p ON p.IDENT = l.LINK_IDENT WHERE l.IDENT IN ($placeholders) AND p.IDENT IS NULL AND COALESCE(l.LINK_URL, '') <> '' AND l.LINK_IDENT NOT LIKE '#%' ORDER BY l.LINK_TXT", false],
+        ];
+        $relations = [];
+        $categoryOwners = [];
+        $seenRelated = [];
+        foreach ($queries as $key => [$sql, $hasLevel]) {
+            $query = $this->db->prepare($sql);
+            foreach ($ids as $index => $id) $query->bindValue($index + 1, $id);
+            if ($hasLevel) $query->bindValue(count($ids) + 1, $this->maxLevel, PDO::PARAM_INT);
+            $query->execute();
+            while ($raw = $query->fetch()) {
+                $link = $this->normalize($raw);
+                $owner = $link['owner'];
+                unset($link['owner']);
+                $link['title'] = html_entity_decode($link['title'] ?: str_replace('_', ' ', $link['slug']), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                if ($key === 'categories') $categoryOwners[$link['id']][] = $owner;
+                if ($key === 'related_pages') {
+                    // Candidates are fetched once per category, avoiding the
+                    // article x category-members cross product during builds.
+                    foreach ($categoryOwners[$owner] ?? [] as $article) {
+                        if ($article !== $link['id'] && !isset($seenRelated[$article][$link['id']]) && count($relations[$article][$key] ?? []) < 5) {
+                            $relations[$article][$key][] = $link;
+                            $seenRelated[$article][$link['id']] = true;
+                        }
+                    }
+                } else {
+                    $relations[$owner][$key][] = $link;
+                }
+            }
+        }
+        foreach ($rows as &$row) {
+            foreach (array_keys($queries) as $key) $row[$key] = $relations[$row['id']][$key] ?? [];
+        }
+        return $rows;
     }
 
     public function diagnose(string $slug): array
@@ -107,3 +155,4 @@ final class LegacyPageRepository implements DiagnosablePageRepository
         return $row;
     }
 }
+
