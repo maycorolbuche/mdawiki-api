@@ -1,93 +1,33 @@
 # MDAWiki API
 
-API em TypeScript para Cloudflare Workers e D1, com CRUD público de páginas, categorias vinculadas, histórico e redirecionamentos. Nesta etapa não há autenticação, upload ou importação do legado. Consulte [rotas e exemplos para Postman](docs/api.md).
+Nova base em **PHP puro 8.2+**, sem framework, sem Workers e sem migrações. Substitui o conteúdo da implementação anterior; o histórico Git é preservado.
 
-## Desenvolvimento
+Esta primeira entrega oferece leitura do HTML já processado em `PAGINAS`. Não é a migração completa do motor: listas dinâmicas, redirecionamentos, parser, login, escrita, histórico, mídia e tarefas serão extraídos do `mdawiki-site` nas próximas etapas. Nenhum arquivo de configuração ou segredo do legado é copiado.
 
-Requer Node.js 22 ou superior e npm.
+## Executar
 
-```sh
-npm ci
-npm run db:migrate:local
-npm run dev
-```
-
-O banco local é persistido em `.wrangler/`, que não deve ser versionado.
-
-## Validação
+Requisitos: PHP 8.2+, PDO MySQL e mbstring. Copie `.env.example` para `.env`, ajuste as variáveis e execute:
 
 ```sh
-npm run check
-npm run build
-npm test
+php -S 127.0.0.1:8080 -t public public/router.php
+php tests/run.php
 ```
 
-`check` gera os tipos do ambiente a partir da configuração Wrangler e executa o TypeScript. `build` empacota o Worker sem publicar.
+Em produção a raiz do site deve apontar exclusivamente para `public/`. `.env`, `src/`, `tests/` e `config/` ficam fora da raiz pública. HTTPS é responsabilidade da hospedagem. Use uma conta MySQL de leitura nesta etapa.
 
-## Configuração na Cloudflare
+`DB_CHARSET=latin1` preserva a conexão legada. São preservadas strings que já contêm bytes UTF-8 e convertidas as demais na resposta. Isso precisa ser validado em uma cópia real antes de produção: o schema não revela como todos os registros foram codificados. Não há conversão do banco ou DDL automático.
 
-```sh
-npx wrangler login
-npx wrangler d1 create mdawiki
-```
+## Contrato
 
-Substitua o `database_id` de exemplo em `wrangler.jsonc` pelo UUID retornado. O identificador composto apenas por zeros é um placeholder para desenvolvimento local; não é um banco remoto existente.
+- `GET /health`: disponibilidade do processo, sem testar o banco.
+- `GET /v1/pages?limit=100&after=...`: exportação paginada para geração estática.
+- `GET /v1/pages/{slug}`: consulta atual no navegador; slug percent-encoded.
+- `OPTIONS`: preflight apenas das origens explicitamente configuradas.
 
-Depois da configuração, publique com:
+Somente `BUSCA=S`, nível até `PUBLIC_MAX_LEVEL`, sem páginas especiais `page@` e páginas de mídia `imagem@`. Todas as consultas possuem parâmetros. O build usa apenas dados públicos. Listagem ordenada por `IDENT`, com cursor opaco; o navegador consulta por `NOME_URL`, preservando acentos e sublinhados.
 
-```sh
-npm run deploy
-```
+API não retorna senhas, tokens, fonte wiki ou dados cadastrais. Leitura não registra acessos, não reprocessa artigos e não executa o cron. HTML é tratado como conteúdo não confiável pelo frontend e sanitizado antes da renderização.
 
-Esse comando aplica primeiro as migrations pendentes no D1 remoto e publica o Worker somente se todas terminarem com sucesso. O histórico de migrations do D1 impede reaplicar arquivos já executados. Migrations já aplicadas não devem ser editadas.
+Configure `FRONTEND_URL` e `LEGACY_MEDIA_URL` para expandir os dois placeholders de URL do legado. Outras regras de templates e URLs absolutas antigas serão tratadas na extração do renderer; o adaptador não promete paridade completa nesta etapa.
 
-### Deploy automático por commit no Cloudflare Workers Builds
-
-No Worker da API, abrir Settings → Builds → Build configuration e configurar:
-
-| Campo | Valor |
-| --- | --- |
-| Branch de produção | main |
-| Build command | npm run check && npm test && npm run build |
-| Deploy command | npm run deploy |
-
-A integração Git do Cloudflare executará validações, migrations remotas e publicação a cada push/merge na branch de produção. Usar `npx wrangler deploy` diretamente ignora a etapa de migrations. O token usado pelo build precisa permitir a edição do D1, além do deploy do Worker.
-
-Não executar esse deploy em builds de preview apontados ao banco de produção. O binding DB de wrangler.jsonc identifica o banco remoto que será atualizado. Para ambientes separados, configurar banco e comando próprios.
-
-`npm run build` continua sendo somente empacotamento dry-run, sem migrations remotas. A CI do GitHub valida tipos, testes isolados e esse build; ela não migra o banco de produção.
-
-Uma falha de migration interrompe o comando antes do deploy, mas migrations anteriores que já terminaram podem ter sido aplicadas. Também não há rollback automático do banco se o deploy posterior falhar. Usar migrations incrementais compatíveis com o Worker ainda publicado.
-
-Os comandos remotos exigem acesso à conta Cloudflare. Nenhuma migration remota nem publicação foi executada durante a preparação desta alteração.
-
-## Banco
-
-Consulte [docs/database.md](docs/database.md). A migration inicial cria somente estruturas, sem registros de exemplo ou dados legados. Não edite migrations já aplicadas: crie arquivos SQL numerados novos em `migrations/`.
-
-Referências oficiais: [D1 migrations](https://developers.cloudflare.com/d1/reference/migrations/), [Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/) e [TypeScript](https://developers.cloudflare.com/workers/languages/typescript/).
-
-## Organização do código
-
-- `src/db/schema.ts`: mapeamento Drizzle das tabelas D1 existentes.
-- `src/db/index.ts`: conexão com D1 e execução atômica de lotes.
-- `src/models/`: acesso tipado às entidades.
-- `src/services/PageService.ts`: regras de negócio e gravações.
-- `src/controllers/PageController.ts`: validação HTTP e respostas JSON.
-- `src/routes/pages.ts`: definição das rotas Hono.
-- `src/validators/page.ts`: validação do payload de páginas.
-
-O esquema Drizzle reflete a migration SQL existente; **não** execute geração automática de migrations sobre um banco existente sem revisar o diff. O lockfile precisa ser atualizado com `npm install` antes de usar `npm ci`.
-
-## Integração com o frontend
-
-`GET /page-schema` publica limites, HTML permitido e o catálogo de tipos/metadados. As configurações estão em `src/config/` e alimentam também a validação do servidor. Consulte `docs/api.md` para CORS, ETag e o contrato de gravação. POST sem old_slug cria; PUT /pages/:slug edita. Título e slug gerado exigem pelo menos dois caracteres. Não há autenticação nesta etapa.
-
-## Diagnóstico de erros no Worker
-
-Erros internos retornam `error` e `error_id`. O mesmo identificador acompanha o erro completo nos logs do Worker, permitindo correlacionar a resposta.
-
-Para diagnóstico temporário, configurar **DEBUG_ERRORS=true** em Workers & Pages → Worker da API → Settings → Variables and Secrets e publicar/aplicar a alteração. Essa configuração pertence ao Worker em execução, não apenas às variáveis do build. Localmente pode ser definida em .dev.vars.
-
-Com essa variável, a resposta também inclui `details: { type, message }`, com a causa final (por exemplo, D1_ERROR: no such column: deleted_at), sem stack nem parâmetros do wrapper SQL. Não depende de query string pública. Esses detalhes podem revelar a estrutura interna do sistema; voltar para false/remover a variável após o diagnóstico. Erros esperados de validação continuam com seu contrato atual. As respostas 500 têm Cache-Control: no-store.
-
+Mudanças futuras de linguagem ou hospedagem devem manter o contrato em [docs/api.md](docs/api.md). A implementação antiga D1/TypeScript e suas migrations foram retiradas, não aplicadas ao banco legado.
