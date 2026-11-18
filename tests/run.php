@@ -83,17 +83,19 @@ if (in_array('sqlite', PDO::getAvailableDrivers(), true)) {
     $db->exec('CREATE TABLE PAGINAS (IDENT TEXT PRIMARY KEY, NOME_URL TEXT, NOME TEXT, CONTEUDO TEXT, CONTEUDO_TXT TEXT, DT_ATUALIZACAO TEXT, BUSCA TEXT, NIVEL INTEGER)');
     $db->exec('CREATE TABLE PAGINAS_CATEGORIAS (IDENT TEXT, NOME_URL TEXT, CATEGORIA TEXT, CATEGORIA_IDENT TEXT, CATEGORIA_URL TEXT, ORDEM INTEGER)');
     $db->exec('CREATE TABLE PAGINAS_LINKS (IDENT TEXT, NOME_URL TEXT, ID INTEGER, LINK TEXT, LINK_IDENT TEXT, LINK_URL TEXT, LINK_HASH TEXT, LINK_TXT TEXT)');
+    $db->exec('CREATE TABLE PAGINAS_REDIRECIONAMENTOS (IDENT TEXT, ID INTEGER, PAGINA_URL TEXT)');
+    $db->exec('CREATE TABLE PAGINAS_IMAGENS (IDENT TEXT, IMAGEM_IDENT TEXT)');
     $insert = $db->prepare('INSERT INTO PAGINAS VALUES (?, ?, ?, ?, ?, NULL, ?, ?)');
     foreach ([['a', 'Cães', 'S', 1], ['b', 'Restrito', 'S', 5], ['c', 'Oculto', 'N', 1], ['page@login', 'Login', 'S', 1], ['imagem@foto', 'Foto', 'S', 1]] as [$id, $slug, $search, $level]) {
         $insert->execute([$id, $slug, $slug, '<p>Conteúdo</p>', 'Conteúdo', $search, $level]);
     }
     $legacy = new LegacyPageRepository($db);
-    check(count($legacy->list(100, '')) === 1, 'Only publicly exportable article rows');
+    check(count($legacy->list(100, '')) === 2, 'Only public articles and public media rows');
     check($legacy->find('Cães')['title'] === 'Cães', 'Lookup by NOME_URL');
     check($legacy->find("' OR 1=1 --") === null, 'Parameterized lookup');
     check($legacy->find('Restrito') === null, 'Private rows never reach static exports');
     $diagnostic = new Application(static fn () => $legacy, $config + ['debug' => true]);
-    foreach ([['Restrito', 'level_above_public_max'], ['Oculto', 'not_searchable'], ['Login', 'special_page_not_exported'], ['Foto', 'media_page_not_exported'], ['a', 'identifier_is_not_url_slug']] as [$slug, $reason]) {
+    foreach ([['Restrito', 'level_above_public_max'], ['Oculto', 'not_searchable'], ['Login', 'special_page_not_exported'], ['a', 'identifier_is_not_url_slug']] as [$slug, $reason]) {
         $response = $diagnostic->handle('GET', '/v1/pages/' . rawurlencode($slug), []);
         check($response->status === 404 && $response->body['error']['code'] === 'not_found', 'Diagnostics do not bypass publication rules');
         check($response->body['error']['details']['database'] === 'query_succeeded', 'Distinguish successful query from database outage');

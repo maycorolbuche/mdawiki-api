@@ -27,11 +27,17 @@ if (is_file($envFile)) {
     }
 }
 
+date_default_timezone_set(getenv('APP_TIMEZONE') ?: 'America/Sao_Paulo');
 return [
+    'app_key' => getenv('APP_KEY') ?: '',
+    'storage_dir' => getenv('STORAGE_DIR') ?: dirname(__DIR__).'/var',
+    'media_root' => getenv('MEDIA_ROOT') ?: dirname(__DIR__).'/var/media',
+    'media_public_url' => rtrim(getenv('MEDIA_PUBLIC_URL') ?: 'https://api.mda.wiki.br/media','/'),
+    'mail' => ['host'=>getenv('SMTP_HOST') ?: '', 'port'=>(int)(getenv('SMTP_PORT') ?: 587), 'secure'=>getenv('SMTP_SECURE') ?: 'tls', 'username'=>getenv('SMTP_USERNAME') ?: '', 'password'=>getenv('SMTP_PASSWORD') ?: '', 'from'=>getenv('SMTP_FROM') ?: ''],
     'debug' => filter_var(getenv('APP_DEBUG') ?: 'false', FILTER_VALIDATE_BOOLEAN),
     'origins' => array_values(array_filter(array_map('trim', explode(',', getenv('ALLOWED_ORIGINS') ?: '')))),
     'frontend_url' => rtrim(getenv('FRONTEND_URL') ?: 'https://mda.wiki.br', '/'),
-    'media_url' => rtrim(getenv('LEGACY_MEDIA_URL') ?: 'https://mda.wiki.br/site', '/'),
+    'media_url' => rtrim(getenv('MEDIA_PUBLIC_URL') ?: 'https://api.mda.wiki.br/media', '/'),
     'db' => [
         'host' => getenv('DB_HOST') ?: '127.0.0.1',
         'port' => getenv('DB_PORT') ?: '3306',
@@ -42,3 +48,4 @@ return [
     ],
     'public_max_level' => (int) (getenv('PUBLIC_MAX_LEVEL') ?: 1),
 ];
+

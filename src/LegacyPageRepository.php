@@ -9,14 +9,15 @@ use InvalidArgumentException;
 final class LegacyPageRepository implements DiagnosablePageRepository
 {
     private const COLUMNS = 'IDENT AS id, NOME_URL AS slug, NOME AS title, CONTEUDO AS html, CONTEUDO_TXT AS text, DT_ATUALIZACAO AS updated_at';
-    private const PUBLIC_FILTER = "BUSCA = 'S' AND COALESCE(NIVEL, 1) <= :level AND IDENT NOT LIKE 'page@%' AND IDENT NOT LIKE 'imagem@%'";
+    private const PUBLIC_FILTER = "BUSCA = 'S' AND COALESCE(NIVEL, 1) <= :level AND IDENT NOT LIKE 'page@%'";
 
-    public function __construct(private readonly PDO $db, private readonly int $maxLevel = 1)
+    public function __construct(private readonly PDO $db, private readonly int $maxLevel = 1, private readonly ?array $siteConfig = null)
     {
     }
+    public function connection(): PDO { return $this->db; }
 
     /** Reuses the existing schema; connection encoding is explicitly configurable. */
-    public static function connect(array $config, int $maxLevel): self
+    public static function connect(array $config, int $maxLevel, ?array $siteConfig = null): self
     {
         // Charset controls the legacy connection behavior; output is normalized below.
         if (!in_array($config['charset'], ['latin1', 'utf8mb4', 'utf8'], true)) {
@@ -33,7 +34,7 @@ final class LegacyPageRepository implements DiagnosablePageRepository
             $config['password'],
             [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC, PDO::ATTR_EMULATE_PREPARES => false],
         );
-        return new self($db, $maxLevel);
+        return new self($db, $maxLevel, $siteConfig);
     }
 
     public function list(int $limit, string $after): array
@@ -100,7 +101,24 @@ final class LegacyPageRepository implements DiagnosablePageRepository
         }
         foreach ($rows as &$row) {
             foreach (array_keys($queries) as $key) $row[$key] = $relations[$row['id']][$key] ?? [];
+            if ($this->siteConfig && str_contains($row['html'] ?? '', '{{{lista:')) $row['html'] = (new PublicLists(new Database($this->db),$this->siteConfig))->render($row['html']);
         }
+        $redirectQuery=$this->db->prepare("SELECT IDENT,PAGINA_URL FROM PAGINAS_REDIRECIONAMENTOS WHERE ID = 1 AND IDENT IN ($placeholders)");
+        foreach ($ids as $index=>$id) $redirectQuery->bindValue($index+1,$id);
+        $redirectQuery->execute();$redirects=[];
+        foreach ($redirectQuery->fetchAll() as $redirect) { $redirect=$this->normalize($redirect);$redirects[$redirect['IDENT']]=$redirect['PAGINA_URL']; }
+        unset($row);
+        foreach ($rows as &$row) $row['redirect_slug']=$redirects[$row['id']] ?? null;
+        unset($row);
+        $mediaIds=[];foreach($rows as $row) if(str_starts_with($row['id'],'imagem@')) $mediaIds[]=substr($row['id'],7);
+        $usage=[];
+        if ($mediaIds) {
+            $marks=implode(',',array_fill(0,count($mediaIds),'?'));
+            $query=$this->db->prepare("SELECT DISTINCT i.IMAGEM_IDENT AS owner,p.IDENT AS id,p.NOME_URL AS slug,p.NOME AS title FROM PAGINAS_IMAGENS i JOIN PAGINAS p ON p.IDENT=i.IDENT WHERE i.IMAGEM_IDENT IN ($marks) AND p.BUSCA='S' AND COALESCE(p.NIVEL,1) <= ? AND p.IDENT NOT LIKE 'page@%' ORDER BY p.NOME,p.IDENT");
+            foreach($mediaIds as $index=>$id) $query->bindValue($index+1,$this->databaseValue($id));$query->bindValue(count($mediaIds)+1,$this->maxLevel,PDO::PARAM_INT);$query->execute();
+            foreach($query->fetchAll() as $link) { $link=$this->normalize($link);$owner='imagem@'.$link['owner'];unset($link['owner']);$link['title']=html_entity_decode($link['title'],ENT_QUOTES|ENT_HTML5,'UTF-8');$usage[$owner][]=$link; }
+        }
+        foreach($rows as &$row) $row['image_usage']=$usage[$row['id']] ?? [];
         return $rows;
     }
 
@@ -127,9 +145,6 @@ final class LegacyPageRepository implements DiagnosablePageRepository
         if (str_starts_with(strtolower($row['IDENT']), 'page@')) {
             $reasons[] = 'special_page_not_exported';
         }
-        if (str_starts_with(strtolower($row['IDENT']), 'imagem@')) {
-            $reasons[] = 'media_page_not_exported';
-        }
         return [
             'record_found' => true,
             'lookup_field' => 'NOME_URL',
@@ -155,4 +170,5 @@ final class LegacyPageRepository implements DiagnosablePageRepository
         return $row;
     }
 }
+
 

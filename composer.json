@@ -1,0 +1,5 @@
+{
+  "name": "mdawiki/api",
+  "description": "API independente do MDAWiki em PHP puro",
+  "require": { "php": ">=8.2", "ext-pdo": "*", "ext-mbstring": "*", "ext-dom": "*", "phpmailer/phpmailer": "^6.10 || ^7.0" }
+}
