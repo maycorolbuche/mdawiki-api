@@ -6,7 +6,7 @@ if (PHP_SAPI!=='cli') exit(1);
 $source=realpath($argv[1] ?? '');
 if (!$source || !is_dir($source.'/@imgs_wiki')) { fwrite(STDERR,"Uso: php bin/import-media.php /caminho/para/site-legado\n");exit(1); }
 $total=0;
-foreach (['@imgs_wiki'=>'wiki','@imgs_user'=>'users','@imgs'=>'assets'] as $folder=>$group) {
+foreach (['@imgs_wiki'=>'wiki','@imgs_wiki_mini'=>'wiki_mini','@imgs_wiki_cp'=>'wiki_cp','@imgs_user'=>'users','@imgs'=>'assets'] as $folder=>$group) {
     if (!is_dir($source.'/'.$folder)) continue;
     $files=new RecursiveIteratorIterator(new RecursiveDirectoryIterator($source.'/'.$folder,FilesystemIterator::SKIP_DOTS));
     foreach ($files as $file) {
@@ -30,3 +30,4 @@ foreach ($batch as $user) {
 }
 } while(count($batch)===50);
 echo "Importação concluída: $total arquivos copiados. Arquivos existentes preservados.\n";
+
