@@ -126,8 +126,7 @@ final class Features
         ];$result=[];foreach($queries as $key=>$sql) $result[$key]=(int)$this->db->one($sql)['n'];return $result;
     }
     private function home(): array {
-        $filter=$this->publicFilter();
-        return ['statistics'=>$this->statistics(),'recent'=>$this->db->rows("SELECT p.IDENT AS id,p.NOME_URL AS slug,p.NOME AS title,p.DT_ALTERACAO AS updated_at FROM PAGINAS p WHERE $filter ORDER BY p.DT_ALTERACAO DESC,p.IDENT LIMIT 10"),'popular'=>$this->db->rows("SELECT p.IDENT AS id,p.NOME_URL AS slug,p.NOME AS title FROM PAGINAS p WHERE $filter ORDER BY p.ACESSOS DESC,p.IDENT LIMIT 10")];
+        return ['statistics'=>$this->statistics()] + (new Home($this->db,$this->renderer,$this->publicFilter()))->get();
     }
     private function visit(array $body): array {
         $slug=$this->slug(is_string($body['slug'] ?? null)?$body['slug']:'');$filter=$this->publicFilter();
@@ -159,3 +158,4 @@ final class Features
     private function upload(array $body): array { $u=$this->accounts->current(true);if ((int)$u['NIVEL']<1) throw new HttpError(403,'permission_denied','Você não tem permissão para enviar imagens da wiki.');$this->rate->check('media-user:'.$u['ID'],20,3600);return (new Media($this->config))->upload($body); }
     private function photo(array $body): array { $u=$this->accounts->current(true);$file=(new Media($this->config))->upload($body,'users');$this->db->run('UPDATE USUARIOS SET FOTO = ?, FOTO_32X32 = ?, FOTO_64 = NULL, FOTO_32X32_64 = NULL WHERE ID = ?',[$file['filename'],$file['filename'],(int)$u['ID']]);return $file; }
 }
+
