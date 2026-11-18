@@ -12,6 +12,13 @@ final class Media
     public function __construct(private array $config) {}
     public function upload(array $body, string $group='wiki'): array {
         $encoded=$body['data'] ?? null;
+        if (is_string($encoded) && strlen($encoded)<=7000000 && str_starts_with($encoded,'data:image/svg+xml;base64,')) {
+            $bytes=base64_decode(substr($encoded,26),true);
+            if (!$bytes || preg_match('~<\s*(?:script|foreignObject|iframe|object|embed)\b|\bon[a-z]+\s*=|<!DOCTYPE|<!ENTITY~i',$bytes)) throw new HttpError(422,'invalid_svg','O SVG contém conteúdo ativo não permitido.');
+            $file=$this->restore($encoded);
+            if ($group==='users') { $target=$this->config['media_root'].'/users';if (!is_dir($target)) mkdir($target,0755,true);rename($this->config['media_root'].'/wiki/'.$file['filename'],$target.'/'.$file['filename']);$file['url']=$this->config['media_public_url'].'/users/'.$file['filename']; }
+            return $file+['width'=>0,'height'=>0];
+        }
         if (!is_string($encoded) || strlen($encoded)>7000000 || !preg_match('~^data:image/(png|jpeg|gif|webp);base64,([A-Za-z0-9+/=\r\n]+)$~D',$encoded,$m)) throw new HttpError(422,'invalid_upload','Envie uma imagem PNG, JPEG, GIF ou WebP de até 5 MB.');
         $bytes=base64_decode($m[2],true); $info=$bytes!==false ? @getimagesizefromstring($bytes):false;
         $formats=['image/png'=>'png','image/jpeg'=>'jpg','image/gif'=>'gif','image/webp'=>'webp'];
@@ -28,7 +35,7 @@ final class Media
         if (!$file || !$root || !str_starts_with($file,$root.DIRECTORY_SEPARATOR) || !$type || !is_file($file)) { http_response_code(404);exit; }
         header('Content-Type: '.$type);header('X-Content-Type-Options: nosniff');header("Content-Security-Policy: sandbox; default-src 'none'; style-src 'unsafe-inline'");header('Cache-Control: public, max-age=86400');readfile($file);exit;
     }
-    /** Only used to restore an already stored revision; normal uploads reject SVG. */
+    /** Sanitizes SVG snapshots; active markup is also rejected on new uploads. */
     public function restore(string $data): array {
         if (!str_starts_with($data,'data:image/svg+xml;base64,')) return $this->upload(['data'=>$data]);
         $bytes=base64_decode(substr($data,26),true);

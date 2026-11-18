@@ -19,7 +19,7 @@ PAGINAS usa MyISAM no schema original; uma transação não pode prometer rollba
 
 As senhas MD5 existentes são aceitas e atualizadas após login para um formato versionado PBKDF2-HMAC-SHA256 (600 mil iterações, salt individual derivado de APP_KEY, 116 bits armazenados) que cabe em SENHA varchar(32). Novas senhas usam esse formato; não há DDL. O PHP antigo não reconhece esse formato: voltar a usá-lo para autenticação exigiria redefinição de senha. A sessão expira em 12 horas, ou 30 dias com “manter conectado”; troca/redefinição de senha invalida as outras sessões na próxima consulta.
 
-Uploads novos aceitam PNG, JPEG, GIF e WebP até 5 MB/20 megapixels. SVGs já existentes são copiados e servidos com CSP sandbox. Restaurações de SVG de revisões removem conteúdo ativo; uploads normais de SVG são rejeitados. Dados pessoais de usuários são exclusivos do titular ou de administradores nível 5.
+Uploads novos aceitam PNG, JPEG, GIF, WebP e SVG sanitizado até 5 MB (20 megapixels para raster). SVGs existentes são copiados e servidos com CSP sandbox. Uploads de SVG com conteúdo ativo são rejeitados; restaurações de revisões removem esse conteúdo. Dados pessoais de usuários são exclusivos do titular ou de administradores nível 5.
 
 ## Validação
 

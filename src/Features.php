@@ -109,7 +109,19 @@ final class Features
     }
     private function statistics(): array {
         $filter=$this->publicFilter();
-        return ['pages'=>(int)$this->db->one("SELECT COUNT(*) AS n FROM PAGINAS p WHERE $filter AND p.IDENT NOT LIKE 'imagem@%'")['n'],'images'=>(int)$this->db->one("SELECT COUNT(*) AS n FROM PAGINAS p WHERE $filter AND p.IDENT LIKE 'imagem@%'")['n'],'categories'=>(int)$this->db->one("SELECT COUNT(DISTINCT c.CATEGORIA_IDENT) AS n FROM PAGINAS_CATEGORIAS c JOIN PAGINAS p ON p.IDENT=c.IDENT WHERE $filter")['n']];
+        $queries=[
+            'pages'=>"SELECT COUNT(*) AS n FROM PAGINAS p WHERE $filter AND p.IDENT NOT LIKE 'imagem@%'",
+            'images'=>"SELECT COUNT(*) AS n FROM PAGINAS p WHERE $filter AND p.IDENT LIKE 'imagem@%'",
+            'categories'=>"SELECT COUNT(DISTINCT c.CATEGORIA_IDENT) AS n FROM PAGINAS_CATEGORIAS c JOIN PAGINAS p ON p.IDENT=c.IDENT WHERE $filter",
+            'redirects'=>"SELECT COUNT(DISTINCT p.IDENT) AS n FROM PAGINAS p JOIN PAGINAS_REDIRECIONAMENTOS r ON r.IDENT=p.IDENT WHERE $filter",
+            'uncategorized'=>"SELECT COUNT(*) AS n FROM PAGINAS p WHERE $filter AND NOT EXISTS (SELECT 1 FROM PAGINAS_CATEGORIAS c WHERE c.IDENT=p.IDENT OR c.CATEGORIA_IDENT=p.IDENT)",
+            'unused_images'=>"SELECT COUNT(*) AS n FROM PAGINAS p WHERE $filter AND p.IDENT LIKE 'imagem@%' AND NOT EXISTS (SELECT 1 FROM PAGINAS_IMAGENS i WHERE i.IMAGEM_IDENT=SUBSTR(p.IDENT,8))",
+            'missing_images'=>"SELECT COUNT(DISTINCT i.IMAGEM_IDENT) AS n FROM PAGINAS_IMAGENS i JOIN PAGINAS p ON p.IDENT=i.IDENT WHERE $filter AND COALESCE(i.IMAGEM_FILE_URL,'')=''",
+            'videos'=>"SELECT COUNT(DISTINCT v.URL) AS n FROM PAGINAS_VIDEOS v JOIN PAGINAS p ON p.IDENT=v.IDENT WHERE $filter",
+            'documentation'=>"SELECT COUNT(*) AS n FROM PAGINAS p WHERE $filter AND p.IDENT LIKE 'doc@%'",
+            'missing_links'=>"SELECT COUNT(DISTINCT l.LINK_IDENT) AS n FROM PAGINAS_LINKS l JOIN PAGINAS p ON p.IDENT=l.IDENT LEFT JOIN PAGINAS target ON target.IDENT=l.LINK_IDENT WHERE $filter AND target.IDENT IS NULL AND l.LINK_IDENT NOT LIKE '#%'",
+            'views'=>"SELECT COALESCE(SUM(p.ACESSOS),0) AS n FROM PAGINAS p WHERE $filter",
+        ];$result=[];foreach($queries as $key=>$sql) $result[$key]=(int)$this->db->one($sql)['n'];return $result;
     }
     private function home(): array {
         $filter=$this->publicFilter();

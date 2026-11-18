@@ -17,7 +17,7 @@ A API mantém as rotas públicas abaixo e adiciona os fluxos do aplicativo. Nenh
 | GET ou PUT /v1/profile | Perfil próprio; escrita aceita somente campos cadastrais permitidos |
 | POST /v1/profile/password | current_password, password, password_confirmation |
 | POST /v1/profile/email | email; depois email + code para confirmar |
-| POST /v1/profile/photo | data: imagem raster em data URL |
+| POST /v1/profile/photo | data: imagem em data URL (SVG sanitizado) |
 | GET /v1/pages/{slug}/editor | title, source, format, exists, media, base_version; requer login/permissão |
 | PUT /v1/pages/{slug} | title, source, base_version; cria ou salva revisão, HTTP 409 em conflito |
 | POST .../preview | source; processa sem persistir |
@@ -29,12 +29,12 @@ A API mantém as rotas públicas abaixo e adiciona os fluxos do aplicativo. Nenh
 | GET /v1/catalog?type=categorias | Listas públicas; mesmos parâmetros de paginação |
 | GET /v1/statistics ou /home | Contadores, alterações recentes e populares |
 | GET /v1/users ou /users/{id} | Administrador nível 5; campos cadastrais, sem credenciais |
-| POST /v1/media | data: raster em data URL; retorna url, filename, width, height |
+| POST /v1/media | data: imagem em data URL; retorna url, filename, width, height |
 | POST /v1/visits | slug; contador diário público, com debounce e sem contagem no build |
 
 Tipos de catálogo: paginas, categorias, imagens, videos, documentacao/codigos, listas, links_inexistentes, paginas_sem_categoria, redirecionamentos, imagens_sem_pagina, imagens_inexistentes. `atualizar` exige administrador. Diretório de usuários aceita filtros NOME, APELIDO, EMAIL, CIDADE, ESTADO, CLUBE, ASSOCIACAO, TIPO_CLUBE, ATIVO e HAS_PHOTO (S/N).
 
-Artigos incluem também redirect_slug (ou null). O frontend segue redirecionamentos internamente, com limite para ciclos. Somente artigos públicos entram na exportação; fontes, histórico, contas e leitura privada nunca entram no snapshot público.
+Artigos incluem também redirect_slug (ou null); páginas de imagem incluem image_usage com os artigos públicos que as utilizam. O frontend segue redirecionamentos internamente, com limite para ciclos. Somente artigos públicos entram na exportação; fontes, histórico, contas e leitura privada nunca entram no snapshot público.
 
 Uma página retorna `{ "data": { "id", "slug", "title", "html", "description", "updated_at", "canonical_url" } }`.
 

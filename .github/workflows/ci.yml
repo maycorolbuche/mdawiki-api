@@ -33,5 +33,5 @@ jobs:
           name: composer-lock
           path: composer.lock
           retention-days: 3
-      - run: python3 tests/http.py
+      - run: python3 tests/integration_http.py
 
