@@ -112,7 +112,7 @@ final class Application
             if (str_starts_with(strtolower($row['id']),'imagem@')) {
                 $file=json_decode($html,true);
                 if (is_array($file) && !empty($file['url'])) { $url=$file['url'];if (!preg_match('~^https?://~',$url)) $url=$media.'/'.ltrim(str_replace('@imgs_wiki/','wiki/',$url),'/');$html='<figure><img src="'.htmlspecialchars($url,ENT_QUOTES,'UTF-8').'" alt="'.htmlspecialchars($row['title'] ?? '',ENT_QUOTES,'UTF-8').'"></figure>'; }
-                elseif (is_array($file)) $html='<p>Esta página está sem imagem.</p>';
+                elseif (is_array($file) || $html==='') $html='<p>Esta página está sem imagem.</p>';
             }
             $html=preg_replace_callback('~(href=[\'"])(?:https?://mda\.wiki\.br)/([^\'"<>]*)~i',fn($m)=>$m[1].$this->config['frontend_url'].'/'.$m[2],$html);
         }
@@ -132,5 +132,6 @@ final class Application
         ];
     }
 }
+
 
 

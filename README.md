@@ -28,3 +28,19 @@ Escritas exigem origem autorizada, cookie de sessão e `X-CSRF-Token`; possuem l
 O código wiki é processado aqui: regras TAGS, includes limitados, tabelas/listas, templates de especialidades/biografias/imagens/vídeos, links, categorias e subtítulos. As rotinas de apresentação reaproveitadas estão isoladas em `wiki-presentation.php`, sem SQL ou dependência de arquivos do site antigo. As tabelas de índices são atualizadas ao salvar; dependências são reprocessadas pelo comando de manutenção.
 
 Use `APP_DEBUG=true` temporariamente para os detalhes originais de erros de banco; `/health` verifica o processo, não a conexão. O contrato, os filtros e o diagnóstico estão em [docs/api.md](docs/api.md). Valide o charset com os bytes do banco real; o schema sozinho não informa todas as conversões históricas.
+
+
+
+### Persistência das páginas de imagem (compatibilidade com o legado)
+
+Ao salvar uma página `imagem@...`, a API mantém o formato de `geraImagem`:
+
+- `PAGINAS.CONTEUDO_CODE`: data URI da imagem em base64 (também preservado nas revisões).
+- `PAGINAS.CONTEUDO_TXT`: caminho relativo do arquivo principal, como `@imgs_wiki/imagem@exemplo.png`.
+- `PAGINAS.CONTEUDO`: JSON com `tipo`, `url`, `url_mini`, `url_cp`, `w`, `h`, `w_mini`, `h_mini`, `w_cp`, `h_cp`, `size`, `size_mini` e `size_cp`.
+
+As imagens raster são limitadas a 500×500, a miniatura a 100×100 e a capa é ampliada quando menor que 200×200, preservando a proporção conforme o cálculo do legado. A fonte base64 é atualizada quando houver redução. SVGs preservam a representação vetorial e passam pela validação já usada pela API.
+
+Os arquivos ficam em `MEDIA_ROOT/wiki`, `MEDIA_ROOT/wiki_mini` e `MEDIA_ROOT/wiki_cp`, servidos por `/media/wiki/...`, `/media/wiki_mini/...` e `/media/wiki_cp/...`. Os caminhos `@imgs_wiki*` continuam gravados no banco e são convertidos em URLs públicas somente na leitura. Esses diretórios precisam permitir escrita pelo PHP. Habilite **GD** no PHP para gerar as versões raster; o Composer e o CI incluem essa extensão. Não há nova variável de ambiente nem alteração de esquema.
+
+O front envia base64 diretamente no PUT da página. URLs locais retornadas pelo antigo POST `/v1/media` continuam aceitas por compatibilidade e são convertidas em base64, sem buscar URLs externas. Remover limpa os três campos e os derivados dessa página; restaurar ou reprocessar regenera os arquivos a partir da fonte armazenada, sem depender de um upload antigo. `bin/import-media.php` também importa as pastas de miniaturas e capas do acervo legado.

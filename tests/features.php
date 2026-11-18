@@ -1,6 +1,6 @@
 <?php
 declare(strict_types=1);
-use MDAWiki\{Application,Accounts,Database,Features,LegacyPageRepository,Session,WikiRenderer};
+use MDAWiki\{Application,Accounts,Database,Features,LegacyPageRepository,Media,Session,WikiRenderer};
 require dirname(__DIR__).'/config/bootstrap.php';
 function verify(bool $ok,string $why): void { if (!$ok) throw new RuntimeException($why); }
 $mysql=getenv('TEST_MYSQL_DSN');
@@ -88,9 +88,10 @@ verify(request('/v1/profile/email','POST',['email'=>'changed@example.test'])->st
 verify(request('/v1/profile/email','POST',['email'=>'changed@example.test','code'=>$code])->status===200,'Verified email can replace old email');
 verify(request('/v1/profile')->body['data']['EMAIL']==='changed@example.test','Session uses current verified email');
 verify(request('/v1/media','POST',['data'=>'data:image/svg+xml;base64,'.base64_encode('<svg onload="alert(1)"/>')])->status===422,'Reject executable SVG uploads');
-$png='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=';
+$fixture=imagecreatetruecolor(1,1);ob_start();imagepng($fixture);$png='data:image/png;base64,'.base64_encode(ob_get_clean());imagedestroy($fixture);
 $upload=request('/v1/media','POST',['data'=>$png]);verify($upload->status===200,'Raster image upload: '.json_encode($upload->body));
 $image=request('/v1/pages/imagem%40Teste','PUT',['title'=>'Imagem teste','source'=>$upload->body['data']['url'],'base_version'=>'']);verify($image->status===200 && str_contains(request('/v1/pages/imagem%40Teste')->body['data']['html'],'<img'),'Image page uses the API storage');
+require __DIR__.'/images.inc.php';
 if (class_exists(DOMDocument::class)) { $svg=(new MDAWiki\Media($config))->restore('data:image/svg+xml;base64,'.base64_encode('<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"><script>alert(1)</script><path d="M0 0"/></svg>'));$bytes=file_get_contents($config['media_root'].'/wiki/'.$svg['filename']);verify(!str_contains($bytes,'script') && !str_contains($bytes,'onload'),'SVG history restoration strips active content'); }
 $renderer=new WikiRenderer($db,$config);$db->run("INSERT INTO PAGINAS (IDENT,NOME_URL,NOME,CONTEUDO_CODE) VALUES ('cycle','Cycle','Cycle','{{Incluir:Cycle}}')");
 try {$renderer->render('{{Incluir:Cycle}}','Other');throw new RuntimeException('Cycle accepted');}catch(MDAWiki\HttpError $e){verify($e->errorCode==='include_cycle','Detect recursive includes');}
@@ -146,5 +147,6 @@ verify(mb_strlen($homeToday['description'])===303 && $homeToday['views']===1000,
 verify(count(array_filter($home['missing'],fn($item)=>$item['id']==='home_missing'))===1 && !in_array('home_secret_missing',array_column($home['missing'],'id'),true),'Missing links are unique and originate only from public pages');
 verify($home['recent'][0]['id']==='home_future','Recent changes fall back to creation date');
 echo "Independent account, wiki editing, history, search, catalogs and security checks passed.\n";
+
 
 
