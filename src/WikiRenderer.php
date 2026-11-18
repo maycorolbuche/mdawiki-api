@@ -70,9 +70,13 @@ final class WikiRenderer
                 },$html);
                 $html=str_replace(['{{Imagens}}','{{/Imagens}}'],['<div class="wiki-gallery">','</div>'],$html);
             }
-            foreach ($this->db->rows('SELECT PARAM_CODE,PARAM_HTML FROM TAGS WHERE POSICAO = ? AND FUNCAO = ? ORDER BY ORDEM',[$position,'preg_replace']) as $rule) {
-                $next=@preg_replace($rule['PARAM_CODE'],$rule['PARAM_HTML'],$html);
-                if ($next===null) throw new HttpError(422,'invalid_wiki_rule','Regra inválida na tabela TAGS.'); $html=$next;
+            foreach ($this->db->rows('SELECT ID,PARAM_CODE,PARAM_HTML FROM TAGS WHERE POSICAO = ? AND FUNCAO = ? ORDER BY ORDEM',[$position,'preg_replace']) as $rule) {
+                $invalidRule='Regra inválida na tabela TAGS (ID: '.($rule['ID'] ?? '?').'; posição: '.$position.').';
+                $pattern=$rule['PARAM_CODE'];
+                if (!is_string($pattern) || trim($pattern)==='') throw new HttpError(422,'invalid_wiki_rule',$invalidRule.' Expressão regular ausente.');
+                // Legacy nvl(PARAM_HTML) treats SQL NULL as an empty replacement.
+                $next=@preg_replace($pattern,$rule['PARAM_HTML'] ?? '',$html);
+                if ($next===null) throw new HttpError(422,'invalid_wiki_rule',$invalidRule); $html=$next;
             }
         }
         $html=$this->urls($html);
@@ -82,3 +86,4 @@ final class WikiRenderer
         return $meta+['html'=>$html,'text'=>trim(html_entity_decode(strip_tags($html),ENT_QUOTES|ENT_HTML5,'UTF-8'))];
     }
 }
+
