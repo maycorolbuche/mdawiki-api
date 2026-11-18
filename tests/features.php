@@ -96,4 +96,24 @@ $renderer=new WikiRenderer($db,$config);$db->run("INSERT INTO PAGINAS (IDENT,NOM
 try {$renderer->render('{{Incluir:Cycle}}','Other');throw new RuntimeException('Cycle accepted');}catch(MDAWiki\HttpError $e){verify($e->errorCode==='include_cycle','Detect recursive includes');}
 $badMail=new Accounts($db,new Session(),$config,static function(){throw new RuntimeException('SMTP unavailable');});
 try {$badMail->register(['name'=>'Failed','email'=>'failed@example.test','password'=>'valid-password','password_confirmation'=>'valid-password']);throw new RuntimeException('Mail should fail');}catch(RuntimeException $e){verify($db->one('SELECT ID FROM USUARIOS WHERE EMAIL = ?',['failed@example.test'])===null,'Mail failure rolls back registration');}
+// Real legacy TAGS rows use SQL NULL to mean "remove the matched text".
+$rules=[['null-pre','/APAGAR_PRE/',null,'PRE',1],['null-pos','/APAGAR_POS/',null,'POS',1],['backref-pos','/(Mantido)/u','<strong>$1</strong>','POS',2],['zero-pos','/NUMERO/','0','POS',3]];
+foreach($rules as [$id,$pattern,$replacement,$position,$order]) $db->run('INSERT INTO TAGS (ID,PARAM_CODE,PARAM_HTML,FUNCAO,POSICAO,ORDEM) VALUES (?,?,?,?,?,?)',[$id,$pattern,$replacement,'preg_replace',$position,$order]);
+$ruleSource='APAGAR_PRE Mantido APAGAR_POS NUMERO';
+$ruleSave=request('/v1/pages/Teste_regra_nula','PUT',['title'=>'Teste de regra nula','source'=>$ruleSource,'base_version'=>'']);
+verify($ruleSave->status===200,'Legacy null replacement must save successfully: '.json_encode($ruleSave->body));
+$rulePage=$db->one('SELECT CONTEUDO,CONTEUDO_CODE FROM PAGINAS WHERE NOME_URL = ?',['Teste_regra_nula']);
+verify(!str_contains($rulePage['CONTEUDO'],'APAGAR_') && str_contains($rulePage['CONTEUDO'],'<strong>Mantido</strong>') && str_contains($rulePage['CONTEUDO'],'0'),'PRE/POS null deletion, backreferences and literal zero remain compatible');
+verify($rulePage['CONTEUDO_CODE']===$ruleSource,'Rule replacement never changes the stored wiki source');
+$rulePreview=request('/v1/pages/Teste_regra_nula/preview','POST',['source'=>$ruleSource]);verify($rulePreview->status===200 && !str_contains($rulePreview->body['data']['html'],'APAGAR_'),'Preview supports legacy null replacements');
+foreach([null,'','/[invalid/'] as $index=>$pattern) {
+    $db->run('INSERT INTO TAGS (ID,PARAM_CODE,PARAM_HTML,FUNCAO,POSICAO,ORDEM) VALUES (?,?,?,?,?,?)',['invalid-rule',$pattern,null,'preg_replace','PRE',9]);
+    $invalid=request('/v1/pages/Regra_invalida_'.$index,'PUT',['title'=>'Inválida','source'=>'Texto','base_version'=>'']);
+    verify($invalid->status===422 && $invalid->body['error']['code']==='invalid_wiki_rule','Invalid patterns must return validation errors, not 503');
+    verify(str_contains($invalid->body['error']['message'],'invalid-rule') && str_contains($invalid->body['error']['message'],'PRE'),'Identify the invalid TAGS row and processing phase');
+    verify($db->one('SELECT IDENT FROM PAGINAS WHERE NOME_URL = ?',['Regra_invalida_'.$index])===null,'Invalid rule cannot partially create an article');
+    $db->run('DELETE FROM TAGS WHERE ID = ?',['invalid-rule']);
+}
+foreach($rules as $rule) $db->run('DELETE FROM TAGS WHERE ID = ?',[$rule[0]]);
 echo "Independent account, wiki editing, history, search, catalogs and security checks passed.\n";
+
