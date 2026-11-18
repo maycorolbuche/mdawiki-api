@@ -10,7 +10,7 @@ final class Home
     public function get(): array
     {
         $columns = "p.IDENT AS id,p.NOME_URL AS slug,p.NOME AS title,p.CONTEUDO_TXT AS description,COALESCE(p.DT_ALTERACAO,p.DT_CADASTRO) AS updated_at,
-            (SELECT COALESCE(NULLIF(i.IMAGEM_FILE_MINI_URL,''),i.IMAGEM_FILE_URL) FROM PAGINAS_IMAGENS i WHERE i.IDENT=p.IDENT AND i.TEMPLATE='N' ORDER BY i.ID LIMIT 1) AS image";
+            (SELECT NULLIF(i.IMAGEM_FILE_URL,'') FROM PAGINAS_IMAGENS i WHERE i.IDENT=p.IDENT AND i.TEMPLATE='N' ORDER BY i.ID LIMIT 1) AS image";
         $random = $this->db->pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'mysql' ? 'RAND()' : 'RANDOM()';
         $eligible = $this->filter." AND NOT EXISTS (SELECT 1 FROM PAGINAS_REDIRECIONAMENTOS r WHERE r.IDENT=p.IDENT)";
         $result = [
