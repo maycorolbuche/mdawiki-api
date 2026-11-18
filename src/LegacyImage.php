@@ -10,7 +10,7 @@ final class LegacyImage
     public function render(string $id, string $source, bool $restore = false): array
     {
         if ($source === '') return ['source'=>'','html'=>'','text'=>'','files'=>[]];
-        if (strpbrk($id,"/\\\0") !== false || strlen($id)>240) throw new HttpError(422,'invalid_media','Identificador de imagem inválido.');
+        if (strpbrk($id,"/\\\0") !== false || strlen($id)>250) throw new HttpError(422,'invalid_media','Identificador de imagem inválido.');
         // Compatibility with uploads already submitted as a URL by the previous front.
         if (!str_starts_with($source,'data:image/')) {
             $path = $this->localPath($source);
