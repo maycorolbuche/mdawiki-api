@@ -13,7 +13,9 @@ final class Pages
     public static function version(?array $page): string { return $page ? hash('sha256',json_encode([$page['CONTEUDO_CODE'],$page['NOME'],$page['DT_ALTERACAO']],JSON_UNESCAPED_UNICODE)) : ''; }
     public function editor(string $slug): array {
         $p=$this->source($slug); $this->permit($p);
-        return ['slug'=>$slug,'title'=>$p['NOME'] ?? str_replace('_',' ',$slug),'source'=>$p['CONTEUDO_CODE'] ?? '', 'base_version'=>self::version($p),'format'=>($p['HTML'] ?? 'N')==='S'?'html':'wiki','exists'=>$p!==null,'media'=>str_starts_with(mb_strtolower($slug),'imagem@')];
+        $source=$p['CONTEUDO_CODE'] ?? '';$media=str_starts_with(mb_strtolower($slug),'imagem@');
+        if ($media && $p) { $file=json_decode($p['CONTEUDO'] ?? '',true);if (!empty($file['url'])) { $source=$this->renderer->mediaUrl($file['url']);if (!preg_match('~^https?://~',$source)) $source=rtrim($this->config['media_public_url'],'/').'/'.ltrim($source,'/'); } }
+        return ['slug'=>$slug,'title'=>$p['NOME'] ?? str_replace('_',' ',$slug),'source'=>$source, 'base_version'=>self::version($p),'format'=>($p['HTML'] ?? 'N')==='S'?'html':'wiki','exists'=>$p!==null,'media'=>$media];
     }
     public function history(string $slug, int $before=PHP_INT_MAX): array {
         $p=$this->source($slug);$this->permit($p);
@@ -22,11 +24,11 @@ final class Pages
         $more=count($rows)>50; $rows=array_slice($rows,0,50);
         return ['title'=>$p['NOME'],'revisions'=>$rows,'next_cursor'=>$more?(int)end($rows)['id']:null,'base_version'=>self::version($p)];
     }
-    public function save(string $slug, array $body): array {
+    public function save(string $slug, array $body, bool $restore=false): array {
         $p=$this->source($slug);$u=$this->permit($p);
         if (!is_string($body['base_version'] ?? null) || !hash_equals(self::version($p),$body['base_version'])) throw new HttpError(409,'edit_conflict','Outra edição foi salva. Recarregue a página antes de salvar.');
         $title=trim(is_string($body['title'] ?? null)?$body['title']:'');$source=$body['source'] ?? null;
-        if ($title==='' || mb_strlen($title)>250 || !is_string($source) || strlen($source)>500000) throw new HttpError(422,'invalid_page','Título ou conteúdo inválido (máximo 500 KB).');
+        if ($title==='' || mb_strlen($title)>250 || !is_string($source) || strlen($source)>($restore?7000000:500000)) throw new HttpError(422,'invalid_page','Título ou conteúdo inválido (máximo 500 KB).');
         $id=$p['IDENT'] ?? Database::id($slug);
         if (!$p && $this->db->one('SELECT IDENT FROM PAGINAS WHERE IDENT = ?',[$id])) throw new HttpError(409,'slug_conflict','Já existe uma página com este identificador.');
         if (str_starts_with(strtolower($slug),'page@')) throw new HttpError(403,'system_page','Este endereço é reservado ao sistema.');
@@ -36,9 +38,17 @@ final class Pages
             $latest=$this->source($slug);
             if (!hash_equals(self::version($latest),$body['base_version'])) throw new HttpError(409,'edit_conflict','Outra edição foi salva. Recarregue antes de salvar.');
             if (str_starts_with(strtolower($id),'imagem@')) {
+                if ($restore && str_starts_with($source,'data:image/')) $source=(new Media($this->config))->restore($source)['url'];
+                $source=$this->renderer->mediaUrl($source);
                 $url=trim($source);$prefix=rtrim($this->config['media_public_url'],'/').'/wiki/';
-                if (!str_starts_with($url,$prefix) || !preg_match('~^[a-zA-Z0-9@_.%-]+$~',substr($url,strlen($prefix)))) throw new HttpError(422,'invalid_media','Envie uma imagem pela API e use o endereço retornado.');
-                $rendered=['html'=>json_encode(['url'=>$url,'url_mini'=>$url,'url_cp'=>$url,'w'=>0,'h'=>0]),'text'=>$title,'categories'=>[],'links'=>[],'external_links'=>[],'templates'=>[],'includes'=>[],'images'=>[],'videos'=>[],'headings'=>[],'redirect'=>null];
+                $width=0;$height=0;
+                if ($url!=='') {
+                    $name=rawurldecode(substr($url,strlen($prefix)));
+                    if (!str_starts_with($url,$prefix) || strpbrk($name,"/\\\0")!==false || $name==='.' || $name==='..') throw new HttpError(422,'invalid_media','Envie uma imagem pela API e use o endereço retornado.');
+                    $file=$this->config['media_root'].'/wiki/'.$name;if (!is_file($file)) throw new HttpError(422,'media_not_found','Imagem não encontrada no armazenamento da API. Importe o acervo ou envie uma imagem.');
+                    $size=@getimagesize($file);if ($size) { $width=$size[0];$height=$size[1]; }
+                }
+                $rendered=['html'=>json_encode(['url'=>$url,'url_mini'=>$url,'url_cp'=>$url,'w'=>$width,'h'=>$height]),'text'=>$title,'categories'=>[],'links'=>[],'external_links'=>[],'templates'=>[],'includes'=>[],'images'=>[],'videos'=>[],'headings'=>[],'redirect'=>null];
             } else $rendered=$this->renderer->render($source,$slug,($p['HTML'] ?? 'N')==='S');
             $now=date('Y-m-d H:i:s');
             $revision=(int)($this->db->one('SELECT MAX(NOME_URL_ID) AS n FROM PAGINAS_LOGS WHERE IDENT = ?',[$id])['n'] ?? 0)+1;
@@ -51,7 +61,10 @@ final class Pages
             $this->db->run('INSERT INTO PAGINAS_LOGS (IDENT,NOME_URL_ID,NOME_URL,NOME,CONTEUDO_CODE,CONTEUDO,EMAIL,ID_USUARIO,DATAHORA) VALUES (?,?,?,?,?,?,?,?,?)',[$id,$revision,$slug,$title,$source,$rendered['html'],$u['EMAIL'],(int)$u['ID'],$now]);
             if (!$p) $this->db->run("INSERT INTO PAGINAS (IDENT,NOME_URL,NOME,CONTEUDO_CODE,CONTEUDO,CONTEUDO_TXT,USU_CADASTRO,DT_CADASTRO,USU_ALTERACAO,DT_ALTERACAO,DT_ATUALIZACAO,BUSCA,NIVEL,ATUALIZAR,HTML) VALUES (?,?,?,?,?,?,?,?,?,?,?,'S',1,'N','N')",[$id,$slug,$title,$source,$rendered['html'],$rendered['text'],$u['EMAIL'],$now,$u['EMAIL'],$now,$now]);
             else $this->db->run("UPDATE PAGINAS SET NOME = ?, CONTEUDO_CODE = ?, CONTEUDO = ?, CONTEUDO_TXT = ?, USU_ALTERACAO = ?, DT_ALTERACAO = ?, DT_ATUALIZACAO = ?, ATUALIZAR = 'N' WHERE IDENT = ?",[$title,$source,$rendered['html'],$rendered['text'],$u['EMAIL'],$now,$now,$id]);
-            $this->relations($id,$slug,$source,$rendered);unlink($journal);
+            $this->relations($id,$slug,$source,$rendered);
+            $this->db->run("UPDATE PAGINAS SET ATUALIZAR = 'S' WHERE IDENT IN (SELECT IDENT FROM PAGINAS_INCLUDES WHERE PAGINA_IDENT = ?)",[$id]);
+            if (str_starts_with($id,'imagem@')) $this->db->run("UPDATE PAGINAS SET ATUALIZAR = 'S' WHERE IDENT IN (SELECT IDENT FROM PAGINAS_IMAGENS WHERE IMAGEM_IDENT = ?)",[substr($id,7)]);
+            unlink($journal);
             return ['slug'=>$slug,'revision'=>$revision,'base_version'=>self::version($this->source($slug))];
         } finally { flock($lock,LOCK_UN);fclose($lock); }
     }
@@ -62,6 +75,10 @@ final class Pages
     }
     public function rebuild(string $slug): array {
         $u=$this->accounts->current(true);if ((int)$u['NIVEL']<5) throw new HttpError(403,'permission_denied','Acesso restrito a administradores.');
+        return $this->rebuildCache($slug);
+    }
+    /** Called by the local maintenance command; never routed directly over HTTP. */
+    public function rebuildCache(string $slug): array {
         $p=$this->source($slug);if (!$p) throw new HttpError(404,'not_found','Página não encontrada.');
         if (str_starts_with($p['IDENT'],'page@')) throw new HttpError(422,'system_page','Página de sistema não pode ser processada como artigo.');
         if (str_starts_with($p['IDENT'],'imagem@')) { $this->db->run("UPDATE PAGINAS SET ATUALIZAR = 'N' WHERE IDENT = ?",[$p['IDENT']]);return ['message'=>'Imagem disponível.']; }
@@ -81,6 +98,8 @@ final class Pages
         foreach($r['templates'] as $i=>$v) $this->db->run('INSERT INTO PAGINAS_TEMPLATES (IDENT,NOME_URL,ID,TEMPLATE_TAG,TEMPLATE) VALUES (?,?,?,?,?)',[$id,$slug,$i+1,mb_substr('{{'.$v.'}}',0,250),mb_substr($v,0,250)]);
         foreach($r['headings'] as $i=>$v) $this->db->run('INSERT INTO PAGINAS_SUBTITULOS (IDENT,NOME_URL,ID,SUBTITULO,SUBTITULO_IDENT,SUBTITULO_URL,NIVEL) VALUES (?,?,?,?,?,?,?)',[$id,$slug,$i+1,$v['title'],$v['id'],$v['id'],$v['level']]);
         foreach($r['videos'] as $i=>$v) $this->db->run('INSERT INTO PAGINAS_VIDEOS (IDENT,NOME_URL,ID,URL,MSG_ERRO) VALUES (?,?,?,?,?)',[$id,$slug,$i+1,$v,'']);
-        foreach($r['images'] as $i=>$v) { $name=pathinfo(parse_url($v,PHP_URL_PATH) ?: $v,PATHINFO_FILENAME); $name=preg_replace('/^imagem@/','',$name);$this->db->run('INSERT INTO PAGINAS_IMAGENS (IDENT,NOME_URL,ID,IMAGEM_IDENT,IMAGEM,IMAGEM_URL,IMAGEM_FILE_URL,IMAGEM_FILE_MINI_URL,IMAGEM_FILE_CP_URL,TEMPLATE) VALUES (?,?,?,?,?,?,?,?,?,?)',[$id,$slug,$i+1,Database::id($name),$name,$name,$v,$v,$v,'N']); }
+        $refs=$r['image_refs'] ?? [];$known=array_column($refs,'url');
+        foreach($r['images'] as $v) { if (in_array($v,$known,true) || str_contains($v,'img_nao_encontrada') || !str_starts_with($v,$this->config['media_public_url'].'/wiki/')) continue;$name=preg_replace('/^imagem@/','',pathinfo(parse_url($v,PHP_URL_PATH) ?: $v,PATHINFO_FILENAME));$refs[]=['name'=>$name,'id'=>Database::id($name),'url'=>$v,'template'=>'N']; }
+        foreach($refs as $i=>$v) $this->db->run('INSERT INTO PAGINAS_IMAGENS (IDENT,NOME_URL,ID,IMAGEM_IDENT,IMAGEM,IMAGEM_URL,IMAGEM_FILE_URL,IMAGEM_FILE_MINI_URL,IMAGEM_FILE_CP_URL,TEMPLATE) VALUES (?,?,?,?,?,?,?,?,?,?)',[$id,$slug,$i+1,$v['id'],$v['name'],str_replace(' ','_',$v['name']),$v['url'],$v['url'],$v['url'],$v['template']]);
     }
 }

@@ -26,7 +26,7 @@ final class Application
         if ($method === 'OPTIONS') {
             return new Response(204, [], $headers + ['Access-Control-Allow-Methods' => 'GET, POST, PUT, OPTIONS', 'Access-Control-Allow-Headers' => 'Accept, Content-Type, X-CSRF-Token']);
         }
-        if ($this->features !== null && (preg_match('~^/v1/(auth/|profile(?:/|$)|media$|search$|catalog$|statistics$|home$|view/|users(?:/|$))~', $path) || preg_match('~^/v1/pages/[^/]+/(editor|history|preview|restore|rebuild)$~D', $path) || ($method === 'PUT' && str_starts_with($path, '/v1/pages/')))) {
+        if ($this->features !== null && (preg_match('~^/v1/(auth/|profile(?:/|$)|media$|search$|catalog$|statistics$|home$|visits$|view/|users(?:/|$))~', $path) || preg_match('~^/v1/pages/[^/]+/(editor|history|preview|restore|rebuild)$~D', $path) || ($method === 'PUT' && str_starts_with($path, '/v1/pages/')))) {
             if ($method !== 'GET' && $origin === '') return new Response(403, ['error'=>['code'=>'origin_required','message'=>'Origem da solicitação ausente.']], $headers);
             try {
                 $response = (($this->features)())->handle($method,$path,$query,$body,$csrf,$ip);
@@ -104,13 +104,15 @@ final class Application
     public function present(array $row): array
     {
         $slug = $row['slug'];
-        $html = str_replace(['{{{url_site}}}', '{{{url_diretorio}}}'], [$this->config['frontend_url'] . '/', ($this->config['media_public_url'] ?? $this->config['media_url']) . '/'], $row['html'] ?? '');
+        $rawHtml=isset($this->config['media_public_url'])?Media::rewrite($row['html'] ?? '',$this->config):($row['html'] ?? '');
+        $html = str_replace(['{{{url_site}}}', '{{{url_diretorio}}}'], [$this->config['frontend_url'] . '/', ($this->config['media_public_url'] ?? $this->config['media_url']) . '/'], $rawHtml);
         if (isset($this->config['media_public_url'])) {
             $media=rtrim($this->config['media_public_url'],'/');
             $html=str_replace(['https://mda.wiki.br/site/@imgs_wiki/','http://mda.wiki.br/site/@imgs_wiki/','https://mda.wiki.br/site/@imgs_user/','https://mda.wiki.br/site/@imgs/',$media.'/@imgs_wiki/',$media.'/@imgs_user/',$media.'/@imgs/'],[$media.'/wiki/',$media.'/wiki/',$media.'/users/',$media.'/assets/',$media.'/wiki/',$media.'/users/',$media.'/assets/'],$html);
             if (str_starts_with(strtolower($row['id']),'imagem@')) {
                 $file=json_decode($html,true);
                 if (is_array($file) && !empty($file['url'])) { $url=$file['url'];if (!preg_match('~^https?://~',$url)) $url=$media.'/'.ltrim(str_replace('@imgs_wiki/','wiki/',$url),'/');$html='<figure><img src="'.htmlspecialchars($url,ENT_QUOTES,'UTF-8').'" alt="'.htmlspecialchars($row['title'] ?? '',ENT_QUOTES,'UTF-8').'"></figure>'; }
+                elseif (is_array($file)) $html='<p>Esta página está sem imagem.</p>';
             }
             $html=preg_replace_callback('~(href=[\'"])(?:https?://mda\.wiki\.br)/([^\'"<>]*)~i',fn($m)=>$m[1].$this->config['frontend_url'].'/'.$m[2],$html);
         }
@@ -126,6 +128,7 @@ final class Application
             'category_members' => $row['category_members'] ?? [],
             'missing_links' => $row['missing_links'] ?? [],
             'redirect_slug' => $row['redirect_slug'] ?? null,
+            'image_usage' => $row['image_usage'] ?? [],
         ];
     }
 }

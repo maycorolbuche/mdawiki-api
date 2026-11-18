@@ -27,6 +27,7 @@ if (is_file($envFile)) {
     }
 }
 
+date_default_timezone_set(getenv('APP_TIMEZONE') ?: 'America/Sao_Paulo');
 return [
     'app_key' => getenv('APP_KEY') ?: '',
     'storage_dir' => getenv('STORAGE_DIR') ?: dirname(__DIR__).'/var',

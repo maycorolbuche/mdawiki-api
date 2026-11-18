@@ -104,8 +104,9 @@ final class Accounts
     public function update(array $body): array {
         $u=$this->current(true); $allowed=['NOME'=>150,'APELIDO'=>50,'CIDADE'=>150,'ESTADO'=>2,'CLUBE'=>50,'ASSOCIACAO'=>50,'TIPO_CLUBE'=>50,'BIOGRAFIA'=>10000,'DATA_NASC'=>10,'ENVIA_EMAIL'=>1]; $sets=[]; $values=[];
         foreach ($allowed as $key=>$maximum) if (array_key_exists($key,$body)) {
-            if (!is_string($body[$key]) || mb_strlen($body[$key])>$maximum) throw new HttpError(422,'invalid_profile','Campo inválido: '.$key);
-            $value=trim($body[$key]);
+            $raw=$body[$key] ?? '';
+            if (!is_string($raw) || mb_strlen($raw)>$maximum) throw new HttpError(422,'invalid_profile','Campo inválido: '.$key);
+            $value=trim($raw);
             if ($key==='DATA_NASC' && $value!=='' && (!preg_match('/^(\d{4})-(\d{2})-(\d{2})$/',$value,$m) || !checkdate((int)$m[2],(int)$m[3],(int)$m[1]))) throw new HttpError(422,'invalid_date','Data de nascimento inválida.');
             if ($key==='NOME' && mb_strlen($value)<2) throw new HttpError(422,'invalid_name','Informe seu nome.');
             if ($key==='ENVIA_EMAIL' && !in_array($value,['S','N'],true)) throw new HttpError(422,'invalid_profile','Preferência inválida.');

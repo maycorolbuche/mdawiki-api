@@ -19,9 +19,14 @@ foreach (['@imgs_wiki'=>'wiki','@imgs_user'=>'users','@imgs'=>'assets'] as $fold
 }
 // Recover embedded avatars where a generated legacy file is absent.
 $db=new Database(LegacyPageRepository::connect($config['db'],$config['public_max_level'])->connection());$media=new Media($config);
-foreach ($db->rows("SELECT ID,FOTO,FOTO_64 FROM USUARIOS WHERE FOTO_64 IS NOT NULL AND FOTO_64 <> ''") as $user) {
+$after=0;
+do {
+$batch=$db->rows("SELECT ID,FOTO,FOTO_64 FROM USUARIOS WHERE ID > ? AND FOTO_64 IS NOT NULL AND FOTO_64 <> '' ORDER BY ID LIMIT 50",[$after]);
+foreach ($batch as $user) {
+    $after=(int)$user['ID'];
     if ($user['FOTO'] && is_file($config['media_root'].'/users/'.basename($user['FOTO']))) continue;
     if (!str_starts_with($user['FOTO_64'],'data:image/')) continue;
     $file=$media->upload(['data'=>$user['FOTO_64']],'users');$db->run('UPDATE USUARIOS SET FOTO = ?, FOTO_32X32 = ? WHERE ID = ?',[$file['filename'],$file['filename'],(int)$user['ID']]);$total++;
 }
+} while(count($batch)===50);
 echo "Importação concluída: $total arquivos copiados. Arquivos existentes preservados.\n";

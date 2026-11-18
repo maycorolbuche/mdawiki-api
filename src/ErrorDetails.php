@@ -34,10 +34,7 @@ final class ErrorDetails
         if ($debug) {
             // Keep the original exception message, but never serialize the config/DSN.
             $message = $error->getMessage();
-            $password = $config['db']['password'] ?? '';
-            if ($password !== '') {
-                $message = str_replace($password, '[REDACTED]', $message);
-            }
+            foreach ([$config['db']['password'] ?? '',$config['mail']['password'] ?? '',$config['app_key'] ?? ''] as $password) if ($password!=='') $message=str_replace($password,'[REDACTED]',$message);
             $message = preg_replace('/(password|passwd|pwd)\s*[=:]\s*(?:"[^"]*"|\x27[^\x27]*\x27|[^\s;]+)/i', '$1=[REDACTED]', $message);
             $details['type'] = get_class($error);
             $details['message'] = $message;

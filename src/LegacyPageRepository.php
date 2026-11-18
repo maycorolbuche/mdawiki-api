@@ -109,6 +109,16 @@ final class LegacyPageRepository implements DiagnosablePageRepository
         foreach ($redirectQuery->fetchAll() as $redirect) { $redirect=$this->normalize($redirect);$redirects[$redirect['IDENT']]=$redirect['PAGINA_URL']; }
         unset($row);
         foreach ($rows as &$row) $row['redirect_slug']=$redirects[$row['id']] ?? null;
+        unset($row);
+        $mediaIds=[];foreach($rows as $row) if(str_starts_with($row['id'],'imagem@')) $mediaIds[]=substr($row['id'],7);
+        $usage=[];
+        if ($mediaIds) {
+            $marks=implode(',',array_fill(0,count($mediaIds),'?'));
+            $query=$this->db->prepare("SELECT DISTINCT i.IMAGEM_IDENT AS owner,p.IDENT AS id,p.NOME_URL AS slug,p.NOME AS title FROM PAGINAS_IMAGENS i JOIN PAGINAS p ON p.IDENT=i.IDENT WHERE i.IMAGEM_IDENT IN ($marks) AND p.BUSCA='S' AND COALESCE(p.NIVEL,1) <= ? AND p.IDENT NOT LIKE 'page@%' ORDER BY p.NOME,p.IDENT");
+            foreach($mediaIds as $index=>$id) $query->bindValue($index+1,$this->databaseValue($id));$query->bindValue(count($mediaIds)+1,$this->maxLevel,PDO::PARAM_INT);$query->execute();
+            foreach($query->fetchAll() as $link) { $link=$this->normalize($link);$owner='imagem@'.$link['owner'];unset($link['owner']);$link['title']=html_entity_decode($link['title'],ENT_QUOTES|ENT_HTML5,'UTF-8');$usage[$owner][]=$link; }
+        }
+        foreach($rows as &$row) $row['image_usage']=$usage[$row['id']] ?? [];
         return $rows;
     }
 

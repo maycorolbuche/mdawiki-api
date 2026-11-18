@@ -39,6 +39,7 @@ final class Features
                 $method==='GET' && $path==='/v1/catalog' => $this->catalog($query),
                 $method==='GET' && $path==='/v1/statistics' => $this->statistics(),
                 $method==='GET' && $path==='/v1/home' => $this->home(),
+                $method==='POST' && $path==='/v1/visits' => $this->visit($body),
                 $method==='GET' && preg_match('~^/v1/view/([^/]+)$~D',$path,$m)===1 => $this->view(rawurldecode($m[1])),
                 $method==='GET' && preg_match('~^/v1/users(?:/(\d+))?$~D',$path,$m)===1 => $this->users($query,isset($m[1])?(int)$m[1]:null),
                 preg_match('~^/v1/pages/([^/]+)/(editor|history|preview|restore|rebuild)$~D',$path,$m)===1 => $this->pageAction($method,rawurldecode($m[1]),$m[2],$query,$body),
@@ -68,7 +69,7 @@ final class Features
             $p=$this->pages->source($slug);$this->pages->permit($p);if (!$p) throw new HttpError(404,'not_found','Página não encontrada.');
             $r=$this->db->one('SELECT NOME,CONTEUDO_CODE FROM PAGINAS_LOGS WHERE IDENT = ? AND NOME_URL_ID = ?',[$p['IDENT'],$this->integer($body['revision'] ?? 0,1,PHP_INT_MAX)]);
             if (!$r) throw new HttpError(404,'not_found','Revisão não encontrada.');
-            return $this->pages->save($slug,['title'=>$r['NOME'],'source'=>$r['CONTEUDO_CODE'],'base_version'=>$body['base_version'] ?? null]);
+            return $this->pages->save($slug,['title'=>$r['NOME'],'source'=>$r['CONTEUDO_CODE'],'base_version'=>$body['base_version'] ?? null],true);
         }
         throw new HttpError(405,'method_not_allowed','Método não permitido.');
     }
@@ -114,6 +115,20 @@ final class Features
         $filter=$this->publicFilter();
         return ['statistics'=>$this->statistics(),'recent'=>$this->db->rows("SELECT p.IDENT AS id,p.NOME_URL AS slug,p.NOME AS title,p.DT_ALTERACAO AS updated_at FROM PAGINAS p WHERE $filter ORDER BY p.DT_ALTERACAO DESC,p.IDENT LIMIT 10"),'popular'=>$this->db->rows("SELECT p.IDENT AS id,p.NOME_URL AS slug,p.NOME AS title FROM PAGINAS p WHERE $filter ORDER BY p.ACESSOS DESC,p.IDENT LIMIT 10")];
     }
+    private function visit(array $body): array {
+        $slug=$this->slug(is_string($body['slug'] ?? null)?$body['slug']:'');$filter=$this->publicFilter();
+        $p=$this->db->one("SELECT p.IDENT,p.NOME_URL FROM PAGINAS p WHERE $filter AND p.NOME_URL = ?",[$slug]);
+        if (!$p) throw new HttpError(404,'not_found','Página não encontrada.');
+        if (($this->session->data['visits'][$p['IDENT']] ?? 0)>time()-30) return ['counted'=>false];
+        $date=date('Y-m-d');$now=date('Y-m-d H:i:s');
+        $update='UPDATE PAGINAS_ACESSOS_LOGS_QTD_DIARIO SET QTD_ACESSOS = COALESCE(QTD_ACESSOS,0)+1, ULT_ATUALIZACAO = ? WHERE DATA = ? AND NOME_URL = ?';
+        if ($this->db->run($update,[$now,$date,$slug])->rowCount()===0) {
+            try { $this->db->run('INSERT INTO PAGINAS_ACESSOS_LOGS_QTD_DIARIO (DATA,IDENT,NOME_URL,QTD_ACESSOS,ULT_ATUALIZACAO) VALUES (?,?,?,1,?)',[$date,$p['IDENT'],$slug,$now]); }
+            catch(\PDOException $e) { if ((string)$e->getCode()!=='23000') throw $e;$this->db->run($update,[$now,$date,$slug]); }
+        }
+        $this->db->run('UPDATE PAGINAS SET ACESSOS = COALESCE(ACESSOS,0)+1 WHERE IDENT = ?',[$p['IDENT']]);
+        $this->session->data['visits'][$p['IDENT']]=time();return ['counted'=>true];
+    }
     private function users(array $q,?int $id): array {
         $u=$this->accounts->current(true);if ((int)$u['NIVEL']!==5) throw new HttpError(403,'permission_denied','Acesso restrito a administradores.');
         if ($id!==null) { $row=$this->db->one('SELECT * FROM USUARIOS WHERE ID = ?',[$id]);if (!$row) throw new HttpError(404,'not_found','Usuário não encontrado.');return $this->accounts->profile($row); }
@@ -127,6 +142,6 @@ final class Features
         $rows=$this->db->rows('SELECT * FROM USUARIOS'.($filters?' WHERE '.implode(' AND ',$filters):'').' ORDER BY ID DESC LIMIT ? OFFSET ?',$values);
         return ['items'=>array_map($this->accounts->profile(...),array_slice($rows,0,$limit)),'next_offset'=>count($rows)>$limit?$offset+$limit:null];
     }
-    private function upload(array $body): array { $this->accounts->current(true);return (new Media($this->config))->upload($body); }
+    private function upload(array $body): array { $u=$this->accounts->current(true);$this->rate->check('media-user:'.$u['ID'],20,3600);return (new Media($this->config))->upload($body); }
     private function photo(array $body): array { $u=$this->accounts->current(true);$file=(new Media($this->config))->upload($body,'users');$this->db->run('UPDATE USUARIOS SET FOTO = ?, FOTO_32X32 = ?, FOTO_64 = NULL, FOTO_32X32_64 = NULL WHERE ID = ?',[$file['filename'],$file['filename'],(int)$u['ID']]);return $file; }
 }

@@ -5,14 +5,33 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: mdawiki_test
+        ports: ['3306:3306']
+        options: --health-cmd="mysqladmin ping -h localhost -ptest" --health-interval=10s --health-timeout=5s --health-retries=10
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
-          extensions: pdo_mysql, pdo_sqlite, mbstring
-      - run: find config src public tests -name '*.php' -print0 | xargs -0 -n1 php -l
+          extensions: pdo_mysql, pdo_sqlite, mbstring, dom
+      - run: find config src public tests bin -name '*.php' -print0 | xargs -0 -n1 php -l
       - run: php tests/run.php
       - run: php tests/features.php
+      - run: php tests/features.php
+        env:
+          TEST_MYSQL_DSN: mysql:host=127.0.0.1;port=3306;dbname=mdawiki_test;charset=latin1
+          TEST_MYSQL_USER: root
+          TEST_MYSQL_PASSWORD: test
       - run: composer install --no-interaction --no-progress --prefer-dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: composer-lock
+          path: composer.lock
+          retention-days: 3
+      - run: python3 tests/http.py
 

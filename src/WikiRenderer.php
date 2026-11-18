@@ -6,9 +6,7 @@ final class WikiRenderer
     public function __construct(private Database $db, private array $config) { require_once __DIR__.'/wiki-presentation.php'; }
     public static function e(string $v): string { return htmlspecialchars($v, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
     public function mediaUrl(string $value): string {
-        $base=rtrim($this->config['media_public_url'],'/');
-        $value=str_replace(['https://mda.wiki.br/site/','http://mda.wiki.br/site/','{{{url_diretorio}}}'],[$base.'/',$base.'/',$base.'/'],$value);
-        return str_replace(['@imgs_wiki/','@imgs_user/','@imgs/'],['wiki/','users/','assets/'],$value);
+        return Media::rewrite($value,$this->config);
     }
     public function urls(string $html): string {
         $html=$this->mediaUrl($html);
@@ -49,7 +47,13 @@ final class WikiRenderer
         // Existing TAGS rules remain data, never PHP/eval. Invalid rules fail saves.
         foreach (['PRE','POS'] as $position) {
             if ($position==='POS' && !$rawHtml) {
-                $GLOBALS['mdawiki_image_resolver']=$this->image(...);
+                $GLOBALS['mdawiki_image_resolver']=function($name) use (&$meta) {
+                    $result=$this->image($name);$file=json_decode($result['IMAGEM'] ?? '',true) ?: [];
+                    $title=preg_replace('/!tmpl$/','',$name);$url=$file['url'] ?? '';
+                    if ($url!=='' && !preg_match('~^https?://~',$url)) $url=rtrim($this->config['media_public_url'],'/').'/'.ltrim($url,'/');
+                    $meta['image_refs'][]=['name'=>$title,'id'=>Database::id($title),'url'=>$url,'template'=>str_ends_with($name,'!tmpl')?'S':'N'];
+                    return $result;
+                };
                 $html=\MDAWiki\Wiki\page_tabelas($html);
                 $html=\MDAWiki\Wiki\page_templates($html,'');
                 $html=\MDAWiki\Wiki\page_lista_marcadores($html);
@@ -71,8 +75,8 @@ final class WikiRenderer
                 if ($next===null) throw new HttpError(422,'invalid_wiki_rule','Regra inválida na tabela TAGS.'); $html=$next;
             }
         }
-        preg_match_all('~src=[\'"]([^\'"<>]+)[\'"]~i',$html,$images); $meta['images']=$images[1];
         $html=$this->urls($html);
+        preg_match_all('~<img[^>]+src=[\'"]([^\'"<>]+)[\'"]~i',$html,$images); $meta['images']=$images[1];
         // Dynamic list macros are links to the new live catalog, never old PHP.
         $html=(new PublicLists($this->db,$this->config))->render($html);
         return $meta+['html'=>$html,'text'=>trim(html_entity_decode(strip_tags($html),ENT_QUOTES|ENT_HTML5,'UTF-8'))];

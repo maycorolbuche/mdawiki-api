@@ -3,13 +3,18 @@ declare(strict_types=1);
 use MDAWiki\{Application,Accounts,Database,Features,LegacyPageRepository,Session,WikiRenderer};
 require dirname(__DIR__).'/config/bootstrap.php';
 function verify(bool $ok,string $why): void { if (!$ok) throw new RuntimeException($why); }
-$pdo=new PDO('sqlite::memory:');$pdo->exec(file_get_contents(__DIR__.'/schema.sqlite.sql'));$db=new Database($pdo);
+$mysql=getenv('TEST_MYSQL_DSN');
+$pdo=$mysql ? new PDO($mysql,getenv('TEST_MYSQL_USER') ?: 'root',getenv('TEST_MYSQL_PASSWORD') ?: 'test') : new PDO('sqlite::memory:');
+$pdo->setAttribute(PDO::ATTR_ERRMODE,PDO::ERRMODE_EXCEPTION);
+if ($mysql) { $pdo->setAttribute(PDO::ATTR_EMULATE_PREPARES,false);foreach(explode(';',file_get_contents(__DIR__.'/schema.mysql.sql')) as $sql) if(trim($sql)!=='') $pdo->exec($sql); }
+else $pdo->exec(file_get_contents(__DIR__.'/schema.sqlite.sql'));
+$db=new Database($pdo);
 $storage=sys_get_temp_dir().'/mdawiki-tests-'.bin2hex(random_bytes(5));
 $config=['origins'=>['https://site.mda.wiki.br'],'frontend_url'=>'https://site.mda.wiki.br','media_public_url'=>'https://api.mda.wiki.br/media','media_url'=>'https://api.mda.wiki.br/media','public_max_level'=>1,'storage_dir'=>$storage,'media_root'=>$storage.'/media','app_key'=>str_repeat('test-key-',8)];
 $session=new Session();$mail=[];$send=function($to,$subject,$text) use (&$mail) {$mail[]=['to'=>$to,'subject'=>$subject,'text'=>$text];};
 $feature=new Features($db,$session,$config,$send);$app=new Application(fn()=>new LegacyPageRepository($pdo),$config,fn()=>$feature);
 function request(string $path,string $method='GET',array $body=[],?string $csrf=null,array $query=[]): MDAWiki\Response { global $app,$session;return $app->handle($method,$path,$query,'https://site.mda.wiki.br',$body,$csrf ?? $session->data['csrf'],'127.0.0.1'); }
-$db->run("INSERT INTO USUARIOS (EMAIL,NOME,SENHA,APELIDO,ATIVO,NIVEL) VALUES (?,?,?,?,'S',5)",['admin@example.test','Administrador',md5('old-password'),'Admin']);
+$db->run("INSERT INTO USUARIOS (ID,EMAIL,NOME,SENHA,APELIDO,ATIVO,NIVEL) VALUES (1,?,?,?,?,'S',5)",['admin@example.test','Administrador',md5('old-password'),'Admin']);
 verify(request('/v1/auth/session')->body['data']['user']===null,'Anonymous session exposes no user');
 verify(request('/v1/auth/login','POST',['email'=>'admin@example.test','password'=>'old-password'],'bad')->status===403,'CSRF required on login');
 verify($app->handle('POST','/v1/auth/login',[],'',[])->status===403,'Writes without Origin rejected');
@@ -17,9 +22,11 @@ verify(request('/v1/auth/login','POST',['email'=>'admin@example.test','password'
 $oldCsrf=$session->data['csrf'];$login=request('/v1/auth/login','POST',['email'=>'admin@example.test','password'=>'old-password']);
 verify($login->status===200 && (int)$login->body['data']['user']['NIVEL']===5,'Existing MD5 account can sign in');
 verify($oldCsrf!==$session->data['csrf'],'Rotate CSRF after login');
+verify(request('/v1/profile','PUT',['NOME'=>'Forbidden'],$oldCsrf)->status===403,'Old CSRF cannot be reused after login');
 $saved=$db->one('SELECT SENHA FROM USUARIOS WHERE ID=1')['SENHA'];verify(strlen($saved)===32 && str_starts_with($saved,'p2$'),'Upgrade MD5 within unchanged column');
 verify(!str_contains(json_encode($login->body),'SENHA') && !str_contains(json_encode($login->body),$saved),'No credential hashes in API');
 verify(request('/v1/profile','PUT',['NOME'=>'Nome atualizado','NIVEL'=>1,'ATIVO'=>'N'])->status===200,'Profile fields accepted');
+verify(request('/v1/profile','PUT',['DATA_NASC'=>null,'CIDADE'=>null])->status===200,'Nullable legacy profile fields can be saved');
 verify((int)$db->one('SELECT NIVEL FROM USUARIOS WHERE ID=1')['NIVEL']===5,'Mass assignment cannot change privileges');
 $db->run("INSERT INTO PAGINAS (IDENT,NOME_URL,NOME,CONTEUDO_CODE,CONTEUDO,CONTEUDO_TXT,NIVEL) VALUES ('incluido','Incluído','Incluído','Texto incluído.','','',1)");
 $code="{{Especialidade:clube=DBV|area=HM|cod=024|nivel=1|ano=1964|origem=Associação Geral|icone=HM024}}\n== Requisitos ==\n# Primeiro requisito\n# [[Outra página|Outro artigo]]\n{{Categoria:Artes e Habilidades Manuais}}\n{{Incluir:Incluído}}";
@@ -32,6 +39,7 @@ verify($save->status===200,'Save wiki article: '.json_encode($save->body));
 $article=request('/v1/pages/Sab%C3%A3o')->body['data'];verify(str_contains($article['html'],'Texto incluído.') && !str_contains($article['html'],'mda.wiki.br/site/'),'Renderer is independent of old URLs');
 verify(count($article['categories'])===1 && count($article['missing_links'])===1,'Saved relations immediately available');
 verify((int)$db->one('SELECT COUNT(*) AS n FROM PAGINAS_INCLUDES')['n']===1,'Include index persisted');
+verify($db->one("SELECT IMAGEM_IDENT,IMAGEM_FILE_URL FROM PAGINAS_IMAGENS WHERE IMAGEM_IDENT = 'hm024'")['IMAGEM_FILE_URL']==='','Missing template image retains its actual identity');
 verify(request('/v1/pages/Sab%C3%A3o','PUT',['title'=>'Changed','source'=>'Overwrite','base_version'=>''])->status===409,'Stale editor cannot overwrite newer revision');
 $editor=request('/v1/pages/Sab%C3%A3o/editor')->body['data'];
 $changed=request('/v1/pages/Sab%C3%A3o','PUT',['title'=>$editor['title'],'source'=>"Novo texto\n{{Categoria:Arte' OR 1=1 --}}",'base_version'=>$editor['base_version']]);verify($changed->status===200,'Parameterized category with apostrophe');
@@ -41,12 +49,22 @@ verify(count(request('/v1/pages/Sab%C3%A3o/history')->body['data']['revisions'])
 verify(count(request('/v1/search','GET',[],null,['q'=>'Sabão'])->body['data']['items'])===1,'Search returns public matching article');
 verify(count(request('/v1/search','GET',[],null,['q'=>"' OR 1=1 --"])->body['data']['items'])===0,'Search input never interpolated as SQL');
 verify(request('/v1/catalog','GET',[],null,['type'=>'categorias'])->status===200,'Category catalog');verify(request('/v1/statistics')->body['data']['pages']===2,'Statistics count visible pages');
-$db->run("INSERT INTO PAGINAS (IDENT,NOME_URL,NOME,CONTEUDO_CODE,NIVEL) VALUES ('private','Privada','Segredo','Privado',5)");
+foreach(['paginas','codigos','documentacao','listas','imagens','videos','links_inexistentes','paginas_sem_categoria','redirecionamentos','imagens_sem_pagina','imagens_inexistentes','atualizar'] as $type) verify(request('/v1/catalog','GET',[],null,['type'=>$type])->status===200,'Catalog query: '.$type);
+verify(request('/v1/home')->status===200,'Home rankings and counters');
+verify(request('/v1/visits','POST',['slug'=>'Sabão'])->body['data']['counted']===true,'Browser views update the independent daily counter');
+verify(request('/v1/visits','POST',['slug'=>'Sabão'])->body['data']['counted']===false,'Debounce duplicate view reports');
+verify((int)$db->one('SELECT QTD_ACESSOS FROM PAGINAS_ACESSOS_LOGS_QTD_DIARIO')['QTD_ACESSOS']===1,'Build and duplicate reports do not inflate views');
+$redirect=request('/v1/pages/Atalho','PUT',['title'=>'Atalho','source'=>'{{{Redirecionar:Sabão}}}','base_version'=>'']);verify($redirect->status===200 && request('/v1/pages/Atalho')->body['data']['redirect_slug']==='Sabão','Redirect metadata is maintained');
+verify(request('/v1/users','GET',[],null,['NOME'=>'Nome atualizado'])->body['data']['items'][0]['EMAIL']==='admin@example.test','Parameterized administrator filters');
+$db->run("INSERT INTO PAGINAS (IDENT,NOME_URL,NOME,CONTEUDO_CODE,CONTEUDO,NIVEL) VALUES ('private','Privada','Segredo','Privado','<p>Segredo</p>',5)");
+verify(request('/v1/view/Privada')->body['data']['is_public']===false,'Authorized private view is explicitly non-public');
+verify(request('/v1/pages/Privada')->status===404,'Private content never leaks into public API, even with an admin session');
 $db->run("INSERT INTO USUARIOS (EMAIL,NOME,SENHA,ATIVO,NIVEL) VALUES (?,?,?,'S',1)",['editor@example.test','Editor',md5('editor-password')]);
 request('/v1/auth/logout','POST');verify(request('/v1/pages/Sab%C3%A3o/editor')->status===401,'Source requires login');
 request('/v1/auth/login','POST',['email'=>'editor@example.test','password'=>'editor-password']);
 verify(request('/v1/users')->status===403,'User directory restricted to administrators');verify(request('/v1/pages/Privada/editor')->status===403,'Page permission enforced on server');
 verify(request('/v1/pages/Sab%C3%A3o/rebuild','POST')->status===403,'Rebuild restricted to administrators');
+verify(request('/v1/view/Privada')->status===403,'Private article view enforces permissions');
 verify(request('/v1/pages/page%40Login','PUT',['title'=>'Unsafe','source'=>'<?php echo 1;?>','base_version'=>''])->status===403,'Never write executable system pages');
 request('/v1/auth/logout','POST');
 $register=request('/v1/auth/register','POST',['name'=>'Conta nova','email'=>'new@example.test','password'=>'new-password-123','password_confirmation'=>'new-password-123']);verify($register->status===200,'Registration: '.json_encode($register->body));
@@ -56,6 +74,7 @@ verify(request('/v1/auth/activate','POST',['code'=>$activation])->status===200,'
 verify(request('/v1/auth/activate','POST',['code'=>$activation])->status===422,'Activation code cannot be replayed');
 request('/v1/auth/forgot','POST',['email'=>'new@example.test']);$text=end($mail)['text'];preg_match('/token=([a-f0-9]{64})/',$text,$token);
 verify(isset($token[1]),'Reset URL points at new frontend');$reset=['email'=>'new@example.test','token'=>$token[1],'password'=>'reset-password-123','password_confirmation'=>'reset-password-123'];
+$db->run('UPDATE USUARIOS SET DATA_CODIGO_CONTA = ? WHERE EMAIL = ?',[date('Y-m-d H:i:s',time()-3601),'new@example.test']);verify(request('/v1/auth/reset','POST',$reset)->status===422,'Expired reset token rejected');$db->run('UPDATE USUARIOS SET DATA_CODIGO_CONTA = ? WHERE EMAIL = ?',[date('Y-m-d H:i:s'),'new@example.test']);
 verify(request('/v1/auth/reset','POST',$reset)->status===200,'Reset password');verify(request('/v1/auth/reset','POST',$reset)->status===422,'Reset token is single-use');
 verify(request('/v1/auth/login','POST',['email'=>'new@example.test','password'=>'reset-password-123'])->status===200,'Login using new slow hash');
 verify(request('/v1/profile/password','POST',['current_password'=>'wrong','password'=>'changed-password','password_confirmation'=>'changed-password'])->status===422,'Password changes require current password');
@@ -63,6 +82,10 @@ verify(request('/v1/profile/email','POST',['email'=>'changed@example.test'])->st
 verify(request('/v1/profile/email','POST',['email'=>'changed@example.test','code'=>$code])->status===200,'Verified email can replace old email');
 verify(request('/v1/profile')->body['data']['EMAIL']==='changed@example.test','Session uses current verified email');
 verify(request('/v1/media','POST',['data'=>'data:image/svg+xml;base64,'.base64_encode('<svg onload="alert(1)"/>')])->status===422,'Reject executable SVG uploads');
+$png='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=';
+$upload=request('/v1/media','POST',['data'=>$png]);verify($upload->status===200,'Raster image upload: '.json_encode($upload->body));
+$image=request('/v1/pages/imagem%40Teste','PUT',['title'=>'Imagem teste','source'=>$upload->body['data']['url'],'base_version'=>'']);verify($image->status===200 && str_contains(request('/v1/pages/imagem%40Teste')->body['data']['html'],'<img'),'Image page uses the API storage');
+if (class_exists(DOMDocument::class)) { $svg=(new MDAWiki\Media($config))->restore('data:image/svg+xml;base64,'.base64_encode('<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"><script>alert(1)</script><path d="M0 0"/></svg>'));$bytes=file_get_contents($config['media_root'].'/wiki/'.$svg['filename']);verify(!str_contains($bytes,'script') && !str_contains($bytes,'onload'),'SVG history restoration strips active content'); }
 $renderer=new WikiRenderer($db,$config);$db->run("INSERT INTO PAGINAS (IDENT,NOME_URL,NOME,CONTEUDO_CODE) VALUES ('cycle','Cycle','Cycle','{{Incluir:Cycle}}')");
 try {$renderer->render('{{Incluir:Cycle}}','Other');throw new RuntimeException('Cycle accepted');}catch(MDAWiki\HttpError $e){verify($e->errorCode==='include_cycle','Detect recursive includes');}
 $badMail=new Accounts($db,new Session(),$config,static function(){throw new RuntimeException('SMTP unavailable');});

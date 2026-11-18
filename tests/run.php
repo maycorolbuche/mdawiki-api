@@ -84,6 +84,7 @@ if (in_array('sqlite', PDO::getAvailableDrivers(), true)) {
     $db->exec('CREATE TABLE PAGINAS_CATEGORIAS (IDENT TEXT, NOME_URL TEXT, CATEGORIA TEXT, CATEGORIA_IDENT TEXT, CATEGORIA_URL TEXT, ORDEM INTEGER)');
     $db->exec('CREATE TABLE PAGINAS_LINKS (IDENT TEXT, NOME_URL TEXT, ID INTEGER, LINK TEXT, LINK_IDENT TEXT, LINK_URL TEXT, LINK_HASH TEXT, LINK_TXT TEXT)');
     $db->exec('CREATE TABLE PAGINAS_REDIRECIONAMENTOS (IDENT TEXT, ID INTEGER, PAGINA_URL TEXT)');
+    $db->exec('CREATE TABLE PAGINAS_IMAGENS (IDENT TEXT, IMAGEM_IDENT TEXT)');
     $insert = $db->prepare('INSERT INTO PAGINAS VALUES (?, ?, ?, ?, ?, NULL, ?, ?)');
     foreach ([['a', 'Cães', 'S', 1], ['b', 'Restrito', 'S', 5], ['c', 'Oculto', 'N', 1], ['page@login', 'Login', 'S', 1], ['imagem@foto', 'Foto', 'S', 1]] as [$id, $slug, $search, $level]) {
         $insert->execute([$id, $slug, $slug, '<p>Conteúdo</p>', 'Conteúdo', $search, $level]);
