@@ -65,6 +65,10 @@ request('/v1/auth/logout','POST');verify(request('/v1/pages/Sab%C3%A3o/editor')-
 request('/v1/auth/login','POST',['email'=>'editor@example.test','password'=>'editor-password']);
 verify(request('/v1/users')->status===403,'User directory restricted to administrators');verify(request('/v1/pages/Privada/editor')->status===403,'Page permission enforced on server');
 verify(request('/v1/pages/Sab%C3%A3o/rebuild','POST')->status===403,'Rebuild restricted to administrators');
+    $db->run('UPDATE USUARIOS SET NIVEL = 0 WHERE EMAIL = ?',['editor@example.test']);
+    verify(request('/v1/pages/Nova_restrita/editor')->status===403,'Read-only accounts cannot create pages above their level');
+    verify(request('/v1/media','POST',['data'=>'invalid'])->status===403,'Read-only accounts cannot upload wiki images');
+    $db->run('UPDATE USUARIOS SET NIVEL = 1 WHERE EMAIL = ?',['editor@example.test']);
 verify(request('/v1/view/Privada')->status===403,'Private article view enforces permissions');
 verify(request('/v1/pages/page%40Login','PUT',['title'=>'Unsafe','source'=>'<?php echo 1;?>','base_version'=>''])->status===403,'Never write executable system pages');
 request('/v1/auth/logout','POST');

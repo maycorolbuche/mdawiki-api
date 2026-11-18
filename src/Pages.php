@@ -7,7 +7,7 @@ final class Pages
     public function source(string $slug): ?array { return $this->db->one('SELECT * FROM PAGINAS WHERE NOME_URL = ?',[$slug]); }
     public function permit(?array $page): array {
         $u=$this->accounts->current(true);
-        if (($page && (int)($page['NIVEL'] ?? 1)>(int)$u['NIVEL']) || ($page && str_starts_with(strtolower($page['IDENT']),'page@'))) throw new HttpError(403,'permission_denied','Você não tem permissão para esta página.');
+        if ((int)($page['NIVEL'] ?? 1)>(int)$u['NIVEL'] || ($page && str_starts_with(strtolower($page['IDENT']),'page@'))) throw new HttpError(403,'permission_denied','Você não tem permissão para esta página.');
         return $u;
     }
     public static function version(?array $page): string { return $page ? hash('sha256',json_encode([$page['CONTEUDO_CODE'],$page['NOME'],$page['DT_ALTERACAO']],JSON_UNESCAPED_UNICODE)) : ''; }

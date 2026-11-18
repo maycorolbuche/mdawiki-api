@@ -154,6 +154,6 @@ final class Features
         $rows=$this->db->rows('SELECT * FROM USUARIOS'.($filters?' WHERE '.implode(' AND ',$filters):'').' ORDER BY ID DESC LIMIT ? OFFSET ?',$values);
         return ['items'=>array_map($this->accounts->profile(...),array_slice($rows,0,$limit)),'next_offset'=>count($rows)>$limit?$offset+$limit:null];
     }
-    private function upload(array $body): array { $u=$this->accounts->current(true);$this->rate->check('media-user:'.$u['ID'],20,3600);return (new Media($this->config))->upload($body); }
+    private function upload(array $body): array { $u=$this->accounts->current(true);if ((int)$u['NIVEL']<1) throw new HttpError(403,'permission_denied','Você não tem permissão para enviar imagens da wiki.');$this->rate->check('media-user:'.$u['ID'],20,3600);return (new Media($this->config))->upload($body); }
     private function photo(array $body): array { $u=$this->accounts->current(true);$file=(new Media($this->config))->upload($body,'users');$this->db->run('UPDATE USUARIOS SET FOTO = ?, FOTO_32X32 = ?, FOTO_64 = NULL, FOTO_32X32_64 = NULL WHERE ID = ?',[$file['filename'],$file['filename'],(int)$u['ID']]);return $file; }
 }
