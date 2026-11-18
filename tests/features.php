@@ -67,6 +67,7 @@ verify(request('/v1/users')->status===403,'User directory restricted to administ
 verify(request('/v1/pages/Sab%C3%A3o/rebuild','POST')->status===403,'Rebuild restricted to administrators');
     $db->run('UPDATE USUARIOS SET NIVEL = 0 WHERE EMAIL = ?',['editor@example.test']);
     verify(request('/v1/pages/Nova_restrita/editor')->status===403,'Read-only accounts cannot create pages above their level');
+    verify(request('/v1/view/Sab%C3%A3o')->status===200,'Read-only accounts can still view public articles');
     verify(request('/v1/media','POST',['data'=>'invalid'])->status===403,'Read-only accounts cannot upload wiki images');
     $db->run('UPDATE USUARIOS SET NIVEL = 1 WHERE EMAIL = ?',['editor@example.test']);
 verify(request('/v1/view/Privada')->status===403,'Private article view enforces permissions');

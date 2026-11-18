@@ -53,9 +53,11 @@ final class Features
         if ($slug==='' || mb_strlen($slug)>250 || preg_match('~[/\\\\\x00-\x1f\x7f?#]~',$slug)) throw new HttpError(422,'invalid_slug','Endereço inválido.'); return $slug;
     }
     private function view(string $slug): array {
-        $slug=$this->slug($slug);$p=$this->pages->source($slug);$user=$this->pages->permit($p);
+        $slug=$this->slug($slug);$user=$this->accounts->current(true);$p=$this->pages->source($slug);
         if (!$p) throw new HttpError(404,'not_found','Página não encontrada.');
-        $repo=new LegacyPageRepository($this->db->pdo,(int)$user['NIVEL'],$this->config);
+        $level=max((int)$user['NIVEL'],(int)$this->config['public_max_level']);
+        if ((int)($p['NIVEL'] ?? 1)>$level || str_starts_with(strtolower($p['IDENT']),'page@')) throw new HttpError(403,'permission_denied','Você não tem permissão para esta página.');
+        $repo=new LegacyPageRepository($this->db->pdo,$level,$this->config);
         $row=$repo->find($slug) ?? ['id'=>$p['IDENT'],'slug'=>$p['NOME_URL'],'title'=>$p['NOME'],'html'=>$p['CONTEUDO'],'text'=>$p['CONTEUDO_TXT'],'updated_at'=>$p['DT_ATUALIZACAO']];
         return (new Application(static fn()=>$repo,$this->config))->present($row)+['is_public'=>$p['BUSCA']==='S' && (int)($p['NIVEL'] ?? 1)<=(int)$this->config['public_max_level']];
     }
