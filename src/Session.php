@@ -4,8 +4,9 @@ namespace MDAWiki;
 final class Session
 {
     public array $data = [];
-    public function __construct(private bool $native = false) {
+    public function __construct(private bool $native = false, ?string $directory = null) {
         if ($native) {
+            if ($directory!==null) { if (!is_dir($directory) && !mkdir($directory,0700,true) && !is_dir($directory)) throw new \RuntimeException('Cannot create session storage');ini_set('session.save_handler','files');session_save_path($directory); }
             ini_set('session.use_strict_mode', '1'); ini_set('session.use_only_cookies', '1');
             ini_set('session.gc_maxlifetime', '2592000');
             session_name('mdawiki_session');

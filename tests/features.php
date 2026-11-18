@@ -51,6 +51,7 @@ verify(count(request('/v1/search','GET',[],null,['q'=>"' OR 1=1 --"])->body['dat
 verify(request('/v1/catalog','GET',[],null,['type'=>'categorias'])->status===200,'Category catalog');verify(request('/v1/statistics')->body['data']['pages']===2,'Statistics count visible pages');
 foreach(['paginas','codigos','documentacao','listas','imagens','videos','links_inexistentes','paginas_sem_categoria','redirecionamentos','imagens_sem_pagina','imagens_inexistentes','atualizar'] as $type) verify(request('/v1/catalog','GET',[],null,['type'=>$type])->status===200,'Catalog query: '.$type);
 verify(request('/v1/home')->status===200,'Home rankings and counters');
+verify(request('/v1/pages/Sab%C3%A3o/rebuild','POST')->status===200,'Administrator can rebuild independently of legacy cron');
 verify(request('/v1/visits','POST',['slug'=>'Sabão'])->body['data']['counted']===true,'Browser views update the independent daily counter');
 verify(request('/v1/visits','POST',['slug'=>'Sabão'])->body['data']['counted']===false,'Debounce duplicate view reports');
 verify((int)$db->one('SELECT QTD_ACESSOS FROM PAGINAS_ACESSOS_LOGS_QTD_DIARIO')['QTD_ACESSOS']===1,'Build and duplicate reports do not inflate views');

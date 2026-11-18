@@ -8,7 +8,6 @@ foreach (glob($config['storage_dir'].'/pending/*.json') ?: [] as $file) {
     if (!$u || $u['ATIVO']!=='S') { fwrite(STDERR,'Autor indisponível: '.$item['slug']."\n");continue; }
     $session=new Session();$session->data['id']=(int)$u['ID'];$session->data['fingerprint']=hash('sha256',$u['SENHA']);$session->data['expires']=time()+60;
     $accounts=new Accounts($db,$session,$config,static function(){});$pages=new Pages($db,$accounts,new WikiRenderer($db,$config),$config);
-    $backup=$file.'.recovering';if (!rename($file,$backup)) throw new RuntimeException('Cannot lock recovery file');
-    try { $page=$pages->source($item['slug']);$pages->save($item['slug'],['title'=>$item['title'],'source'=>$item['source'],'base_version'=>Pages::version($page)]);unlink($backup);echo 'Recuperada: '.$item['slug']."\n"; }
-    catch (Throwable $e) { if (!is_file($file)) rename($backup,$file);fwrite(STDERR,$item['slug'].': '.$e->getMessage()."\n"); }
+    try { $page=$pages->source($item['slug']);$pages->save($item['slug'],['title'=>$item['title'],'source'=>$item['source'],'base_version'=>Pages::version($page)],false,true);echo 'Recuperada: '.$item['slug']."\n"; }
+    catch (Throwable $e) { fwrite(STDERR,$item['slug'].': '.$e->getMessage()."\n"); }
 }

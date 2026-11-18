@@ -8,7 +8,7 @@ use MDAWiki\{Database,Features,Session,Mailer,Media};
 $config = require dirname(__DIR__) . '/config/bootstrap.php';
 $app = new Application(static fn () => LegacyPageRepository::connect($config['db'], $config['public_max_level'],$config), $config, static function() use ($config) {
     $db=new Database(LegacyPageRepository::connect($config['db'],$config['public_max_level'])->connection());
-    return new Features($db,new Session(true),$config,Closure::fromCallable(new Mailer($config['mail'],$db)));
+    return new Features($db,new Session(true,$config['storage_dir'].'/sessions'),$config,Closure::fromCallable(new Mailer($config['mail'],$db)));
 });
 $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 if (str_starts_with($path,'/media/')) (new Media($config))->serve($path);

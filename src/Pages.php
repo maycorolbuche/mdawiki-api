@@ -24,7 +24,7 @@ final class Pages
         $more=count($rows)>50; $rows=array_slice($rows,0,50);
         return ['title'=>$p['NOME'],'revisions'=>$rows,'next_cursor'=>$more?(int)end($rows)['id']:null,'base_version'=>self::version($p)];
     }
-    public function save(string $slug, array $body, bool $restore=false): array {
+    public function save(string $slug, array $body, bool $restore=false, bool $recover=false): array {
         $p=$this->source($slug);$u=$this->permit($p);
         if (!is_string($body['base_version'] ?? null) || !hash_equals(self::version($p),$body['base_version'])) throw new HttpError(409,'edit_conflict','Outra edição foi salva. Recarregue a página antes de salvar.');
         $title=trim(is_string($body['title'] ?? null)?$body['title']:'');$source=$body['source'] ?? null;
@@ -56,7 +56,7 @@ final class Pages
             // Rebuild can safely replay the latest revision after an interrupted write.
             $journalDir=$this->config['storage_dir'].'/pending';if (!is_dir($journalDir)) @mkdir($journalDir,0700,true);
             $journal=$journalDir.'/'.hash('sha256',$id).'.json';
-            if (is_file($journal)) throw new HttpError(503,'pending_recovery','Esta página tem uma gravação pendente de recuperação pelo administrador.');
+            if (is_file($journal) && !$recover) throw new HttpError(503,'pending_recovery','Esta página tem uma gravação pendente de recuperação pelo administrador.');
             if (file_put_contents($journal,json_encode(['slug'=>$slug,'title'=>$title,'source'=>$source,'user_id'=>$u['ID'],'revision'=>$revision,'time'=>$now],JSON_THROW_ON_ERROR),LOCK_EX)===false) throw new \RuntimeException('Cannot write recovery journal');
             $this->db->run('INSERT INTO PAGINAS_LOGS (IDENT,NOME_URL_ID,NOME_URL,NOME,CONTEUDO_CODE,CONTEUDO,EMAIL,ID_USUARIO,DATAHORA) VALUES (?,?,?,?,?,?,?,?,?)',[$id,$revision,$slug,$title,$source,$rendered['html'],$u['EMAIL'],(int)$u['ID'],$now]);
             if (!$p) $this->db->run("INSERT INTO PAGINAS (IDENT,NOME_URL,NOME,CONTEUDO_CODE,CONTEUDO,CONTEUDO_TXT,USU_CADASTRO,DT_CADASTRO,USU_ALTERACAO,DT_ALTERACAO,DT_ATUALIZACAO,BUSCA,NIVEL,ATUALIZAR,HTML) VALUES (?,?,?,?,?,?,?,?,?,?,?,'S',1,'N','N')",[$id,$slug,$title,$source,$rendered['html'],$rendered['text'],$u['EMAIL'],$now,$u['EMAIL'],$now,$now]);
@@ -80,12 +80,19 @@ final class Pages
     /** Called by the local maintenance command; never routed directly over HTTP. */
     public function rebuildCache(string $slug): array {
         $p=$this->source($slug);if (!$p) throw new HttpError(404,'not_found','Página não encontrada.');
+        $directory=$this->config['storage_dir'].'/locks';if (!is_dir($directory)) @mkdir($directory,0700,true);
+        $lock=fopen($directory.'/'.hash('sha256',$p['IDENT']).'.lock','c');if (!$lock || !flock($lock,LOCK_EX)) throw new \RuntimeException('Cannot lock article rebuild');
+        try {
+        $p=$this->source($slug);if (!$p) throw new HttpError(404,'not_found','Página não encontrada.');
+        if (is_file($this->config['storage_dir'].'/pending/'.hash('sha256',$p['IDENT']).'.json')) throw new HttpError(503,'pending_recovery','Recupere a gravação pendente antes de reprocessar.');
         if (str_starts_with($p['IDENT'],'page@')) throw new HttpError(422,'system_page','Página de sistema não pode ser processada como artigo.');
         if (str_starts_with($p['IDENT'],'imagem@')) { $this->db->run("UPDATE PAGINAS SET ATUALIZAR = 'N' WHERE IDENT = ?",[$p['IDENT']]);return ['message'=>'Imagem disponível.']; }
         $result=$this->renderer->render($p['CONTEUDO_CODE'] ?? '',$slug,$p['HTML']==='S');
         $this->db->run("UPDATE PAGINAS SET CONTEUDO = ?, CONTEUDO_TXT = ?, DT_ATUALIZACAO = ?, ATUALIZAR = 'N' WHERE IDENT = ?",[$result['html'],$result['text'],date('Y-m-d H:i:s'),$p['IDENT']]);
         $this->relations($p['IDENT'],$slug,$p['CONTEUDO_CODE'],$result);
+        if ($p['CONTEUDO']!==$result['html']) $this->db->run("UPDATE PAGINAS SET ATUALIZAR = 'S' WHERE IDENT IN (SELECT IDENT FROM PAGINAS_INCLUDES WHERE PAGINA_IDENT = ?)",[$p['IDENT']]);
         return ['message'=>'Página reprocessada.'];
+        } finally {flock($lock,LOCK_UN);fclose($lock);}
     }
     public function relations(string $id,string $slug,string $source,array $r): void {
         foreach (['PAGINAS_CATEGORIAS','PAGINAS_LINKS','PAGINAS_LINKS_EXTERNOS','PAGINAS_REDIRECIONAMENTOS','PAGINAS_INCLUDES','PAGINAS_TEMPLATES','PAGINAS_SUBTITULOS','PAGINAS_IMAGENS','PAGINAS_VIDEOS'] as $table) $this->db->run("DELETE FROM $table WHERE IDENT = ?",[$id]);
