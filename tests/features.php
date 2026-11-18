@@ -129,7 +129,7 @@ foreach(['private'=>5,'hidden'=>1,'redirect'=>1] as $name=>$level) {
     if($name!=='redirect') $db->run('INSERT INTO PAGINAS_ACESSOS_LOGS_QTD_DIARIO (DATA,IDENT,NOME_URL,QTD_ACESSOS) VALUES (?,?,?,99999)',[date('Y-m-d'),$id,$id]);
 }
 $db->run("INSERT INTO PAGINAS_REDIRECIONAMENTOS (IDENT,NOME_URL,ID,PAGINA_URL) VALUES ('home_redirect','home_redirect',1,'home_today')");
-$db->run("INSERT INTO PAGINAS_IMAGENS (IDENT,NOME_URL,ID,IMAGEM_URL,IMAGEM_FILE_URL,IMAGEM_FILE_MINI_URL,IMAGEM_FILE_CP_URL,TEMPLATE) VALUES ('home_today','home_today',1,'photo','https://mda.wiki.br/site/@imgs_wiki/photo.png','https://mda.wiki.br/site/@imgs_wiki/photo-mini.png','','N')");
+$db->run("INSERT INTO PAGINAS_IMAGENS (IDENT,NOME_URL,ID,IMAGEM_URL,IMAGEM_FILE_URL,IMAGEM_FILE_MINI_URL,IMAGEM_FILE_CP_URL,TEMPLATE) VALUES ('home_today','home_today',1,'photo','https://mda.wiki.br/site/@imgs_wiki/photo.png','https://mda.wiki.br/site/@imgs_wiki_mini/photo.png','','N')");
 foreach([['home_today',1,'home_missing','Falta este conteúdo'],['home_week',1,'home_missing','Falta este conteúdo'],['home_private',1,'home_secret_missing','Link privado']] as [$source,$id,$target,$title]) $db->run('INSERT INTO PAGINAS_LINKS (IDENT,ID,LINK,LINK_IDENT,LINK_URL) VALUES (?,?,?,?,?)',[$source,$id,$title,$target,$target]);
 $homeResponse=request('/v1/home');verify($homeResponse->status===200,'Home request succeeds');$home=$homeResponse->body['data'];
 foreach(['random','recent','popular','top_today','top_week','top_month','missing'] as $key) {
@@ -142,7 +142,7 @@ verify(in_array('home_today',$todayIds,true) && !in_array('home_week',$todayIds,
 verify(in_array('home_week',$weekIds,true) && !in_array('home_outside_week',$weekIds,true),'Seven-day ranking respects its inclusive boundary');
 verify(in_array('home_month',$monthIds,true) && !in_array('home_outside_month',$monthIds,true) && !in_array('home_future',$monthIds,true),'Thirty-day ranking excludes older and future visits');
 $homeToday=$home['top_today'][array_search('home_today',$todayIds,true)];
-verify($homeToday['image']==='https://api.mda.wiki.br/media/wiki/photo-mini.png','Home thumbnails use the independent media API');
+verify($homeToday['image']==='https://api.mda.wiki.br/media/wiki/photo.png','Home uses the original image rather than the mini directory');
 verify(mb_strlen($homeToday['description'])===303 && $homeToday['views']===1000,'Home summaries are bounded and period counts are numeric');
 verify(count(array_filter($home['missing'],fn($item)=>$item['id']==='home_missing'))===1 && !in_array('home_secret_missing',array_column($home['missing'],'id'),true),'Missing links are unique and originate only from public pages');
 verify($home['recent'][0]['id']==='home_future','Recent changes fall back to creation date');
