@@ -1,4 +1,5 @@
 <?php
+use MDAWiki\{Accounts,Media,WikiRenderer};
 // Included by features.php against both SQLite and the original MySQL schema.
 $stored=$db->one("SELECT * FROM PAGINAS WHERE IDENT='imagem@teste'");
 verify($stored['CONTEUDO_CODE']===$png,'Store the base64 image source, not an upload URL');
