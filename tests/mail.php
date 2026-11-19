@@ -92,4 +92,6 @@ checkMail($db->one('SELECT TIPO_EMAIL FROM EMAIL_LOGS ORDER BY ID DESC')['TIPO_E
 $db->run("INSERT INTO EMAIL_LOGS (UID,TIPO_EMAIL,IDENTIF,ENVIADO,ASSUNTO) VALUES ('historical-legacy','PAGE_ALT','mail-test','N','Do not replay')");
 $notifications->dispatch();
 checkMail($db->one("SELECT ENVIADO FROM EMAIL_LOGS WHERE UID = 'historical-legacy'")['ENVIADO']==='N','Retry worker does not replay historical legacy messages');
+$notifications->notify('USU_ALTERACAO','mail-changed@example.test','',['NOME'=>'<b>Nome</b>']);
+checkMail(str_contains(end($sent)['body'],'&lt;b&gt;Nome&lt;/b&gt;') && !str_contains(end($sent)['body'],'<b>Nome</b>'),'Personal template variables cannot inject HTML');
 echo "Legacy email events, templates, preferences, outbox and retry checks passed.\n";
