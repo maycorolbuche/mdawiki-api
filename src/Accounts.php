@@ -36,8 +36,12 @@ final class Accounts
     public function profile(array $user): array {
         $fields = ['ID','NOME','APELIDO','EMAIL','DATA_NASC','CIDADE','ESTADO','CLUBE','ASSOCIACAO','TIPO_CLUBE','BIOGRAFIA','NIVEL','ENVIA_EMAIL','ATIVO','DT_CADASTRO','DT_ALTERACAO'];
         $data = array_intersect_key($user, array_flip($fields));
-        $data['photo'] = !empty($user['FOTO']) ? rtrim($this->config['media_public_url'], '/') . '/users/' . rawurlencode(basename($user['FOTO'])) : null;
+        $data['photo'] = self::photoUrl($user,$this->config);
         return $data;
+    }
+    public static function photoUrl(array $user, array $config, bool $thumbnail = false): ?string {
+        $file=$thumbnail && !empty($user['FOTO_32X32']) ? $user['FOTO_32X32'] : ($user['FOTO'] ?? '');
+        return $file!=='' && $file!==null ? rtrim($config['media_public_url'],'/').'/users/'.rawurlencode(basename($file)) : null;
     }
     public function session(): array { $u = $this->current(); return ['user'=>$u ? $this->profile($u) : null, 'csrf_token'=>$this->session->data['csrf']]; }
     public function login(array $body): array {
