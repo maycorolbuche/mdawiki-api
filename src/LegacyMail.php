@@ -40,10 +40,7 @@ final class LegacyMail
     private static function contains(array $row, string $email): bool
     {
         foreach (['MAIL_PARA','MAIL_CC','MAIL_CCO'] as $key) {
-            foreach (preg_split('/[;,]/', $row[$key] ?? '') as $address) {
-                if (preg_match('/<([^<>]+)>/', $address, $m)) $address = $m[1];
-                if (strcasecmp(trim($address), $email) === 0) return true;
-            }
+            if (preg_match('~(?:^|[<,;\s])'.preg_quote($email,'~').'(?:$|[>,;\s])~iu',$row[$key] ?? '')) return true;
         }
         return false;
     }
@@ -57,19 +54,23 @@ final class LegacyMail
         $article = $page !== '' ? $this->db->one('SELECT IDENT,NOME,NOME_URL,CONTEUDO_CODE,CONTEUDO FROM PAGINAS WHERE IDENT = ?', [$page]) : null;
         $allowed = ['NOME','EMAIL','EMAIL_NOVO','APELIDO','FOTO_64','CIDADE','ESTADO','CLUBE','ASSOCIACAO','TIPO_CLUBE','DATA_NASC','BIOGRAFIA'];
         $values = array_intersect_key($user, array_flip($allowed));
+        if (empty($values['FOTO_64']) && !empty($user['FOTO'])) $values['FOTO_64']=rtrim($this->config['media_public_url'],'/').'/users/'.rawurlencode(basename($user['FOTO']));
         $values += ['CODIGO'=>$user['CODIGO_CONTA'] ?? '', 'PAGINA'=>$article['NOME'] ?? '', 'PAGINA_URL'=>$article['NOME_URL'] ?? '', 'CONTEUDO_CODE'=>$article['CONTEUDO_CODE'] ?? '', 'CONTEUDO'=>$article['CONTEUDO'] ?? ''];
         if ($article && str_starts_with(mb_strtolower($article['NOME_URL']), 'imagem@')) $values['CONTEUDO_CODE'] = '<img src="'.htmlspecialchars((string)($article['CONTEUDO_CODE'] ?? ''),ENT_QUOTES,'UTF-8').'">';
         $base = rtrim($this->config['frontend_url'], '/').'/';
-        $values += ['IP'=>$_SERVER['REMOTE_ADDR'] ?? '', 'NAVEGADOR'=>$_SERVER['HTTP_USER_AGENT'] ?? '', 'DATAHORA'=>date('d/m/Y H:i:s'), 'LINK'=>$base.($article ? rawurlencode($article['NOME_URL']).'/' : ''), 'URL_SITE'=>$base];
+        $values += ['IP'=>$_SERVER['HTTP_CLIENT_IP'] ?? $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? '', 'NAVEGADOR'=>$_SERVER['HTTP_USER_AGENT'] ?? '', 'DATAHORA'=>date('d/m/Y H:i:s'), 'LINK'=>$base.($article ? rawurlencode($article['NOME_URL']).'/' : ''), 'URL_SITE'=>$base];
         $values = array_replace($values, $extra);
-        $replace = static fn($text) => preg_replace_callback('/<\[([^\[\]]+)\]>/', static fn($m) => (string)($values[$m[1]] ?? ''), (string)$text);
+        $replace = static fn($text, bool $html = false) => preg_replace_callback('/<\[([^\[\]]+)\]>/', static function($m) use($values,$html) {
+            $value=(string)($values[$m[1]] ?? '');
+            return $html && !in_array($m[1],['CONTEUDO','CONTEUDO_CODE'],true) ? htmlspecialchars($value,ENT_QUOTES | ENT_SUBSTITUTE,'UTF-8') : $value;
+        }, (string)$text);
         $uid = 'api-'.bin2hex(random_bytes(16));
         $count = 0;
         foreach ($templates as $template) {
             $to=$replace($template['EMAIL']); $cc=$replace($template['CC']); $bcc=$replace($template['CCO']);
             if (trim($to.$cc.$bcc)==='') continue;
             $subject=$replace(trim($template['ASSUNTO'] ?? '')!=='' ? $template['ASSUNTO'] : $template['DEFAULT_SUBJECT']);
-            $body=$replace(trim($template['MENSAGEM'] ?? '')!=='' ? $template['MENSAGEM'] : $template['DEFAULT_BODY']);
+            $body=$replace(trim($template['MENSAGEM'] ?? '')!=='' ? $template['MENSAGEM'] : $template['DEFAULT_BODY'],true);
             $this->db->run("INSERT INTO EMAIL_LOGS (UID,TIPO_EMAIL,IDENTIF,DATAHORA,ASSUNTO,MENSAGEM,MAIL_PARA,MAIL_CC,MAIL_CCO,ENVIADO,TENTATIVAS_ENVIO) VALUES (?,?,?,?,?,?,?,?,?,'N',0)", [$uid,$type,$template['IDENTIF'] ?? '0',date('Y-m-d H:i:s'),$subject,$body,$to,$cc,$bcc]);
             $count++;
         }

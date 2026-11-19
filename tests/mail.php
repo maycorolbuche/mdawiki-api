@@ -17,6 +17,7 @@ $transport=function(string $to,string $subject,string $body,array $options=[]) u
     $sent[]=compact('to','subject','body','options');
 };
 $notifications=new LegacyMail($db,$config,$transport);
+$db->run('INSERT INTO EMAIL_CONFIG (IDENTIF,CHAVE,VALOR) VALUES (?,?,?)',['mail-test','Host','test.example.test']);
 $events=['PAGE_ALT','USU_CADASTRO_ATIVAR','USU_CADASTRO_ATIVADO','USU_CADASTRO_ATIVAR_ENVCODIGO','USU_ALTERACAO','USU_ALTERACAO_SENHA','USU_ALTERACAO_EMAIL','USU_ALTERACAO_EMAIL_ENVCODIGO'];
 foreach ($events as $type) {
     $db->run('INSERT INTO EMAIL_MSG (TIPO_EMAIL,DESCRICAO,ASSUNTO,MENSAGEM,IDENTIF) VALUES (?,?,?,?,?)',[$type,'Teste',$type.' <[NOME]>','<p><[NOME]> <[EMAIL]> <[PAGINA]> <[PAGINA_URL]> <[LINK]> <[URL_SITE]> <[CODIGO]> <[EMAIL_NOVO]></p>','mail-test']);
