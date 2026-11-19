@@ -8,8 +8,9 @@ final class Features
     private Pages $pages;
     private WikiRenderer $renderer;
     private RateLimiter $rate;
+    private LegacyMail $notifications;
     public function __construct(private Database $db, private Session $session, private array $config, Closure $mail) {
-        $this->accounts=new Accounts($db,$session,$config,$mail);$this->renderer=new WikiRenderer($db,$config);$this->pages=new Pages($db,$this->accounts,$this->renderer,$config);$this->rate=new RateLimiter($config['storage_dir'].'/rates');
+        $this->notifications=new LegacyMail($db,$config,$mail);$this->accounts=new Accounts($db,$session,$config,$mail,$this->notifications);$this->renderer=new WikiRenderer($db,$config);$this->pages=new Pages($db,$this->accounts,$this->renderer,$config,$this->notifications);$this->rate=new RateLimiter($config['storage_dir'].'/rates');
     }
     public function handle(string $method,string $path,array $query,array $body,string $csrf,string $ip): Response {
         try {
@@ -156,6 +157,6 @@ final class Features
         return ['items'=>array_map($this->accounts->profile(...),array_slice($rows,0,$limit)),'next_offset'=>count($rows)>$limit?$offset+$limit:null];
     }
     private function upload(array $body): array { $u=$this->accounts->current(true);if ((int)$u['NIVEL']<1) throw new HttpError(403,'permission_denied','Você não tem permissão para enviar imagens da wiki.');$this->rate->check('media-user:'.$u['ID'],20,3600);return (new Media($this->config))->upload($body); }
-    private function photo(array $body): array { $u=$this->accounts->current(true);$file=(new Media($this->config))->upload($body,'users');$this->db->run('UPDATE USUARIOS SET FOTO = ?, FOTO_32X32 = ?, FOTO_64 = NULL, FOTO_32X32_64 = NULL WHERE ID = ?',[$file['filename'],$file['filename'],(int)$u['ID']]);return $file; }
+    private function photo(array $body): array { $u=$this->accounts->current(true);$file=(new Media($this->config))->upload($body,'users');$this->db->run('UPDATE USUARIOS SET FOTO = ?, FOTO_32X32 = ?, FOTO_64 = NULL, FOTO_32X32_64 = NULL WHERE ID = ?',[$file['filename'],$file['filename'],(int)$u['ID']]);$this->notifications->notify('USU_ALTERACAO',$u['EMAIL']);return $file; }
 }
 

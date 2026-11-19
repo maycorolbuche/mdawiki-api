@@ -4,7 +4,8 @@ namespace MDAWiki;
 use Closure;
 final class Accounts
 {
-    public function __construct(private Database $db, private Session $session, private array $config, private Closure $mail) {}
+    private LegacyMail $notifications;
+    public function __construct(private Database $db, private Session $session, private array $config, private Closure $mail, ?LegacyMail $notifications = null) { $this->notifications=$notifications ?? new LegacyMail($db,$config,$mail); }
     private function hash(string $password, int $id): string {
         $key = $this->config['app_key'] ?? '';
         if (strlen($key) < 32) throw new HttpError(503, 'auth_not_configured', 'Configure APP_KEY na API para habilitar as contas.');
@@ -65,7 +66,7 @@ final class Accounts
         try {
             $this->db->run("INSERT INTO USUARIOS (EMAIL,NOME,SENHA,APELIDO,CODIGO_CONTA,DATA_CODIGO_CONTA,DT_CADASTRO,ATIVO,NIVEL) VALUES (?,?,?,?,?,?,?,'N',1)", [$email,$name,bin2hex(random_bytes(16)),mb_substr(strstr($email, '@', true),0,50),$code,$now,$now]);
             $id = (int) $this->db->pdo->lastInsertId(); $this->db->run('UPDATE USUARIOS SET SENHA = ? WHERE ID = ?', [$this->hash($password,$id),$id]);
-            ($this->mail)($email, 'Ative sua conta MDAWiki', "Seu código: $code\n" . $this->config['frontend_url'] . '/page@AtivaConta?code=' . $code);
+            $this->notifications->security('USU_CADASTRO_ATIVAR',$email,$email,'Ative sua conta MDAWiki',"Seu código: $code\n" . $this->config['frontend_url'] . '/page@AtivaConta?code=' . $code,['CODIGO'=>$code]);
             $this->db->pdo->commit();
         } catch (\Throwable $e) { if ($this->db->pdo->inTransaction()) $this->db->pdo->rollBack(); throw $e; }
         return ['message'=>'Cadastro criado. Confira seu e-mail para ativar a conta.'];
@@ -75,6 +76,7 @@ final class Accounts
         $u = $code !== '' ? $this->db->one("SELECT * FROM USUARIOS WHERE CODIGO_CONTA = ? AND ATIVO = 'N'", [$code]) : null;
         if (!$u || strtotime($u['DATA_CODIGO_CONTA'] ?? '') < time() - 86400) throw new HttpError(422, 'invalid_code', 'Código inválido ou expirado. Solicite outro código.');
         $this->db->run("UPDATE USUARIOS SET ATIVO = 'S', CODIGO_CONTA = NULL, DATA_CODIGO_CONTA = NULL WHERE ID = ?", [(int) $u['ID']]);
+        $this->notifications->notify('USU_CADASTRO_ATIVADO',$u['EMAIL']);
         return ['message'=>'Conta ativada. Você já pode entrar.'];
     }
     public function requestCode(array $body, bool $reset): array {
@@ -87,7 +89,8 @@ final class Accounts
             $this->db->pdo->beginTransaction();
             try {
                 $this->db->run("UPDATE USUARIOS SET $column = ?, DATA_CODIGO_CONTA = ? WHERE ID = ?", [$stored,$now,(int) $u['ID']]);
-                ($this->mail)($email, $reset ? 'Redefinir senha MDAWiki' : 'Código de ativação MDAWiki', "Acesse: $link\n" . ($reset ? 'O link expira em uma hora.' : "Seu código: $token"));
+                if ($reset) ($this->mail)($email,'Redefinir senha MDAWiki',"Acesse: $link\nO link expira em uma hora.");
+                else $this->notifications->security('USU_CADASTRO_ATIVAR_ENVCODIGO',$email,$email,'Código de ativação MDAWiki',"Acesse: $link\nSeu código: $token",['CODIGO'=>$token]);
                 $this->db->pdo->commit();
             } catch (\Throwable $e) { if ($this->db->pdo->inTransaction()) $this->db->pdo->rollBack(); throw $e; }
         }
@@ -99,6 +102,7 @@ final class Accounts
         if (!is_string($token) || strlen($token)!==64 || !$u || empty($u['SENHA_PROV']) || !hash_equals($u['SENHA_PROV'],substr(hash('sha256',$token),0,32)) || strtotime($u['DATA_CODIGO_CONTA'] ?? '') < time()-3600) throw new HttpError(422,'invalid_token','Link inválido ou expirado.');
         $updated=$this->db->run('UPDATE USUARIOS SET SENHA = ?, SENHA_PROV = NULL, DATA_CODIGO_CONTA = NULL WHERE ID = ? AND SENHA_PROV = ?',[$this->hash($password,(int)$u['ID']),(int)$u['ID'],$u['SENHA_PROV']]);
         if ($updated->rowCount()!==1) throw new HttpError(422,'invalid_token','Link já utilizado.');
+        $this->notifications->notify('USU_ALTERACAO_SENHA',$email);
         return ['message'=>'Senha redefinida. Entre com a nova senha.'];
     }
     public function update(array $body): array {
@@ -113,6 +117,7 @@ final class Accounts
             $sets[]="$key = ?"; $values[]=$value==='' && $key==='DATA_NASC' ? null : $value;
         }
         if ($sets) { $values[]=date('Y-m-d H:i:s'); $values[]=(int)$u['ID']; $this->db->run('UPDATE USUARIOS SET '.implode(',',$sets).', DT_ALTERACAO = ? WHERE ID = ?',$values); }
+        if ($sets) $this->notifications->notify('USU_ALTERACAO',$u['EMAIL']);
         return $this->profile($this->current(true));
     }
     public function changePassword(array $body): array {
@@ -120,6 +125,7 @@ final class Accounts
         if (!is_string($body['current_password'] ?? null) || !$this->verify($body['current_password'],$u)) throw new HttpError(422,'invalid_password','Senha atual incorreta.');
         $hash=$this->hash($password,(int)$u['ID']); $this->db->run('UPDATE USUARIOS SET SENHA = ?, SENHA_PROV = NULL WHERE ID = ?',[$hash,(int)$u['ID']]);
         $this->session->rotate(); $this->session->data['fingerprint']=hash('sha256',$hash);
+        $this->notifications->notify('USU_ALTERACAO_SENHA',$u['EMAIL']);
         return $this->session()+['message'=>'Senha alterada.'];
     }
     public function changeEmail(array $body): array {
@@ -128,12 +134,17 @@ final class Accounts
         if ($this->db->one('SELECT ID FROM USUARIOS WHERE EMAIL = ?',[$email])) throw new HttpError(409,'email_exists','E-mail já cadastrado.');
         if (empty($body['code'])) {
             $code=bin2hex(random_bytes(10));
-            ($this->mail)($email,'Confirme o novo e-mail MDAWiki',"Código: $code");
-            $this->db->run('UPDATE USUARIOS SET EMAIL_NOVO = ?, CODIGO_CONTA = ?, DATA_CODIGO_CONTA = ? WHERE ID = ?',[$email,$code,date('Y-m-d H:i:s'),(int)$u['ID']]);
+            $this->db->pdo->beginTransaction();
+            try {
+                $this->db->run('UPDATE USUARIOS SET EMAIL_NOVO = ?, CODIGO_CONTA = ?, DATA_CODIGO_CONTA = ? WHERE ID = ?',[$email,$code,date('Y-m-d H:i:s'),(int)$u['ID']]);
+                $this->notifications->security('USU_ALTERACAO_EMAIL_ENVCODIGO',$u['EMAIL'],$email,'Confirme o novo e-mail MDAWiki',"Código: $code",['CODIGO'=>$code,'EMAIL_NOVO'=>$email]);
+                $this->db->pdo->commit();
+            } catch (\Throwable $error) { if ($this->db->pdo->inTransaction()) $this->db->pdo->rollBack(); throw $error; }
             return ['message'=>'Código enviado para o novo e-mail.'];
         }
         if (!is_string($body['code']) || $email!==$u['EMAIL_NOVO'] || empty($u['CODIGO_CONTA']) || !hash_equals($u['CODIGO_CONTA'],$body['code']) || strtotime($u['DATA_CODIGO_CONTA'] ?? '') < time()-3600) throw new HttpError(422,'invalid_code','Código inválido ou expirado.');
         $this->db->run('UPDATE USUARIOS SET EMAIL = ?, EMAIL_NOVO = NULL, CODIGO_CONTA = NULL, DATA_CODIGO_CONTA = NULL WHERE ID = ?',[$email,(int)$u['ID']]);
+        $this->notifications->notify('USU_ALTERACAO_EMAIL',$email,'',['EMAIL_ANTIGO'=>$u['EMAIL'],'EMAIL_NOVO'=>$email]);
         return $this->session()+['message'=>'E-mail alterado.'];
     }
 }

@@ -44,3 +44,37 @@ As imagens raster são limitadas a 500×500, a miniatura a 100×100 e a capa é 
 Os arquivos ficam em `MEDIA_ROOT/wiki`, `MEDIA_ROOT/wiki_mini` e `MEDIA_ROOT/wiki_cp`, servidos por `/media/wiki/...`, `/media/wiki_mini/...` e `/media/wiki_cp/...`. Os caminhos `@imgs_wiki*` continuam gravados no banco e são convertidos em URLs públicas somente na leitura. Esses diretórios precisam permitir escrita pelo PHP. Habilite **GD** no PHP para gerar as versões raster; o Composer e o CI incluem essa extensão. Não há nova variável de ambiente nem alteração de esquema.
 
 O front envia base64 diretamente no PUT da página. URLs locais retornadas pelo antigo POST `/v1/media` continuam aceitas por compatibilidade e são convertidas em base64, sem buscar URLs externas. Remover limpa os três campos e os derivados dessa página; restaurar ou reprocessar regenera os arquivos a partir da fonte armazenada, sem depender de um upload antigo. `bin/import-media.php` também importa as pastas de miniaturas e capas do acervo legado.
+
+
+### E-mails de eventos compatíveis com o legado
+
+A API reutiliza as tabelas existentes `EMAIL_MSG`, `EMAIL_ENVIO`, `EMAIL_CONFIG` e `EMAIL_LOGS`; não há migration nem novas variáveis obrigatórias. Os modelos e os destinatários precisam estar cadastrados nessas tabelas, como no site antigo.
+
+| Evento | Quando é disparado |
+| --- | --- |
+| `PAGE_ALT` | Criação, alteração ou restauração de artigo/imagem; inclui gravações recuperadas pelo comando local. Reprocessamento automático não representa nova edição e não envia aviso. |
+| `USU_CADASTRO_ATIVAR` | Novo cadastro. |
+| `USU_CADASTRO_ATIVAR_ENVCODIGO` | Reenvio do código de ativação. |
+| `USU_CADASTRO_ATIVADO` | Ativação concluída. |
+| `USU_ALTERACAO` | Alteração do perfil ou envio de nova foto. |
+| `USU_ALTERACAO_SENHA` | Troca de senha ou redefinição concluída. |
+| `USU_ALTERACAO_EMAIL_ENVCODIGO` | Confirmação solicitada para o novo e-mail. |
+| `USU_ALTERACAO_EMAIL` | Troca de e-mail concluída. |
+
+Assunto e mensagem por destinatário em `EMAIL_ENVIO` têm precedência quando não estão vazios; caso contrário, usa `EMAIL_MSG`. Para, CC e CCO também vêm de `EMAIL_ENVIO`. O SMTP é selecionado pelo `IDENTIF` do modelo, consultando `EMAIL_CONFIG`; sem configuração específica, utiliza o SMTP do ambiente. Mensagens dos modelos são HTML UTF-8.
+
+As variáveis `<[NOME]>`, `<[EMAIL]>`, `<[EMAIL_NOVO]>`, `<[APELIDO]>`, `<[PAGINA]>`, `<[PAGINA_URL]>`, `<[CONTEUDO_CODE]>`, `<[CONTEUDO]>`, `<[CODIGO]>`, dados de clube/perfil, `<[IP]>`, `<[NAVEGADOR]>`, `<[DATAHORA]>`, `<[LINK]>` e `<[URL_SITE]>` são preenchidas como no legado. LINK usa o endereço da página no novo FRONTEND_URL. Confirme os links fixos dos modelos do banco antes de desativar o domínio antigo; prefira as variáveis de URL. EMAIL_ANTIGO também está disponível no aviso de alteração de e-mail.
+
+Notificações opcionais respeitam `USUARIOS.ENVIA_EMAIL=N`. Os códigos necessários para ativar uma conta ou confirmar novo e-mail continuam sendo enviados mesmo com notificações opcionais desativadas. Se nenhum modelo entregar o código ao destinatário necessário, mantém o envio simples atual como alternativa, sem duplicar uma mensagem pessoal já atendida pelo modelo. A recuperação de senha mantém o link seguro com token e não volta a usar senha provisória em texto.
+
+O envio é tentado na solicitação e os eventos ficam em `EMAIL_LOGS`: `N` pendente, `S` enviado, `E` falha, com data, motivo original e contador de tentativas. Erro no aviso de uma edição não desfaz o conteúdo salvo. Falha no envio obrigatório do código impede a conclusão daquele fluxo e preserva o tratamento transacional existente.
+
+Para retentativas, o comando `bin/maintenance.php` já processa a fila. Também existe um comando separado:
+
+```sh
+php /caminho/mdawiki-api/bin/send-mail.php
+```
+
+Se a manutenção ainda não estiver agendada, execute o comando de e-mails por cron a cada cinco minutos. Ele processa até 50 registros, aguarda cinco minutos entre tentativas e limita falhas automáticas a dez tentativas. Mensagens novas usam UID `api-...`; o comando não reenvia automaticamente o histórico pendente do site antigo. Não execute o enviador legado sobre a mesma fila simultaneamente. Bloqueios locais por registro evitam duplicação entre processos da API no mesmo servidor.
+
+Confira `EMAIL_LOGS.ENVIADO`, `RETORNO` e `TENTATIVAS_ENVIO` para diagnosticar falhas. Após corrigir a configuração, uma falha esgotada pode ser liberada pelo administrador ajustando o contador/data do registro. Os testes usam transporte simulado: não enviam mensagens reais nem exigem credenciais SMTP.

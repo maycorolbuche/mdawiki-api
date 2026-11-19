@@ -22,12 +22,19 @@ jobs:
       - run: find config src public tests bin -name '*.php' -print0 | xargs -0 -n1 php -l
       - run: php tests/run.php
       - run: php tests/features.php
+      - run: php tests/mail.php
       - run: php tests/features.php
         env:
           TEST_MYSQL_DSN: mysql:host=127.0.0.1;port=3306;dbname=mdawiki_test;charset=latin1
           TEST_MYSQL_USER: root
           TEST_MYSQL_PASSWORD: test
       - run: composer install --no-interaction --no-progress --prefer-dist
+      - run: php tests/mailer.php
+      - run: php tests/mail.php
+        env:
+          TEST_MYSQL_DSN: mysql:host=127.0.0.1;port=3306;dbname=mdawiki_test;charset=latin1
+          TEST_MYSQL_USER: root
+          TEST_MYSQL_PASSWORD: test
       - uses: actions/upload-artifact@v4
         with:
           name: composer-lock

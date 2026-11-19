@@ -3,7 +3,7 @@ declare(strict_types=1);
 namespace MDAWiki;
 final class Pages
 {
-    public function __construct(private Database $db, private Accounts $accounts, private WikiRenderer $renderer, private array $config) {}
+    public function __construct(private Database $db, private Accounts $accounts, private WikiRenderer $renderer, private array $config, private ?LegacyMail $notifications = null) {}
     public function source(string $slug): ?array { return $this->db->one('SELECT * FROM PAGINAS WHERE NOME_URL = ?',[$slug]); }
     public function permit(?array $page): array {
         $u=$this->accounts->current(true);
@@ -61,6 +61,7 @@ final class Pages
             if (str_starts_with($id,'imagem@')) $this->db->run("UPDATE PAGINAS SET ATUALIZAR = 'S' WHERE IDENT IN (SELECT IDENT FROM PAGINAS_IMAGENS WHERE IMAGEM_IDENT = ?)",[substr($id,7)]);
             if ($imageProcessor) $imageProcessor->cleanup($p['CONTEUDO'] ?? '',$rendered['html'],$id);
             unlink($journal);
+            $this->notifications?->notify('PAGE_ALT',$u['EMAIL'],$id);
             return ['slug'=>$slug,'revision'=>$revision,'base_version'=>self::version($this->source($slug))];
         } finally { flock($lock,LOCK_UN);fclose($lock); }
     }

@@ -7,7 +7,8 @@ foreach (glob($config['storage_dir'].'/pending/*.json') ?: [] as $file) {
     $item=json_decode(file_get_contents($file),true,32,JSON_THROW_ON_ERROR);$u=$db->one('SELECT * FROM USUARIOS WHERE ID = ?',[(int)$item['user_id']]);
     if (!$u || $u['ATIVO']!=='S') { fwrite(STDERR,'Autor indisponível: '.$item['slug']."\n");continue; }
     $session=new Session();$session->data['id']=(int)$u['ID'];$session->data['fingerprint']=hash('sha256',$u['SENHA']);$session->data['expires']=time()+60;
-    $accounts=new Accounts($db,$session,$config,static function(){});$pages=new Pages($db,$accounts,new WikiRenderer($db,$config),$config);
+    $send=Closure::fromCallable(new MDAWiki\Mailer($config['mail'],$db));$notifications=new MDAWiki\LegacyMail($db,$config,$send);
+    $accounts=new Accounts($db,$session,$config,$send,$notifications);$pages=new Pages($db,$accounts,new WikiRenderer($db,$config),$config,$notifications);
     try { $page=$pages->source($item['slug']);$pages->save($item['slug'],['title'=>$item['title'],'source'=>$item['source'],'base_version'=>Pages::version($page)],false,true);echo 'Recuperada: '.$item['slug']."\n"; }
     catch (Throwable $e) { fwrite(STDERR,$item['slug'].': '.$e->getMessage()."\n"); }
 }
