@@ -97,6 +97,16 @@ verify(request('/v1/profile/email','POST',['email'=>'changed@example.test','code
 verify(request('/v1/profile')->body['data']['EMAIL']==='changed@example.test','Session uses current verified email');
 verify(request('/v1/media','POST',['data'=>'data:image/svg+xml;base64,'.base64_encode('<svg onload="alert(1)"/>')])->status===422,'Reject executable SVG uploads');
 $fixture=imagecreatetruecolor(1,1);ob_start();imagepng($fixture);$png='data:image/png;base64,'.base64_encode(ob_get_clean());imagedestroy($fixture);
+$rectangle=imagecreatetruecolor(2,1);ob_start();imagepng($rectangle);$rectangularPng='data:image/png;base64,'.base64_encode(ob_get_clean());imagedestroy($rectangle);
+$photoBefore=$db->one('SELECT FOTO FROM USUARIOS WHERE EMAIL = ?',['changed@example.test'])['FOTO'];
+$filesBefore=glob($config['media_root'].'/users/*') ?: [];
+$invalidPhoto=request('/v1/profile/photo','POST',['data'=>$rectangularPng]);
+verify($invalidPhoto->status===422 && $invalidPhoto->body['error']['code']==='invalid_profile_photo','Profile photo must be square');
+verify($db->one('SELECT FOTO FROM USUARIOS WHERE EMAIL = ?',['changed@example.test'])['FOTO']===$photoBefore && (glob($config['media_root'].'/users/*') ?: [])===$filesBefore,'Rejected photo does not write a file or replace the avatar');
+verify(request('/v1/profile/photo','POST',['data'=>'data:image/svg+xml;base64,'.base64_encode('<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"/>')])->status===422,'Uncropped profile SVG must pass through the raster cropper');
+$squarePhoto=request('/v1/profile/photo','POST',['data'=>$png]);
+verify($squarePhoto->status===200 && $squarePhoto->body['data']['width']===$squarePhoto->body['data']['height'],'Square profile photo is accepted');
+verify(request('/v1/media','POST',['data'=>$rectangularPng])->status===200,'Wiki images may remain rectangular');
 $upload=request('/v1/media','POST',['data'=>$png]);verify($upload->status===200,'Raster image upload: '.json_encode($upload->body));
 $image=request('/v1/pages/imagem%40Teste','PUT',['title'=>'Imagem teste','source'=>$upload->body['data']['url'],'base_version'=>'']);verify($image->status===200 && str_contains(request('/v1/pages/imagem%40Teste')->body['data']['html'],'<img'),'Image page uses the API storage');
 require __DIR__.'/images.inc.php';

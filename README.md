@@ -78,3 +78,10 @@ php /caminho/mdawiki-api/bin/send-mail.php
 Se a manutenção ainda não estiver agendada, execute o comando de e-mails por cron a cada cinco minutos. Ele processa até 50 registros, aguarda cinco minutos entre tentativas e limita falhas automáticas a dez tentativas. Mensagens novas usam UID `api-...`; o comando não reenvia automaticamente o histórico pendente do site antigo. Não execute o enviador legado sobre a mesma fila simultaneamente. Bloqueios locais por registro evitam duplicação entre processos da API no mesmo servidor.
 
 Confira `EMAIL_LOGS.ENVIADO`, `RETORNO` e `TENTATIVAS_ENVIO` para diagnosticar falhas. Após corrigir a configuração, uma falha esgotada pode ser liberada pelo administrador ajustando o contador/data do registro. Os testes usam transporte simulado: não enviam mensagens reais nem exigem credenciais SMTP.
+
+
+### Foto de perfil quadrada
+
+`POST /v1/profile/photo` exige uma imagem raster quadrada (PNG, JPEG, GIF ou WebP). O front abre o modal Cropper.js e converte o recorte para PNG de 512×512 antes do envio, inclusive quando a origem escolhida é SVG. A API verifica as dimensões reais antes de gravar o arquivo ou alterar o perfil; uma imagem não quadrada ou SVG sem recorte retorna `422 invalid_profile_photo`.
+
+Os avatares já cadastrados e a importação do acervo são preservados. Essa restrição pertence ao upload de foto de perfil e não se aplica às imagens de artigos. Não há novas variáveis de ambiente ou mudanças de esquema.
