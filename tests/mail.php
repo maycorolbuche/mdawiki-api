@@ -94,4 +94,11 @@ $notifications->dispatch();
 checkMail($db->one("SELECT ENVIADO FROM EMAIL_LOGS WHERE UID = 'historical-legacy'")['ENVIADO']==='N','Retry worker does not replay historical legacy messages');
 $notifications->notify('USU_ALTERACAO','mail-changed@example.test','',['NOME'=>'<b>Nome</b>']);
 checkMail(str_contains(end($sent)['body'],'&lt;b&gt;Nome&lt;/b&gt;') && !str_contains(end($sent)['body'],'<b>Nome</b>'),'Personal template variables cannot inject HTML');
+// Restore the isolated CI mail configuration before the native HTTP/SMTP suite.
+foreach ($events as $type) {
+    $db->run('DELETE FROM EMAIL_LOGS WHERE TIPO_EMAIL = ?',[$type]);
+    $db->run('DELETE FROM EMAIL_ENVIO WHERE TIPO_EMAIL = ?',[$type]);
+    $db->run('DELETE FROM EMAIL_MSG WHERE TIPO_EMAIL = ?',[$type]);
+}
+$db->run('DELETE FROM EMAIL_CONFIG WHERE IDENTIF = ?',['mail-test']);
 echo "Legacy email events, templates, preferences, outbox and retry checks passed.\n";
