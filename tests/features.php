@@ -44,6 +44,14 @@ verify(request('/v1/pages/Sab%C3%A3o','PUT',['title'=>'Changed','source'=>'Overw
 $editor=request('/v1/pages/Sab%C3%A3o/editor')->body['data'];
 $changed=request('/v1/pages/Sab%C3%A3o','PUT',['title'=>$editor['title'],'source'=>"Novo texto\n{{Categoria:Arte' OR 1=1 --}}",'base_version'=>$editor['base_version']]);verify($changed->status===200,'Parameterized category with apostrophe');
 $history=request('/v1/pages/Sab%C3%A3o/history')->body['data'];verify(count($history['revisions'])===2 && $history['revisions'][0]['source']!==$history['revisions'][1]['source'],'History contains actual revisions');
+verify($history['revisions'][0]['author_photo']===null,'History supports an author without a photo');
+$db->run('UPDATE USUARIOS SET FOTO = ?, FOTO_32X32 = ? WHERE ID=1',['original.png','mini avatar.png']);
+$avatarHistory=request('/v1/pages/Sab%C3%A3o/history')->body['data']['revisions'];
+verify($avatarHistory[0]['author_photo']==='https://api.mda.wiki.br/media/users/mini%20avatar.png','History prefers the same thumbnail as the legacy');
+verify(!isset($avatarHistory[0]['author_photo_original']) && !isset($avatarHistory[0]['author_photo_thumbnail']) && !isset($avatarHistory[0]['EMAIL']),'History exposes only the public photo URL');
+$db->run('UPDATE USUARIOS SET FOTO_32X32 = NULL WHERE ID=1');
+verify(request('/v1/pages/Sab%C3%A3o/history')->body['data']['revisions'][0]['author_photo']==='https://api.mda.wiki.br/media/users/original.png','History falls back to the original photo');
+$db->run('UPDATE USUARIOS SET FOTO = NULL WHERE ID=1');
 verify(request('/v1/pages/Sab%C3%A3o/restore','POST',['revision'=>1,'base_version'=>$history['base_version']])->status===200,'Restore creates new revision');
 verify(count(request('/v1/pages/Sab%C3%A3o/history')->body['data']['revisions'])===3,'Restore preserves original history');
 verify(count(request('/v1/search','GET',[],null,['q'=>'Sabão'])->body['data']['items'])===1,'Search returns public matching article');

@@ -20,8 +20,13 @@ final class Pages
     public function history(string $slug, int $before=PHP_INT_MAX): array {
         $p=$this->source($slug);$this->permit($p);
         if (!$p) throw new HttpError(404,'not_found','Página não encontrada.');
-        $rows=$this->db->rows('SELECT l.NOME_URL_ID AS id,l.NOME AS title,l.CONTEUDO_CODE AS source,l.DATAHORA AS created_at,u.APELIDO AS author FROM PAGINAS_LOGS l LEFT JOIN USUARIOS u ON u.ID=l.ID_USUARIO WHERE l.IDENT = ? AND l.NOME_URL_ID < ? ORDER BY l.NOME_URL_ID DESC LIMIT 51',[$p['IDENT'],$before]);
+        $rows=$this->db->rows('SELECT l.NOME_URL_ID AS id,l.NOME AS title,l.CONTEUDO_CODE AS source,l.DATAHORA AS created_at,u.APELIDO AS author,u.FOTO AS author_photo_original,u.FOTO_32X32 AS author_photo_thumbnail FROM PAGINAS_LOGS l LEFT JOIN USUARIOS u ON u.ID=l.ID_USUARIO WHERE l.IDENT = ? AND l.NOME_URL_ID < ? ORDER BY l.NOME_URL_ID DESC LIMIT 51',[$p['IDENT'],$before]);
         $more=count($rows)>50; $rows=array_slice($rows,0,50);
+        foreach ($rows as &$row) {
+            $row['author_photo']=Accounts::photoUrl(['FOTO'=>$row['author_photo_original'],'FOTO_32X32'=>$row['author_photo_thumbnail']],$this->config,true);
+            unset($row['author_photo_original'],$row['author_photo_thumbnail']);
+        }
+        unset($row);
         return ['title'=>$p['NOME'],'revisions'=>$rows,'next_cursor'=>$more?(int)end($rows)['id']:null,'base_version'=>self::version($p)];
     }
     public function save(string $slug, array $body, bool $restore=false, bool $recover=false): array {
