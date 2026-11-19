@@ -10,8 +10,9 @@ final class Media
         return str_replace(['{{{url_diretorio}}}','@imgs_wiki/','@imgs_wiki_mini/','@imgs_wiki_cp/','@imgs_user/','@imgs/'],[$base.'/',$base.'/wiki/',$base.'/wiki_mini/',$base.'/wiki_cp/',$base.'/users/',$base.'/assets/'],$value);
     }
     public function __construct(private array $config) {}
-    public function upload(array $body, string $group='wiki'): array {
+    public function upload(array $body, string $group='wiki', bool $requireSquare=false): array {
         $encoded=$body['data'] ?? null;
+        if ($requireSquare && is_string($encoded) && str_starts_with($encoded,'data:image/svg+xml')) throw new HttpError(422,'invalid_profile_photo','Recorte a foto antes de enviar. A foto de perfil deve ser uma imagem quadrada PNG, JPEG, GIF ou WebP.');
         if (is_string($encoded) && strlen($encoded)<=7000000 && str_starts_with($encoded,'data:image/svg+xml;base64,')) {
             $bytes=base64_decode(substr($encoded,26),true);
             if (!$bytes || preg_match('~<\s*(?:script|foreignObject|iframe|object|embed)\b|\bon[a-z]+\s*=|<!DOCTYPE|<!ENTITY~i',$bytes)) throw new HttpError(422,'invalid_svg','O SVG contém conteúdo ativo não permitido.');
@@ -23,6 +24,7 @@ final class Media
         $bytes=base64_decode($m[2],true); $info=$bytes!==false ? @getimagesizefromstring($bytes):false;
         $formats=['image/png'=>'png','image/jpeg'=>'jpg','image/gif'=>'gif','image/webp'=>'webp'];
         if (!$info || !isset($formats[$info['mime']]) || strlen($bytes)>5000000 || $info[0]*$info[1]>20000000) throw new HttpError(422,'invalid_upload','Imagem inválida ou com dimensões excessivas.');
+        if ($requireSquare && $info[0]!==$info[1]) throw new HttpError(422,'invalid_profile_photo','A foto de perfil deve ser quadrada. Recorte a imagem antes de enviar.');
         $directory=$this->config['media_root'].'/'.$group;if (!is_dir($directory) && !mkdir($directory,0755,true)) throw new \RuntimeException('Cannot create media directory');
         $name=bin2hex(random_bytes(16)).'.'.$formats[$info['mime']];if (file_put_contents($directory.'/'.$name,$bytes,LOCK_EX)===false) throw new \RuntimeException('Cannot save image');
         return ['url'=>$this->config['media_public_url'].'/'.$group.'/'.$name,'filename'=>$name,'width'=>$info[0],'height'=>$info[1]];
