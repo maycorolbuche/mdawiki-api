@@ -135,4 +135,5 @@ if (in_array('sqlite', PDO::getAvailableDrivers(), true)) {
     echo "PDO SQLite unavailable: repository integration checks skipped (CI requires it).\n";
 }
 echo "API contract checks passed.\n";
+require __DIR__ . '/study-material.inc.php';
 
