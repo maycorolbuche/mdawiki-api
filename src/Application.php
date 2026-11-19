@@ -119,6 +119,7 @@ final class Application
         return [
             'id' => $row['id'], 'slug' => $slug, 'title' => html_entity_decode($row['title'] ?? $slug, ENT_QUOTES | ENT_HTML5, 'UTF-8'),
             'html' => $html,
+            'study_material_url' => (new StudyMaterial($this->config['storage_dir'] ?? dirname(__DIR__) . '/var'))->lookup($rawHtml),
             'description' => mb_substr(trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($row['text'] ?? ''), ENT_QUOTES | ENT_HTML5, 'UTF-8'))), 0, 240),
             'updated_at' => $row['updated_at'] ?? null,
             'canonical_url' => $this->config['frontend_url'] . '/' . rawurlencode($slug) . '/',
