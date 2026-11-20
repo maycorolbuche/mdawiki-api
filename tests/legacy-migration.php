@@ -31,7 +31,7 @@ $revision->execute([9, $a]);
 $db->exec('USE migration_target');
 $db->exec(file_get_contents(__DIR__ . '/../migrations/001_content_and_media.sql'));
 $root = sys_get_temp_dir() . '/mdawiki-migration-' . bin2hex(random_bytes(8));
-putenv("MIGRATION_MEDIA_ROOT={$root}");
+putenv("MEDIA_ROOT={$root}");
 putenv("LEGACY_DB_DSN={$server};dbname=migration_source;charset=utf8mb4");
 putenv("MIGRATION_DB_DSN={$server};dbname=migration_target;charset=utf8mb4");
 foreach (['LEGACY_DB', 'MIGRATION_DB'] as $prefix) {
