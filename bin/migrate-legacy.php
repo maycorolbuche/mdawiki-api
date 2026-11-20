@@ -262,6 +262,7 @@ try {
     if ($argc !== 1) {
         throw new RuntimeException('Argumento desconhecido. Use --help.');
     }
+    $config = require dirname(__DIR__) . '/config/bootstrap.php';
     $source = connect('LEGACY_DB');
     $target = connect('MIGRATION_DB');
     $identity = 'SELECT CONCAT(@@hostname, "/", @@port, "/", @@server_id, "/", DATABASE())';
@@ -285,12 +286,8 @@ try {
         $target->query("SELECT 1 FROM {$table} LIMIT 0");
     }
 
-    $root = setting('MIGRATION_MEDIA_ROOT');
-    if (!str_starts_with($root, '/') || rtrim($root, '/') === '') {
-        throw new RuntimeException('MIGRATION_MEDIA_ROOT deve ser um diretório absoluto dedicado.');
-    }
-    $root = rtrim($root, '/');
-    if ((!is_dir($root) && !mkdir($root, 0770, true)) || !is_writable($root)) {
+    $root = rtrim($config['media_root'], '/\\');
+    if ($root === '' || (!is_dir($root) && !mkdir($root, 0770, true)) || !is_writable($root)) {
         throw new RuntimeException('Sem permissão de escrita no diretório de mídia do destino.');
     }
     $counts = ['inserted' => 0, 'updated' => 0, 'unchanged' => 0, 'revisions' => 0, 'errors' => 0];
