@@ -124,15 +124,15 @@ function fileId(PDO $target, string $root, ?string $data): ?int
     };
 
     $hash = hash('sha256', $bytes);
-    $key = substr($hash, 0, 2) . '/' . $hash . '.' . $extension;
-    $directory = $root . '/' . substr($hash, 0, 2);
-    if (!is_dir($directory) && !mkdir($directory, 0770, true) && !is_dir($directory)) {
-        throw new RuntimeException('Falha ao criar diretório de mídia.');
+    $key = $hash . '.' . $extension;
+    $file = query($target, 'SELECT id, storage_key FROM files WHERE sha256 = ?', [$hash])->fetch();
+    if ($file !== false && $file['storage_key'] !== $key) {
+        throw new RuntimeException('O hash já está associado a outra chave de armazenamento.');
     }
 
     $path = $root . '/' . $key;
     if (!is_file($path)) {
-        $temporary = tempnam($directory, '.migration-');
+        $temporary = tempnam($root, '.migration-');
         if ($temporary === false) {
             throw new RuntimeException('Falha ao criar arquivo temporário de mídia.');
         }
@@ -151,11 +151,7 @@ function fileId(PDO $target, string $root, ?string $data): ?int
         throw new RuntimeException("Arquivo existente tem hash incorreto: {$key}");
     }
 
-    $file = query($target, 'SELECT id, storage_key FROM files WHERE sha256 = ?', [$hash])->fetch();
     if ($file !== false) {
-        if ($file['storage_key'] !== $key) {
-            throw new RuntimeException('O hash já está associado a outra chave de armazenamento.');
-        }
         return (int) $file['id'];
     }
     query($target, 'INSERT INTO files (sha256, storage_key, mime_type, size_bytes) VALUES (?, ?, ?, ?)',

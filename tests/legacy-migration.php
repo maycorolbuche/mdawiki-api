@@ -57,6 +57,7 @@ $links = $db->query('SELECT i.file_id FROM image_revisions i JOIN page_revisions
     ORDER BY r.revision_number')->fetchAll(PDO::FETCH_COLUMN);
 check(count($links) === 3 && $links[0] === $links[2] && $links[0] !== $links[1], 'Histórico A → B → A incorreto.');
 foreach ($db->query('SELECT sha256, storage_key FROM files') as $file) {
+    check(preg_match('/^[a-f0-9]{64}\.gif$/D', $file['storage_key']) === 1, 'A chave deve conter apenas o nome do arquivo.');
     check(hash_file('sha256', $root . '/' . $file['storage_key']) === $file['sha256'], 'Binário incorreto.');
 }
 
