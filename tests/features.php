@@ -42,6 +42,13 @@ verify((int)$db->one('SELECT COUNT(*) AS n FROM PAGINAS_INCLUDES')['n']===1,'Inc
 verify($db->one("SELECT IMAGEM_IDENT,IMAGEM_FILE_URL FROM PAGINAS_IMAGENS WHERE IMAGEM_IDENT = 'hm024'")['IMAGEM_FILE_URL']==='','Missing template image retains its actual identity');
 verify(request('/v1/pages/Sab%C3%A3o','PUT',['title'=>'Changed','source'=>'Overwrite','base_version'=>''])->status===409,'Stale editor cannot overwrite newer revision');
 $editor=request('/v1/pages/Sab%C3%A3o/editor')->body['data'];
+$snapshotBefore=$db->one("SELECT * FROM PAGINAS WHERE NOME_URL = ?",['Sabão']);
+$logsBefore=(int)$db->one('SELECT COUNT(*) AS n FROM PAGINAS_LOGS')['n'];
+$noop=request('/v1/pages/Sab%C3%A3o','PUT',['title'=>$editor['title'],'source'=>$editor['source'],'base_version'=>$editor['base_version']]);
+verify($noop->status===200 && $noop->body['data']['unchanged']===true && $noop->body['data']['revision']===1,'Saving identical source succeeds without a new revision');
+verify($noop->body['data']['base_version']===$editor['base_version'],'Unchanged save preserves the concurrency token');
+verify((int)$db->one('SELECT COUNT(*) AS n FROM PAGINAS_LOGS')['n']===$logsBefore,'Identical save does not append history');
+verify($db->one('SELECT * FROM PAGINAS WHERE NOME_URL = ?',['Sabão'])===$snapshotBefore,'Identical save preserves content, dates, author and cache flags');
 $changed=request('/v1/pages/Sab%C3%A3o','PUT',['title'=>$editor['title'],'source'=>"Novo texto\n{{Categoria:Arte' OR 1=1 --}}",'base_version'=>$editor['base_version']]);verify($changed->status===200,'Parameterized category with apostrophe');
 $history=request('/v1/pages/Sab%C3%A3o/history')->body['data'];verify(count($history['revisions'])===2 && $history['revisions'][0]['source']!==$history['revisions'][1]['source'],'History contains actual revisions');
 verify($history['revisions'][0]['author_photo']===null,'History supports an author without a photo');
@@ -164,6 +171,20 @@ verify($homeToday['image']==='https://api.mda.wiki.br/media/wiki/photo.png','Hom
 verify(mb_strlen($homeToday['description'])===303 && $homeToday['views']===1000,'Home summaries are bounded and period counts are numeric');
 verify(count(array_filter($home['missing'],fn($item)=>$item['id']==='home_missing'))===1 && !in_array('home_secret_missing',array_column($home['missing'],'id'),true),'Missing links are unique and originate only from public pages');
 verify($home['recent'][0]['id']==='home_future','Recent changes fall back to creation date');
+$noopCreated=request('/v1/pages/Noop_test','PUT',['title'=>'Noop test','source'=>'Texto','base_version'=>'']);
+verify($noopCreated->status===200,'New page still creates its first revision');
+$noopEditor=request('/v1/pages/Noop_test/editor')->body['data'];
+$titleChanged=request('/v1/pages/Noop_test','PUT',['title'=>'Outro título','source'=>'Texto','base_version'=>$noopEditor['base_version']]);
+verify($titleChanged->status===200 && $titleChanged->body['data']['revision']===2,'Changing only the title records a revision');
+$spaceChanged=request('/v1/pages/Noop_test','PUT',['title'=>'Outro título','source'=>"Texto ", 'base_version'=>$titleChanged->body['data']['base_version']]);
+verify($spaceChanged->status===200 && $spaceChanged->body['data']['revision']===3,'Whitespace differences are real source edits');
+verify(request('/v1/pages/Noop_test','PUT',['title'=>'Outro título','source'=>'Texto ','base_version'=>$noopEditor['base_version']])->status===409,'Stale base version is still rejected even with identical content');
+verify(request('/v1/pages/Noop_test/restore','POST',['revision'=>3,'base_version'=>$spaceChanged->body['data']['base_version']])->body['data']['unchanged']===true,'Restoring the already current revision does not duplicate history');
+$pendingDir=$config['storage_dir'].'/pending';if (!is_dir($pendingDir)) mkdir($pendingDir,0700,true);
+$pendingFile=$pendingDir.'/'.hash('sha256',MDAWiki\Database::id('Noop_test')).'.json';
+file_put_contents($pendingFile,'{}');
+verify(request('/v1/pages/Noop_test','PUT',['title'=>'Outro título','source'=>'Texto ','base_version'=>$spaceChanged->body['data']['base_version']])->status===503,'Identical save cannot bypass pending recovery');
+unlink($pendingFile);
 echo "Independent account, wiki editing, history, search, catalogs and security checks passed.\n";
 
 

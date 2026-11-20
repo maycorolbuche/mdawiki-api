@@ -51,6 +51,11 @@ checkMail($log['ENVIADO']==='S' && (int)$log['TENTATIVAS_ENVIO']===1,'Article ch
 checkMail(str_contains($log['MENSAGEM'],'Artigo de teste') && str_contains($log['MENSAGEM'],'https://site.mda.wiki.br/Mail_article/'),'Page and canonical link variables');
 $before=count($sent);$notifications->dispatch($log['UID']);checkMail(count($sent)===$before,'Sent logs are never replayed');
 
+$unchangedPage=$pages->source('Mail_article');$sentBefore=count($sent);
+$mailCountBefore=(int)$db->one('SELECT COUNT(*) AS n FROM EMAIL_LOGS')['n'];
+$unchangedResult=$pages->save('Mail_article',['title'=>$unchangedPage['NOME'],'source'=>$unchangedPage['CONTEUDO_CODE'],'base_version'=>Pages::version($unchangedPage)]);
+checkMail($unchangedResult['unchanged']===true && count($sent)===$sentBefore,'Unchanged article does not send email');
+checkMail((int)$db->one('SELECT COUNT(*) AS n FROM EMAIL_LOGS')['n']===$mailCountBefore,'Unchanged article does not enqueue notifications');
 $db->run('UPDATE EMAIL_ENVIO SET ASSUNTO = ?, MENSAGEM = ? WHERE TIPO_EMAIL = ?',['Personalizado <[NOME]>','Conteúdo <[PAGINA]>','PAGE_ALT']);
 $fail=true;
 $pages->save('Mail_article',['title'=>'Artigo alterado','source'=>'Conteúdo salvo com SMTP offline','base_version'=>Pages::version($pages->source('Mail_article'))]);
