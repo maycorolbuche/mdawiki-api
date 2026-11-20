@@ -19,7 +19,7 @@ php bin/migrate-legacy.php
 
 O destino usa `utf8mb4`; host e porta assumem `127.0.0.1` e `3306` quando omitidos.
 
-O comando usa a configuração de mídia da API. Os arquivos são gravados em `var/media` por padrão, ou no diretório `MEDIA_ROOT` já configurado no ambiente ou no `.env`.
+O comando usa a configuração de mídia da API. Os arquivos usam o nome `<sha256>.<extensão>` e são gravados diretamente em `var/media` por padrão, ou no diretório `MEDIA_ROOT` já configurado no ambiente ou no `.env`.
 
 A origem deve usar o charset de conexão que funciona para os dados na API atual. O importador usa a mesma heurística de reconhecer UTF-8 válido e converter valores restantes de ISO-8859-1. Confira acentos com amostras reais. Configure o diretório em área privada, fora da raiz HTTP. Os originais SVG são preservados byte a byte; a publicação posterior deve aplicar os mesmos controles de conteúdo SVG usados pela API. Se a origem tiver muito histórico, meça a consulta por IDENT. O índice primário legado começa por NOME_URL_ID e uma cópia de homologação pode se beneficiar de um índice adicional em (IDENT, NOME_URL_ID).
 
