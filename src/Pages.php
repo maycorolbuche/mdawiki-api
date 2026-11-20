@@ -42,20 +42,23 @@ final class Pages
         try {
             $latest=$this->source($slug);
             if (!hash_equals(self::version($latest),$body['base_version'])) throw new HttpError(409,'edit_conflict','Outra edição foi salva. Recarregue antes de salvar.');
+            $journalDir=$this->config['storage_dir'].'/pending';
+            $journal=$journalDir.'/'.hash('sha256',$id).'.json';
+            if (is_file($journal) && !$recover) throw new HttpError(503,'pending_recovery','Esta página tem uma gravação pendente de recuperação pelo administrador.');
+            if (!$recover && $latest && $title===$latest['NOME'] && $source===($latest['CONTEUDO_CODE'] ?? '')) return $this->unchanged($slug,$latest);
             $imageProcessor=null;$imageFiles=[];
             if (str_starts_with(strtolower($id),'imagem@')) {
                 $imageProcessor=new LegacyImage($this->config);
                 $image=$imageProcessor->render($id,$source,$restore);
                 $source=$image['source'];$imageFiles=$image['files'];
+                if (!$recover && $latest && $title===$latest['NOME'] && $source===($latest['CONTEUDO_CODE'] ?? '')) return $this->unchanged($slug,$latest);
                 $rendered=['html'=>$image['html'],'text'=>$image['text'],'categories'=>[],'links'=>[],'external_links'=>[],'templates'=>[],'includes'=>[],'images'=>[],'videos'=>[],'headings'=>[],'redirect'=>null];
             } else $rendered=$this->renderer->render($source,$slug,($p['HTML'] ?? 'N')==='S');
             $now=date('Y-m-d H:i:s');
             $revision=(int)($this->db->one('SELECT MAX(NOME_URL_ID) AS n FROM PAGINAS_LOGS WHERE IDENT = ?',[$id])['n'] ?? 0)+1;
             // Persist the recovery source before changing the MyISAM cache.
             // Rebuild can safely replay the latest revision after an interrupted write.
-            $journalDir=$this->config['storage_dir'].'/pending';if (!is_dir($journalDir)) @mkdir($journalDir,0700,true);
-            $journal=$journalDir.'/'.hash('sha256',$id).'.json';
-            if (is_file($journal) && !$recover) throw new HttpError(503,'pending_recovery','Esta página tem uma gravação pendente de recuperação pelo administrador.');
+            if (!is_dir($journalDir)) @mkdir($journalDir,0700,true);
             if (file_put_contents($journal,json_encode(['slug'=>$slug,'title'=>$title,'source'=>$source,'user_id'=>$u['ID'],'revision'=>$revision,'time'=>$now],JSON_THROW_ON_ERROR),LOCK_EX)===false) throw new \RuntimeException('Cannot write recovery journal');
             if ($imageProcessor) $imageProcessor->publish($imageFiles);
             $this->db->run('INSERT INTO PAGINAS_LOGS (IDENT,NOME_URL_ID,NOME_URL,NOME,CONTEUDO_CODE,CONTEUDO,EMAIL,ID_USUARIO,DATAHORA) VALUES (?,?,?,?,?,?,?,?,?)',[$id,$revision,$slug,$title,$source,$rendered['html'],$u['EMAIL'],(int)$u['ID'],$now]);
@@ -69,6 +72,10 @@ final class Pages
             $this->notifications?->notify('PAGE_ALT',$u['EMAIL'],$id);
             return ['slug'=>$slug,'revision'=>$revision,'base_version'=>self::version($this->source($slug))];
         } finally { flock($lock,LOCK_UN);fclose($lock); }
+    }
+    private function unchanged(string $slug,array $page): array {
+        $revision=(int)($this->db->one('SELECT MAX(NOME_URL_ID) AS n FROM PAGINAS_LOGS WHERE IDENT = ?',[$page['IDENT']])['n'] ?? 0);
+        return ['slug'=>$slug,'revision'=>$revision,'base_version'=>self::version($page),'unchanged'=>true];
     }
     public function preview(string $slug,array $body): array {
         $p=$this->source($slug);$this->permit($p);
