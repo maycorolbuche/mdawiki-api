@@ -255,18 +255,38 @@ function migratePage(PDO $source, PDO $target, string $root, array $row, array &
     }
 }
 
+function applyDestinationSchema(PDO $target): void
+{
+    $path = dirname(__DIR__) . '/migrations/001_content_and_media.sql';
+    $sql = is_readable($path) ? file_get_contents($path) : false;
+    if ($sql === false || trim($sql) === '') {
+        throw new RuntimeException('Não foi possível carregar a migration 001_content_and_media.sql.');
+    }
+
+    // This initial DDL contains only idempotent CREATE TABLE statements.
+    foreach (explode(';', $sql) as $statement) {
+        if (trim($statement) !== '') {
+            $target->exec($statement);
+        }
+    }
+}
+
 if (in_array('--help', $argv, true)) {
     fwrite(STDOUT, "Uso: php bin/migrate-legacy.php\nConsulte docs/legacy-migration.md para configurar origem, destino e mídia.\n");
     exit(0);
 }
 
+$stage = 'Configuração';
 try {
     if ($argc !== 1) {
         throw new RuntimeException('Argumento desconhecido. Use --help.');
     }
     $config = require dirname(__DIR__) . '/config/bootstrap.php';
+    $stage = 'Conexão com a origem (DB_*)';
     $source = MDAWiki\LegacyPageRepository::connect($config['db'], $config['public_max_level'])->connection();
+    $stage = 'Conexão com o destino (MIGRATION_DB_*)';
     $target = connectDestination();
+    $stage = 'Validação das bases';
     $identity = 'SELECT CONCAT(@@hostname, "/", @@port, "/", @@server_id, "/", DATABASE())';
     $originIdentity = $source->query($identity)->fetchColumn();
     $targetIdentity = $target->query($identity)->fetchColumn();
@@ -284,9 +304,9 @@ try {
     if ((int) query($target, 'SELECT GET_LOCK(?, 0)', [$lock])->fetchColumn() !== 1) {
         throw new RuntimeException('Já existe uma migração executando nesse destino.');
     }
-    foreach (['pages', 'page_revisions', 'files', 'images', 'image_revisions'] as $table) {
-        $target->query("SELECT 1 FROM {$table} LIMIT 0");
-    }
+    $stage = 'Aplicação do esquema no destino';
+    applyDestinationSchema($target);
+    $stage = 'Importação de conteúdo';
 
     $root = rtrim($config['media_root'], '/\\');
     if ($root === '' || (!is_dir($root) && !mkdir($root, 0770, true)) || !is_writable($root)) {
@@ -328,6 +348,13 @@ try {
     fwrite(STDOUT, 'Total: ' . json_encode($counts, JSON_THROW_ON_ERROR) . PHP_EOL);
     exit($counts['errors'] === 0 ? 0 : 1);
 } catch (Throwable $error) {
-    fwrite(STDERR, ($error instanceof PDOException ? 'Erro SQL ' . $error->getCode() : $error->getMessage()) . PHP_EOL);
+    $code = $error instanceof PDOException ? (int) ($error->errorInfo[1] ?? $error->getCode()) : 0;
+    $message = match (true) {
+        $code === 1045 => 'Erro SQL 1045. Acesso negado pelo MySQL. Confira usuário, senha e permissão de conexão a partir deste host.',
+        $code === 1049 => 'Erro SQL 1049. Base inexistente. Confira o nome da base configurada.',
+        $error instanceof PDOException => 'Erro SQL ' . $code,
+        default => $error->getMessage(),
+    };
+    fwrite(STDERR, $stage . ': ' . $message . PHP_EOL);
     exit(1);
 }
