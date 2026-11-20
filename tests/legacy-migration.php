@@ -63,14 +63,14 @@ check($db->query('SELECT password_hash FROM users WHERE id = 101')->fetchColumn(
 check((int) $db->query('SELECT COUNT(*) FROM session_events')->fetchColumn() === 2, 'Ocorrências sem chave não foram preservadas.');
 check($db->query("SELECT setting_value FROM settings WHERE setting_key = 'test'")->fetchColumn() === 'first', 'Configuração não importada.');
 check((int) $db->query('SELECT COUNT(*) FROM pages')->fetchColumn() === 2, 'Duplicação de páginas.');
-check((int) $db->query('SELECT COUNT(*) FROM files')->fetchColumn() === 2, 'Falha de deduplicação.');
+check((int) $db->query('SELECT COUNT(*) FROM files')->fetchColumn() === 3, 'Deduplicação por pasta incorreta.');
 check($db->query('SELECT GROUP_CONCAT(revision_number ORDER BY legacy_revision_number) FROM page_revisions')->fetchColumn() === '1,2,3',
     'Sequência inicial incorreta.');
 $links = $db->query('SELECT i.file_id FROM image_revisions i JOIN page_revisions r ON r.id = i.page_revision_id
     ORDER BY r.revision_number')->fetchAll(PDO::FETCH_COLUMN);
 check(count($links) === 3 && $links[0] === $links[2] && $links[0] !== $links[1], 'Histórico A → B → A incorreto.');
 foreach ($db->query('SELECT sha256, storage_key FROM files') as $file) {
-    check(preg_match('/^[a-f0-9]{64}\.gif$/D', $file['storage_key']) === 1, 'A chave deve conter apenas o nome do arquivo.');
+    check(preg_match('~^(articles|avatars)/[a-f0-9]{64}\.gif$~D', $file['storage_key']) === 1, 'A chave deve incluir a pasta de mídia.');
     check(hash_file('sha256', $root . '/' . $file['storage_key']) === $file['sha256'], 'Binário incorreto.');
 }
 
@@ -86,7 +86,12 @@ check($db->query('SELECT GROUP_CONCAT(revision_number ORDER BY legacy_revision_n
 
 $db->exec('USE migration_source');
 $revision->execute([15, 'data:image/gif;base64,?']);
+$insertUser->execute([102, 'broken-avatar@example.test', 'unsupported', 'data:image/gif;base64,?']);
 $db->exec('USE migration_target');
 $run(1);
 check((int) $db->query('SELECT COUNT(*) FROM page_revisions')->fetchColumn() === 4, 'Falha parcial gravou revisão inválida.');
 echo "Migração testada com reexecução, atualização e deduplicação.\n";
+
+check((int) $db->query("SELECT COUNT(*) FROM files WHERE storage_key LIKE 'avatars/%'")->fetchColumn() === 1, 'Pasta de avatares incorreta.');
+check((int) $db->query("SELECT COUNT(*) FROM migration_errors WHERE source_table = 'USUARIOS' AND source_field = 'FOTO_64'")->fetchColumn() === 1, 'Erro de avatar não registrado.');
+check((int) $db->query("SELECT COUNT(*) FROM migration_errors WHERE source_table = 'PAGINAS_LOGS' AND source_field = 'CONTEUDO_CODE'")->fetchColumn() === 1, 'Erro de revisão não registrado.');
