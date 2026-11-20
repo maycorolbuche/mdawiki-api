@@ -41,11 +41,3 @@ jobs:
           path: composer.lock
           retention-days: 3
       - run: python3 tests/integration_http.py
-
-
-
-      - run: php tests/history_cleanup.php
-        env:
-          TEST_MYSQL_DSN: mysql:host=127.0.0.1;port=3306;dbname=mdawiki_test;charset=latin1
-          TEST_MYSQL_USER: root
-          TEST_MYSQL_PASSWORD: test
