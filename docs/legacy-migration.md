@@ -19,7 +19,7 @@ php bin/migrate-legacy.php
 
 O destino usa `utf8mb4`; host e porta assumem `127.0.0.1` e `3306` quando omitidos.
 
-O comando usa a configuração de mídia da API. Os arquivos usam o nome `<sha256>.<extensão>` e são gravados diretamente em `var/media` por padrão, ou no diretório `MEDIA_ROOT` já configurado no ambiente ou no `.env`.
+O comando usa a configuração de mídia da API. Os arquivos usam o nome `<sha256>.<extensão>` sob `avatars/` (usuários) ou `articles/` (páginas e revisões), diretórios criados em `var/media` por padrão, ou no diretório `MEDIA_ROOT` já configurado no ambiente ou no `.env`.
 
 A origem deve usar o charset de conexão que funciona para os dados na API atual. O importador usa a mesma heurística de reconhecer UTF-8 válido e converter valores restantes de ISO-8859-1. Confira acentos com amostras reais. Configure o diretório em área privada, fora da raiz HTTP. Os originais SVG são preservados byte a byte; a publicação posterior deve aplicar os mesmos controles de conteúdo SVG usados pela API. Se a origem tiver muito histórico, meça a consulta por IDENT. O índice primário legado começa por NOME_URL_ID e uma cópia de homologação pode se beneficiar de um índice adicional em (IDENT, NOME_URL_ID).
 
@@ -48,7 +48,7 @@ php bin/migrate-legacy.php
 
 O destino usa `utf8mb4`; host e porta assumem `127.0.0.1` e `3306` quando omitidos.
 
-O comando usa a configuração de mídia da API. Os arquivos usam o nome `<sha256>.<extensão>` e são gravados diretamente em `var/media` por padrão, ou no diretório `MEDIA_ROOT` já configurado no ambiente ou no `.env`.
+O comando usa a configuração de mídia da API. Os arquivos usam o nome `<sha256>.<extensão>` sob `avatars/` (usuários) ou `articles/` (páginas e revisões), diretórios criados em `var/media` por padrão, ou no diretório `MEDIA_ROOT` já configurado no ambiente ou no `.env`.
 
 A origem deve usar o charset de conexão que funciona para os dados na API atual. O importador usa a mesma heurística de reconhecer UTF-8 válido e converter valores restantes de ISO-8859-1. Confira acentos com amostras reais. Configure o diretório em área privada, fora da raiz HTTP. Os originais SVG são preservados byte a byte; a publicação posterior deve aplicar os mesmos controles de conteúdo SVG usados pela API. Se a origem tiver muito histórico, meça a consulta por IDENT. O índice primário legado começa por NOME_URL_ID e uma cópia de homologação pode se beneficiar de um índice adicional em (IDENT, NOME_URL_ID).
 
@@ -64,6 +64,12 @@ Se o MySQL retornar `1045`, o comando indica se a conexão rejeitada foi a orige
 
 - Pode executar o mesmo comando várias vezes. A página é localizada pelo IDENT e atualizada se DT_ALTERACAO ou o conteúdo da linha mudou, inclusive quando o timestamp é nulo ou se repete. Revisões são conferidas independentemente do timestamp da página.
 - O histórico recebe números 1, 2, 3 em ordem de NOME_URL_ID, por página. O número original fica em legacy_revision_number e o ID interno se mantém nas reexecuções. Revisões importadas anteriormente são preservadas caso o legado as remova. Páginas apagadas na origem e revisões sem página correspondente ficam fora da sincronização automática.
-- Imagens vêm exclusivamente de CONTEUDO_CODE da página ou revisão. Um campo vazio representa uma imagem sem arquivo. Bytes inválidos interrompem a migração daquela página e aparecem no relatório; as demais páginas continuam. Arquivos com o mesmo SHA-256 reutilizam o mesmo file_id, inclusive entre páginas e revisões. Um arquivo ausente no destino é recriado; divergência de hash é reportada. Miniaturas e capas ficam para a etapa de publicação.
+- Imagens vêm exclusivamente de CONTEUDO_CODE da página ou revisão. Um campo vazio representa uma imagem sem arquivo. Bytes inválidos interrompem a migração daquela página e aparecem no relatório; as demais páginas continuam. Arquivos da mesma pasta com o mesmo SHA-256 reutilizam o mesmo file_id, inclusive entre páginas e revisões. Um arquivo ausente no destino é recriado; divergência de hash é reportada. Miniaturas e capas ficam para a etapa de publicação.
 - A gravação no banco é transacional por página. Se a transação falhar depois da gravação do arquivo, a próxima execução reutiliza o binário pelo hash. O bloqueio do MySQL evita dois importadores no mesmo destino. O resumo apresenta páginas inseridas, atualizadas, inalteradas, revisões importadas ou atualizadas e páginas com erro. Código de saída 1 indica falha total ou parcial.
 - Para a conferência final, pausar escritores e rodar novamente. PAGINAS usa MyISAM na origem e uma cópia com o site editando pode observar a página e o histórico em momentos diferentes. Compare contagens, slugs, acentos, sequências e arquivos no destino antes de trocar a API.
+
+### Erros da importação
+
+Consulte `migration_errors` no banco de destino pelo ID da execução exibido no terminal. Cada registro guarda tabela, chave de origem, campo quando identificado, motivo e data. Foto inválida cancela a importação daquele usuário nessa execução, mantendo os registros previamente importados. Corrija a origem e reexecute. Erros anteriores permanecem no histórico.
+
+Em destinos já importados, a primeira execução requer também permissão ALTER em `files` para permitir um mesmo hash nas duas pastas. A reexecução recria os arquivos pelos dados de origem e atualiza os vínculos. Os arquivos antigos ficam no disco.
