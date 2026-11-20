@@ -4,7 +4,7 @@ Este comando importa páginas, revisões e os binários das páginas de imagem, 
 
 ## Preparar
 
-Use PHP CLI 8.2+ com `pdo_mysql`, `mbstring` e `dom`. Crie uma base **separada** para o destino e aplique [001_content_and_media.sql](../migrations/001_content_and_media.sql) nela, pelo cliente MySQL ou pelo phpMyAdmin. A origem deve ter `PAGINAS` e `PAGINAS_LOGS`; use um usuário com SELECT na origem. O comando precisa de SELECT, INSERT e UPDATE no destino.
+Use PHP CLI 8.2+ com `pdo_mysql`, `mbstring` e `dom`. Crie uma base **separada** para o destino. O comando aplica [001_content_and_media.sql](../migrations/001_content_and_media.sql) automaticamente no destino antes de copiar os dados. O SQL cria as tabelas ausentes e pode ser reaplicado. A origem deve ter `PAGINAS` e `PAGINAS_LOGS`; use um usuário com SELECT na origem. O comando precisa de CREATE, REFERENCES, SELECT, INSERT e UPDATE no destino.
 
 A origem usa o mesmo `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` e `DB_CHARSET` da API. A sessão do importador na origem é somente leitura. Configure somente os dados do destino no `.env` ou no ambiente do terminal. O exemplo abaixo usa Bash.
 
@@ -22,6 +22,8 @@ O destino usa `utf8mb4`; host e porta assumem `127.0.0.1` e `3306` quando omitid
 O comando usa a configuração de mídia da API. Os arquivos são gravados em `var/media` por padrão, ou no diretório `MEDIA_ROOT` já configurado no ambiente ou no `.env`.
 
 A origem deve usar o charset de conexão que funciona para os dados na API atual. O importador usa a mesma heurística de reconhecer UTF-8 válido e converter valores restantes de ISO-8859-1. Confira acentos com amostras reais. Configure o diretório em área privada, fora da raiz HTTP. Os originais SVG são preservados byte a byte; a publicação posterior deve aplicar os mesmos controles de conteúdo SVG usados pela API. Se a origem tiver muito histórico, meça a consulta por IDENT. O índice primário legado começa por NOME_URL_ID e uma cópia de homologação pode se beneficiar de um índice adicional em (IDENT, NOME_URL_ID).
+
+Se o MySQL retornar `1045`, o comando indica se a conexão rejeitada foi a origem (`DB_*`) ou o destino (`MIGRATION_DB_*`). Confira as credenciais e a permissão da conta para conectar a partir do host do terminal.
 
 ## Reexecutar e conferir
 

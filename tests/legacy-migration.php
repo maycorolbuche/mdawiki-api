@@ -29,7 +29,6 @@ $revision->execute([5, $b]);
 $revision->execute([9, $a]);
 
 $db->exec('USE migration_target');
-$db->exec(file_get_contents(__DIR__ . '/../migrations/001_content_and_media.sql'));
 $root = sys_get_temp_dir() . '/mdawiki-migration-' . bin2hex(random_bytes(8));
 putenv("MEDIA_ROOT={$root}");
 putenv('DB_HOST=127.0.0.1');
