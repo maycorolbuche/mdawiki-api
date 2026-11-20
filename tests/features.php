@@ -93,6 +93,8 @@ verify(request('/v1/auth/login','POST',['email'=>'new@example.test','password'=>
 $activation=$db->one('SELECT CODIGO_CONTA FROM USUARIOS WHERE EMAIL = ?',['new@example.test'])['CODIGO_CONTA'];verify(count($mail)===1 && str_contains($mail[0]['text'],$activation),'Activation sent through injected mail transport');
 verify(request('/v1/auth/activate','POST',['code'=>$activation])->status===200,'Activate new account');
 verify(request('/v1/auth/activate','POST',['code'=>$activation])->status===422,'Activation code cannot be replayed');
+$db->run("UPDATE USUARIOS SET SENHA = '' WHERE EMAIL = ?", ['new@example.test']);
+verify(request('/v1/auth/login','POST',['email'=>'new@example.test','password'=>'new-password-123'])->status===401,'Blank password requires reset');
 request('/v1/auth/forgot','POST',['email'=>'new@example.test']);$text=end($mail)['text'];preg_match('/token=([a-f0-9]{64})/',$text,$token);
 verify(isset($token[1]),'Reset URL points at new frontend');$reset=['email'=>'new@example.test','token'=>$token[1],'password'=>'reset-password-123','password_confirmation'=>'reset-password-123'];
 $db->run('UPDATE USUARIOS SET DATA_CODIGO_CONTA = ? WHERE EMAIL = ?',[date('Y-m-d H:i:s',time()-3601),'new@example.test']);verify(request('/v1/auth/reset','POST',$reset)->status===422,'Expired reset token rejected');$db->run('UPDATE USUARIOS SET DATA_CODIGO_CONTA = ? WHERE EMAIL = ?',[date('Y-m-d H:i:s'),'new@example.test']);

@@ -15,6 +15,7 @@ $db->exec('CREATE DATABASE migration_source');
 $db->exec('CREATE DATABASE migration_target');
 $db->exec('USE migration_source');
 $db->exec(file_get_contents(__DIR__ . '/schema.mysql.sql'));
+$db->exec(file_get_contents(__DIR__ . '/schema.migration.mysql.sql'));
 
 $a = 'data:image/gif;base64,R0lGODlhAQABAIAAAP///////yH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
 $b = 'data:image/gif;base64,' . base64_encode(base64_decode(explode(',', $a, 2)[1], true) . "\0");
@@ -27,6 +28,11 @@ $revision = $db->prepare("INSERT INTO PAGINAS_LOGS (NOME_URL_ID, IDENT, NOME_URL
 $revision->execute([2, $a]);
 $revision->execute([5, $b]);
 $revision->execute([9, $a]);
+$insertUser = $db->prepare("INSERT INTO USUARIOS (ID, EMAIL, SENHA, ATIVO, FOTO_64) VALUES (?, ?, ?, 'S', ?)");
+$insertUser->execute([100, 'migrated@example.test', md5('legacy-password'), $a]);
+$insertUser->execute([101, 'reset@example.test', 'unsupported', null]);
+$db->exec("INSERT INTO CONFIG (CHAVE, VALOR) VALUES ('test', 'first')");
+$db->exec("INSERT INTO ACESSOS_LOGS (UID) VALUES ('same'), ('same')");
 
 $db->exec('USE migration_target');
 $root = sys_get_temp_dir() . '/mdawiki-migration-' . bin2hex(random_bytes(8));
@@ -48,7 +54,14 @@ $run = static function (int $expected = 0): void {
 };
 
 $run();
+check($db->query('SELECT password_hash FROM users WHERE id = 101')->fetchColumn() === '', 'Hash incompatível não ficou vazio.');
+check($db->query('SELECT password_hash FROM users WHERE id = 100')->fetchColumn() === md5('legacy-password'), 'Hash compatível perdido.');
+check((int) $db->query('SELECT avatar_file_id FROM users WHERE id = 100')->fetchColumn() > 0, 'Avatar não vinculado.');
+$db->exec("UPDATE users SET password_hash = 'reset-in-destination' WHERE id = 101");
 $run();
+check($db->query('SELECT password_hash FROM users WHERE id = 101')->fetchColumn() === 'reset-in-destination', 'Reexecução sobrescreveu senha.');
+check((int) $db->query('SELECT COUNT(*) FROM session_events')->fetchColumn() === 2, 'Ocorrências sem chave não foram preservadas.');
+check($db->query("SELECT setting_value FROM settings WHERE setting_key = 'test'")->fetchColumn() === 'first', 'Configuração não importada.');
 check((int) $db->query('SELECT COUNT(*) FROM pages')->fetchColumn() === 2, 'Duplicação de páginas.');
 check((int) $db->query('SELECT COUNT(*) FROM files')->fetchColumn() === 2, 'Falha de deduplicação.');
 check($db->query('SELECT GROUP_CONCAT(revision_number ORDER BY legacy_revision_number) FROM page_revisions')->fetchColumn() === '1,2,3',

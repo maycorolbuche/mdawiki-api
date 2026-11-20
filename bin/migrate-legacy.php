@@ -40,17 +40,22 @@ function query(PDO $db, string $sql, array $values = []): PDOStatement
     return $statement;
 }
 
-/** Column names come exclusively from the mappings in this command. */
-function upsert(PDO $db, string $table, array $row, array $keys): void
+/** Table and column names come exclusively from the import mappings. */
+function prepareUpsert(PDO $db, string $table, array $columns, array $protected): PDOStatement
 {
-    $columns = array_keys($row);
     $placeholders = implode(', ', array_fill(0, count($columns), '?'));
     $updates = array_map(
-        static fn (string $column): string => "{$column} = VALUES({$column})",
-        array_diff($columns, $keys),
+        static fn (string $column): string => "`{$column}` = VALUES(`{$column}`)",
+        array_diff($columns, $protected),
     );
-    query($db, 'INSERT INTO ' . $table . ' (' . implode(', ', $columns) . ") VALUES ({$placeholders})"
-        . ' ON DUPLICATE KEY UPDATE ' . implode(', ', $updates), array_values($row));
+    $names = '`' . implode('`, `', $columns) . '`';
+    return $db->prepare("INSERT INTO `{$table}` ({$names}) VALUES ({$placeholders})"
+        . ' ON DUPLICATE KEY UPDATE ' . implode(', ', $updates));
+}
+
+function upsert(PDO $db, string $table, array $row, array $keys): void
+{
+    prepareUpsert($db, $table, array_keys($row), $keys)->execute(array_values($row));
 }
 
 function legacyText(?string $value): ?string
@@ -253,18 +258,95 @@ function migratePage(PDO $source, PDO $target, string $root, array $row, array &
 
 function applyDestinationSchema(PDO $target): void
 {
-    $path = dirname(__DIR__) . '/migrations/001_content_and_media.sql';
-    $sql = is_readable($path) ? file_get_contents($path) : false;
-    if ($sql === false || trim($sql) === '') {
-        throw new RuntimeException('Não foi possível carregar a migration 001_content_and_media.sql.');
-    }
+    foreach (['001_content_and_media.sql', '002_remaining_legacy_tables.sql'] as $migration) {
+        $path = dirname(__DIR__) . '/migrations/' . $migration;
+        $sql = is_readable($path) ? file_get_contents($path) : false;
+        if ($sql === false || trim($sql) === '') {
+            throw new RuntimeException("Não foi possível carregar a migration {$migration}.");
+        }
 
-    // This initial DDL contains only idempotent CREATE TABLE statements.
-    foreach (explode(';', $sql) as $statement) {
-        if (trim($statement) !== '') {
-            $target->exec($statement);
+        // Both migrations contain only idempotent CREATE TABLE statements.
+        foreach (explode(';', $sql) as $statement) {
+            if (trim($statement) !== '') {
+                $target->exec($statement);
+            }
         }
     }
+}
+
+function migrateRemainingTables(PDO $source, PDO $target, string $root, string $appKey): int
+{
+    $errors = 0;
+    $source->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, false);
+    $tables = require __DIR__ . '/legacy-table-map.php';
+    foreach ($tables as $legacyTable => [$table, $keys, $fields]) {
+        $users = $legacyTable === 'USUARIOS';
+        $keyless = $keys === ['source_hash', 'source_occurrence'];
+        $occurrences = [];
+        $statement = null;
+        $copied = 0;
+        $failed = 0;
+        fwrite(STDOUT, "Importando {$legacyTable} → {$table}..." . PHP_EOL);
+        $columns = array_keys($fields);
+        if ($users) {
+            array_push($columns, 'FOTO_64', 'FOTO_32X32_64');
+        }
+        $result = $source->query('SELECT `' . implode('`, `', $columns) . "` FROM `{$legacyTable}`");
+        foreach ($result as $row) {
+            try {
+                $values = [];
+                foreach ($fields as $origin => $definition) {
+                    [$column, $type] = array_pad(explode(':', $definition, 2), 2, 'text');
+                    $value = $row[$origin];
+                    $values[$column] = match ($type) {
+                        'number' => $value,
+                        'date' => legacyDate($value),
+                        'flag' => legacyFlag($value),
+                        default => legacyText($value),
+                    };
+                }
+                if ($keyless) {
+                    $hash = checksum($row);
+                    $occurrences[$hash] = ($occurrences[$hash] ?? 0) + 1;
+                    $values['source_hash'] = $hash;
+                    $values['source_occurrence'] = $occurrences[$hash];
+                }
+                $protected = $keys;
+                if ($users) {
+                    $target->beginTransaction();
+                    $password = (string) $row['SENHA'];
+                    $values['password_hash'] = match (true) {
+                        preg_match('/^[a-f0-9]{32}$/D', $password) === 1 => $password,
+                        strlen($appKey) >= 32 && preg_match('/^p2\$[a-f0-9]{29}$/D', $password) === 1 => $password,
+                        default => '',
+                    };
+                    $protected[] = 'password_hash';
+                    $values['avatar_file_id'] = fileId($target, $root, $row['FOTO_64']);
+                    $values['thumbnail_file_id'] = fileId($target, $root, $row['FOTO_32X32_64']);
+                }
+                $statement ??= prepareUpsert($target, $table, array_keys($values), $protected);
+                $statement->execute(array_values($values));
+                if ($users) {
+                    $target->commit();
+                }
+                $copied++;
+            } catch (Throwable $error) {
+                if ($target->inTransaction()) {
+                    $target->rollBack();
+                }
+                $failed++;
+                if ($failed <= 10) {
+                    $message = $error instanceof PDOException ? 'Erro SQL ' . ($error->errorInfo[1] ?? $error->getCode()) : $error->getMessage();
+                    fwrite(STDERR, "{$legacyTable}: {$message}" . PHP_EOL);
+                }
+            }
+        }
+        $result->closeCursor();
+        fwrite(STDOUT, "{$table}: {$copied} processados, {$failed} erros." . PHP_EOL);
+        $errors += $failed;
+    }
+
+    return $errors;
 }
 
 if (in_array('--help', $argv, true)) {
@@ -341,8 +423,10 @@ try {
         }
         fwrite(STDOUT, json_encode($counts, JSON_THROW_ON_ERROR) . PHP_EOL);
     }
+    $stage = 'Importação das tabelas complementares';
+    $counts['table_errors'] = migrateRemainingTables($source, $target, $root, $config['app_key']);
     fwrite(STDOUT, 'Total: ' . json_encode($counts, JSON_THROW_ON_ERROR) . PHP_EOL);
-    exit($counts['errors'] === 0 ? 0 : 1);
+    exit($counts['errors'] + $counts['table_errors'] === 0 ? 0 : 1);
 } catch (Throwable $error) {
     $code = $error instanceof PDOException ? (int) ($error->errorInfo[1] ?? $error->getCode()) : 0;
     $message = match (true) {
