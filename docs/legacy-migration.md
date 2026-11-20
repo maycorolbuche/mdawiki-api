@@ -6,16 +6,18 @@ Este comando importa páginas, revisões e os binários das páginas de imagem, 
 
 Use PHP CLI 8.2+ com `pdo_mysql`, `mbstring` e `dom`. Crie uma base **separada** para o destino e aplique [001_content_and_media.sql](../migrations/001_content_and_media.sql) nela, pelo cliente MySQL ou pelo phpMyAdmin. A origem deve ter `PAGINAS` e `PAGINAS_LOGS`; use um usuário com SELECT na origem. O comando precisa de SELECT, INSERT e UPDATE no destino.
 
-Configure as variáveis de ambiente abaixo (exemplo Bash). Informe as senhas na sessão ou em um arquivo privado fora do Git.
+A origem usa o mesmo `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` e `DB_CHARSET` da API. A sessão do importador na origem é somente leitura. Configure somente os dados do destino no `.env` ou no ambiente do terminal. O exemplo abaixo usa Bash.
 
 ```bash
-export LEGACY_DB_DSN='mysql:host=127.0.0.1;dbname=mdawiki_legacy;charset=latin1'
-export LEGACY_DB_USER='legacy_reader'
-export MIGRATION_DB_DSN='mysql:host=127.0.0.1;dbname=mdawiki_new;charset=utf8mb4'
-export MIGRATION_DB_USER='migration_writer'
-# Defina LEGACY_DB_PASSWORD e MIGRATION_DB_PASSWORD no ambiente.
+export MIGRATION_DB_HOST='127.0.0.1'
+export MIGRATION_DB_PORT='3306'
+export MIGRATION_DB_DATABASE='mdawiki_new'
+export MIGRATION_DB_USERNAME='migration_writer'
+# Defina MIGRATION_DB_PASSWORD no ambiente ou no .env.
 php bin/migrate-legacy.php
 ```
+
+O destino usa `utf8mb4`; host e porta assumem `127.0.0.1` e `3306` quando omitidos.
 
 O comando usa a configuração de mídia da API. Os arquivos são gravados em `var/media` por padrão, ou no diretório `MEDIA_ROOT` já configurado no ambiente ou no `.env`.
 

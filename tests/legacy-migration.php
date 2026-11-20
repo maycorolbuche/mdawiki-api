@@ -32,12 +32,17 @@ $db->exec('USE migration_target');
 $db->exec(file_get_contents(__DIR__ . '/../migrations/001_content_and_media.sql'));
 $root = sys_get_temp_dir() . '/mdawiki-migration-' . bin2hex(random_bytes(8));
 putenv("MEDIA_ROOT={$root}");
-putenv("LEGACY_DB_DSN={$server};dbname=migration_source;charset=utf8mb4");
-putenv("MIGRATION_DB_DSN={$server};dbname=migration_target;charset=utf8mb4");
-foreach (['LEGACY_DB', 'MIGRATION_DB'] as $prefix) {
-    putenv("{$prefix}_USER=root");
-    putenv("{$prefix}_PASSWORD=test");
-}
+putenv('DB_HOST=127.0.0.1');
+putenv('DB_PORT=3306');
+putenv('DB_DATABASE=migration_source');
+putenv('DB_USERNAME=root');
+putenv('DB_PASSWORD=test');
+putenv('DB_CHARSET=utf8mb4');
+putenv('MIGRATION_DB_HOST=127.0.0.1');
+putenv('MIGRATION_DB_PORT=3306');
+putenv('MIGRATION_DB_DATABASE=migration_target');
+putenv('MIGRATION_DB_USERNAME=root');
+putenv('MIGRATION_DB_PASSWORD=test');
 $run = static function (int $expected = 0): void {
     passthru(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../bin/migrate-legacy.php'), $status);
     check($status === $expected, 'Código de saída inesperado do importador.');
