@@ -16,14 +16,16 @@ function setting(string $name, ?string $default = null): string
     return $value === false ? $default : $value;
 }
 
-function connect(string $prefix): PDO
+function connectDestination(): PDO
 {
-    $dsn = setting($prefix . '_DSN');
-    if (!str_starts_with($dsn, 'mysql:')) {
-        throw new RuntimeException("Use um DSN PDO MySQL em {$prefix}_DSN.");
-    }
+    $dsn = sprintf(
+        'mysql:host=%s;port=%s;dbname=%s;charset=utf8mb4',
+        setting('MIGRATION_DB_HOST', '127.0.0.1'),
+        setting('MIGRATION_DB_PORT', '3306'),
+        setting('MIGRATION_DB_DATABASE'),
+    );
 
-    return new PDO($dsn, setting($prefix . '_USER'), setting($prefix . '_PASSWORD', ''), [
+    return new PDO($dsn, setting('MIGRATION_DB_USERNAME'), setting('MIGRATION_DB_PASSWORD', ''), [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES => false,
@@ -263,8 +265,8 @@ try {
         throw new RuntimeException('Argumento desconhecido. Use --help.');
     }
     $config = require dirname(__DIR__) . '/config/bootstrap.php';
-    $source = connect('LEGACY_DB');
-    $target = connect('MIGRATION_DB');
+    $source = MDAWiki\LegacyPageRepository::connect($config['db'], $config['public_max_level'])->connection();
+    $target = connectDestination();
     $identity = 'SELECT CONCAT(@@hostname, "/", @@port, "/", @@server_id, "/", DATABASE())';
     $originIdentity = $source->query($identity)->fetchColumn();
     $targetIdentity = $target->query($identity)->fetchColumn();
