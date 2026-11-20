@@ -166,19 +166,105 @@ function fileId(PDO $target, string $root, string $folder, ?string $data): ?int
     return (int) $target->lastInsertId();
 }
 
+/** The canonical slug preserves the title's case and accents. */
+function pageSlugs(?string $title, string $fallback): array
+{
+    foreach ([$title ?? '', $fallback] as $value) {
+        $canonical = Normalizer::normalize($value, Normalizer::FORM_C);
+        $slug = trim(preg_replace('/[^\p{L}\p{M}\p{N}]+/u', '-', $canonical), '-');
+        $folded = mb_convert_case($slug, MB_CASE_FOLD, 'UTF-8');
+        $identifier = preg_replace('/\p{M}+/u', '', Normalizer::normalize($folded, Normalizer::FORM_D));
+        if ($identifier !== '') {
+            return [$slug, Normalizer::normalize($identifier, Normalizer::FORM_C)];
+        }
+    }
+    throw new RuntimeException('Título e URL legada não geraram um identificador válido.');
+}
+
+function applyPageRelationships(PDO $target, array $references): void
+{
+    $columns = $target->query('SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()')->fetchAll();
+    $existing = [];
+    foreach ($columns as $column) {
+        $existing[$column['TABLE_NAME']][$column['COLUMN_NAME']] = true;
+    }
+    if (!isset($existing['pages']['identifier'])) {
+        $target->exec('ALTER TABLE pages ADD COLUMN identifier VARCHAR(250) COLLATE utf8mb4_bin NULL,
+            ADD UNIQUE KEY pages_identifier_unique (identifier)');
+    }
+    foreach ($references as $table => $fields) {
+        $changes = [];
+        foreach (array_keys($fields) as $field) {
+            if (!isset($existing[$table][$field])) {
+                $changes[] = 'ADD COLUMN ' . $field . ' BIGINT UNSIGNED NULL';
+                $changes[] = 'ADD FOREIGN KEY (' . $field . ') REFERENCES pages (id)';
+            }
+        }
+        if ($changes !== []) {
+            $target->exec('ALTER TABLE ' . $table . ' ' . implode(', ', $changes));
+        }
+    }
+}
+
+/** Legacy names are used only to find the new page IDs during import. */
+function buildPageLookup(PDO $source, PDO $target): array
+{
+    $lookup = ['identifier' => [], 'slug' => []];
+    foreach ($target->query('SELECT id, legacy_identifier FROM pages WHERE identifier IS NOT NULL') as $page) {
+        $lookup['identifier'][$page['legacy_identifier']] = (int) $page['id'];
+    }
+    foreach ($source->query('SELECT IDENT, NOME_URL FROM PAGINAS') as $page) {
+        $id = $lookup['identifier'][legacyText($page['IDENT'])] ?? null;
+        $slug = legacyText($page['NOME_URL']);
+        if ($id !== null && $slug !== null && $slug !== '') {
+            $lookup['slug'][$slug] = array_key_exists($slug, $lookup['slug']) ? null : $id;
+        }
+    }
+
+    return $lookup;
+}
+
+function resolvePageReference(array $lookup, string $field, array $values, array $columns): ?int
+{
+    foreach ($columns as $column) {
+        $value = $values[$column] ?? '';
+        if ($value === '') {
+            continue;
+        }
+        $index = str_ends_with($column, '_identifier') ? 'identifier' : 'slug';
+        $match = $lookup[$index][$value] ?? null;
+        if ($match === null && $field === 'image_page_id' && $index === 'identifier') {
+            $match = $lookup[$index]['imagem@' . $value] ?? null;
+        }
+        if ($match !== null) {
+            return $match;
+        }
+    }
+
+    return null;
+}
+
 function migratePage(PDO $source, PDO $target, string $root, array $row, array &$counts, array &$context): void
 {
     $key = legacyText($row['IDENT']);
-    $slug = legacyText($row['NOME_URL']);
-    $isImage = str_starts_with(strtolower($slug), 'imagem@') || str_starts_with(strtolower($key), 'imagem@');
+    $legacySlug = legacyText($row['NOME_URL']);
+    $isImage = str_starts_with(strtolower($legacySlug), 'imagem@') || str_starts_with(strtolower($key), 'imagem@');
+    [$slug, $identifier] = pageSlugs(legacyText($row['NOME']), $legacySlug);
+    $owner = query($target, 'SELECT legacy_identifier FROM pages WHERE identifier = ?', [$identifier])->fetchColumn();
+    if ($owner !== false && $owner !== $key) {
+        $context['field'] = 'NOME';
+        throw new RuntimeException("Identificador normalizado em conflito: {$identifier} (página legada {$owner}).");
+    }
     $updatedAt = legacyDate($row['DT_ALTERACAO']);
     $fingerprint = checksum($row);
-    $current = query($target, 'SELECT id, updated_at, legacy_checksum FROM pages WHERE legacy_identifier = ?', [$key])->fetch();
+    $current = query($target, 'SELECT id, slug, identifier, updated_at, legacy_checksum FROM pages WHERE legacy_identifier = ?', [$key])->fetch();
 
-    if ($current === false || $current['updated_at'] !== $updatedAt || $current['legacy_checksum'] !== $fingerprint) {
+    if ($current === false || $current['identifier'] !== $identifier || $current['slug'] !== $slug || $current['updated_at'] !== $updatedAt || $current['legacy_checksum'] !== $fingerprint) {
         upsert($target, 'pages', [
             'legacy_identifier' => $key,
             'slug' => $slug,
+            'identifier' => $identifier,
             'title' => legacyText($row['NOME']),
             'kind' => $isImage ? 'image' : 'article',
             'source' => $isImage ? null : legacyText($row['CONTEUDO_CODE']),
@@ -210,7 +296,7 @@ function migratePage(PDO $source, PDO $target, string $root, array $row, array &
         $imageId = (int) query($target, 'SELECT id FROM images WHERE page_id = ?', [$pageId])->fetchColumn();
     }
 
-    $existing = query($target, 'SELECT legacy_revision_number, id, revision_number, legacy_checksum
+    $existing = query($target, 'SELECT legacy_revision_number, id, slug, revision_number, legacy_checksum
         FROM page_revisions WHERE page_id = ?', [$pageId])->fetchAll(PDO::FETCH_UNIQUE | PDO::FETCH_ASSOC);
     $revisions = query($source, 'SELECT * FROM PAGINAS_LOGS WHERE IDENT = ? ORDER BY NOME_URL_ID', [$row['IDENT']]);
     foreach ($revisions as $revision) {
@@ -218,12 +304,13 @@ function migratePage(PDO $source, PDO $target, string $root, array $row, array &
         $legacyNumber = (int) $revision['NOME_URL_ID'];
         $prior = $existing[$legacyNumber] ?? null;
         $fingerprint = checksum($revision);
-        if ($prior === null || $prior['legacy_checksum'] !== $fingerprint) {
+        [$revisionSlug] = pageSlugs(legacyText($revision['NOME']), legacyText($revision['NOME_URL']));
+        if ($prior === null || $prior['slug'] !== $revisionSlug || $prior['legacy_checksum'] !== $fingerprint) {
             upsert($target, 'page_revisions', [
                 'page_id' => $pageId,
                 'legacy_revision_number' => $legacyNumber,
                 'revision_number' => $prior['revision_number'] ?? 0,
-                'slug' => legacyText($revision['NOME_URL']),
+                'slug' => $revisionSlug,
                 'title' => legacyText($revision['NOME']),
                 'source' => $isImage ? null : legacyText($revision['CONTEUDO_CODE']),
                 'rendered_html' => $isImage ? null : legacyText($revision['CONTEUDO']),
@@ -292,9 +379,10 @@ function recordMigrationError(PDO $target, string $runId, array $context, Throwa
     ]);
 }
 
-function migrateRemainingTables(PDO $source, PDO $target, string $root, string $appKey, string $runId): int
+function migrateRemainingTables(PDO $source, PDO $target, string $root, string $appKey, string $runId, array $references): int
 {
     $errors = 0;
+    $lookup = buildPageLookup($source, $target);
     $source->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, false);
     $tables = require __DIR__ . '/legacy-table-map.php';
     foreach ($tables as $legacyTable => [$table, $keys, $fields]) {
@@ -333,6 +421,9 @@ function migrateRemainingTables(PDO $source, PDO $target, string $root, string $
                     $values['source_hash'] = $hash;
                     $values['source_occurrence'] = $occurrences[$hash];
                     $context['key'] = ['hash' => $hash, 'occurrence' => $occurrences[$hash]];
+                }
+                foreach ($references[$table] ?? [] as $field => $columnsForReference) {
+                    $values[$field] = resolvePageReference($lookup, $field, $values, $columnsForReference);
                 }
                 $protected = $keys;
                 if ($users) {
@@ -386,6 +477,9 @@ try {
     if ($argc !== 1) {
         throw new RuntimeException('Argumento desconhecido. Use --help.');
     }
+    if (!class_exists(Normalizer::class)) {
+        throw new RuntimeException('Habilite a extensão PHP intl para normalizar os slugs.');
+    }
     $config = require dirname(__DIR__) . '/config/bootstrap.php';
     $stage = 'Conexão com a origem (DB_*)';
     $source = MDAWiki\LegacyPageRepository::connect($config['db'], $config['public_max_level'])->connection();
@@ -411,6 +505,8 @@ try {
     }
     $stage = 'Aplicação do esquema no destino';
     applyDestinationSchema($target);
+    $references = require __DIR__ . '/legacy-page-references.php';
+    applyPageRelationships($target, $references);
     // Existing destinations used a unique hash across all media. The unique
     // storage key now deduplicates each media folder independently.
     if ($target->query("SHOW INDEX FROM files WHERE Key_name = 'sha256' AND Non_unique = 0")->fetch()) {
@@ -460,7 +556,7 @@ try {
         fwrite(STDOUT, json_encode($counts, JSON_THROW_ON_ERROR) . PHP_EOL);
     }
     $stage = 'Importação das tabelas complementares';
-    $counts['table_errors'] = migrateRemainingTables($source, $target, $root, $config['app_key'], $runId);
+    $counts['table_errors'] = migrateRemainingTables($source, $target, $root, $config['app_key'], $runId, $references);
     fwrite(STDOUT, 'Total: ' . json_encode($counts, JSON_THROW_ON_ERROR) . PHP_EOL);
     exit($counts['errors'] + $counts['table_errors'] === 0 ? 0 : 1);
 } catch (Throwable $error) {

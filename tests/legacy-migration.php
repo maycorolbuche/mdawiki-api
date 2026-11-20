@@ -9,7 +9,7 @@ function check(bool $condition, string $message): void
     }
 }
 
-$server = 'mysql:host=127.0.0.1;port=3306';
+$server = 'mysql:host=127.0.0.1;port=3306;charset=utf8mb4';
 $db = new PDO($server, 'root', 'test', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
 $db->exec('CREATE DATABASE migration_source');
 $db->exec('CREATE DATABASE migration_target');
@@ -21,13 +21,14 @@ $a = 'data:image/gif;base64,R0lGODlhAQABAIAAAP///////yH5BAEKAAEALAAAAAABAAEAAAIC
 $b = 'data:image/gif;base64,' . base64_encode(base64_decode(explode(',', $a, 2)[1], true) . "\0");
 $page = $db->prepare('INSERT INTO PAGINAS (IDENT, NOME_URL, NOME, CONTEUDO_CODE, DT_ALTERACAO)
     VALUES (?, ?, ?, ?, ?)');
-$page->execute(['article', 'Artigo_Exemplo', 'Artigo', 'Primeira versão', '2026-11-20 09:00:00']);
+$page->execute(['article', 'Artigo_Exemplo', 'EspéciAlidade Teste', 'Primeira versão', '2026-11-20 09:00:00']);
 $page->execute(['imagem@sample', 'Imagem@Sample', 'Imagem', $a, '2026-11-20 09:00:00']);
 $revision = $db->prepare("INSERT INTO PAGINAS_LOGS (NOME_URL_ID, IDENT, NOME_URL, CONTEUDO_CODE)
     VALUES (?, 'imagem@sample', 'Imagem@Sample', ?)");
 $revision->execute([2, $a]);
 $revision->execute([5, $b]);
 $revision->execute([9, $a]);
+$db->exec("INSERT INTO COMENTARIOS (ID, NOME_URL) VALUES (1, 'Artigo_Exemplo'), (2, 'Pagina_Ausente')");
 $insertUser = $db->prepare("INSERT INTO USUARIOS (ID, EMAIL, SENHA, ATIVO, FOTO_64) VALUES (?, ?, ?, 'S', ?)");
 $insertUser->execute([100, 'migrated@example.test', md5('legacy-password'), $a]);
 $insertUser->execute([101, 'reset@example.test', 'unsupported', null]);
@@ -54,6 +55,10 @@ $run = static function (int $expected = 0): void {
 };
 
 $run();
+$importedPage = $db->query("SELECT id, slug, identifier FROM pages WHERE legacy_identifier = 'article'")->fetch(PDO::FETCH_ASSOC);
+check($importedPage['slug'] === 'EspéciAlidade-Teste' && $importedPage['identifier'] === 'especialidade-teste', 'Slug e identificador incorretos.');
+check((int) $db->query('SELECT page_id FROM comments WHERE id = 1')->fetchColumn() === (int) $importedPage['id'], 'Comentário sem vínculo por ID.');
+check($db->query('SELECT page_id FROM comments WHERE id = 2')->fetchColumn() === null, 'Referência inexistente recebeu ID.');
 check($db->query('SELECT password_hash FROM users WHERE id = 101')->fetchColumn() === '', 'Hash incompatível não ficou vazio.');
 check($db->query('SELECT password_hash FROM users WHERE id = 100')->fetchColumn() === md5('legacy-password'), 'Hash compatível perdido.');
 check((int) $db->query('SELECT avatar_file_id FROM users WHERE id = 100')->fetchColumn() > 0, 'Avatar não vinculado.');
@@ -85,6 +90,7 @@ check($db->query('SELECT GROUP_CONCAT(revision_number ORDER BY legacy_revision_n
     'Inserção tardia deixou buracos.');
 
 $db->exec('USE migration_source');
+$page->execute(['collision', 'Conflito_Legado', 'ESPEcialidade Teste', 'Não deve sobrescrever', '2026-11-20 09:00:00']);
 $revision->execute([15, 'data:image/gif;base64,?']);
 $insertUser->execute([102, 'broken-avatar@example.test', 'unsupported', 'data:image/gif;base64,?']);
 $db->exec('USE migration_target');
@@ -95,3 +101,6 @@ echo "Migração testada com reexecução, atualização e deduplicação.\n";
 check((int) $db->query("SELECT COUNT(*) FROM files WHERE storage_key LIKE 'avatars/%'")->fetchColumn() === 1, 'Pasta de avatares incorreta.');
 check((int) $db->query("SELECT COUNT(*) FROM migration_errors WHERE source_table = 'USUARIOS' AND source_field = 'FOTO_64'")->fetchColumn() === 1, 'Erro de avatar não registrado.');
 check((int) $db->query("SELECT COUNT(*) FROM migration_errors WHERE source_table = 'PAGINAS_LOGS' AND source_field = 'CONTEUDO_CODE'")->fetchColumn() === 1, 'Erro de revisão não registrado.');
+
+check((int) $db->query("SELECT COUNT(*) FROM pages WHERE legacy_identifier = 'collision'")->fetchColumn() === 0, 'Colisão sobrescreveu uma página.');
+check((int) $db->query("SELECT COUNT(*) FROM migration_errors WHERE source_table = 'PAGINAS' AND source_field = 'NOME'")->fetchColumn() === 1, 'Colisão não registrada.');

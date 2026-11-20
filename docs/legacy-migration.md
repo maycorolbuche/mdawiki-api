@@ -4,7 +4,7 @@ O comando importa as 29 tabelas físicas do dump legado, incluindo páginas, rev
 
 ## Preparar
 
-Use PHP CLI 8.2+ com `pdo_mysql`, `mbstring` e `dom`. Crie uma base **separada** para o destino. O comando aplica [001_content_and_media.sql](../migrations/001_content_and_media.sql) e [002_remaining_legacy_tables.sql](../migrations/002_remaining_legacy_tables.sql) automaticamente no destino antes de copiar os dados. O SQL cria as tabelas ausentes e pode ser reaplicado. Use um usuário com SELECT nas tabelas legadas na origem. O comando precisa de CREATE, REFERENCES, SELECT, INSERT e UPDATE no destino.
+Use PHP CLI 8.2+ com `pdo_mysql`, `mbstring`, `dom` e `intl`. Crie uma base **separada** para o destino. O comando aplica [001_content_and_media.sql](../migrations/001_content_and_media.sql) e [002_remaining_legacy_tables.sql](../migrations/002_remaining_legacy_tables.sql) automaticamente no destino antes de copiar os dados. O SQL cria as tabelas ausentes e pode ser reaplicado. Use um usuário com SELECT nas tabelas legadas na origem. O comando precisa de CREATE, REFERENCES, SELECT, INSERT e UPDATE no destino.
 
 A origem usa o mesmo `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` e `DB_CHARSET` da API. A sessão do importador na origem é somente leitura. Configure somente os dados do destino no `.env` ou no ambiente do terminal. O exemplo abaixo usa Bash.
 
@@ -33,7 +33,7 @@ O comando importa as 29 tabelas físicas do dump legado, incluindo páginas, rev
 
 ## Preparar
 
-Use PHP CLI 8.2+ com `pdo_mysql`, `mbstring` e `dom`. Crie uma base **separada** para o destino. O comando aplica [001_content_and_media.sql](../migrations/001_content_and_media.sql) e [002_remaining_legacy_tables.sql](../migrations/002_remaining_legacy_tables.sql) automaticamente no destino antes de copiar os dados. O SQL cria as tabelas ausentes e pode ser reaplicado. Use um usuário com SELECT nas tabelas legadas na origem. O comando precisa de CREATE, REFERENCES, SELECT, INSERT e UPDATE no destino.
+Use PHP CLI 8.2+ com `pdo_mysql`, `mbstring`, `dom` e `intl`. Crie uma base **separada** para o destino. O comando aplica [001_content_and_media.sql](../migrations/001_content_and_media.sql) e [002_remaining_legacy_tables.sql](../migrations/002_remaining_legacy_tables.sql) automaticamente no destino antes de copiar os dados. O SQL cria as tabelas ausentes e pode ser reaplicado. Use um usuário com SELECT nas tabelas legadas na origem. O comando precisa de CREATE, REFERENCES, SELECT, INSERT e UPDATE no destino.
 
 A origem usa o mesmo `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` e `DB_CHARSET` da API. A sessão do importador na origem é somente leitura. Configure somente os dados do destino no `.env` ou no ambiente do terminal. O exemplo abaixo usa Bash.
 
@@ -73,3 +73,9 @@ Se o MySQL retornar `1045`, o comando indica se a conexão rejeitada foi a orige
 Consulte `migration_errors` no banco de destino pelo ID da execução exibido no terminal. Cada registro guarda tabela, chave de origem, campo quando identificado, motivo e data. Foto inválida cancela a importação daquele usuário nessa execução, mantendo os registros previamente importados. Corrija a origem e reexecute. Erros anteriores permanecem no histórico.
 
 Em destinos já importados, a primeira execução requer também permissão ALTER em `files` para permitir um mesmo hash nas duas pastas. A reexecução recria os arquivos pelos dados de origem e atualiza os vínculos. Os arquivos antigos ficam no disco.
+
+### Identidade das páginas
+
+`pages.title` guarda o título exibido, `pages.slug` guarda a forma canônica com hífens, caixa e acentos do título, e `pages.identifier` guarda a chave normalizada, com índice único. Por exemplo, `EspéciAlidade Teste` produz `EspéciAlidade-Teste` e `especialidade-teste`. Títulos sem caracteres aproveitáveis usam a URL legada. Colisões entre páginas legadas distintas são registradas em `migration_errors`.
+
+O importador cria chaves estrangeiras para as páginas relacionadas. Os valores textuais legados permanecem como dados auxiliares e históricos. Referências sem correspondência ficam com ID nulo. Reexecute sobre o destino para preencher as novas colunas preservando os IDs existentes. O usuário de migração precisa de ALTER e REFERENCES. A API em uso continua conectada ao legado. Na troca para a nova base, a busca de páginas deve aplicar a mesma normalização e consultar o identificador indexado.
