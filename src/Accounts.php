@@ -14,7 +14,8 @@ final class Accounts
         return 'p2$' . substr(hash_pbkdf2('sha256', $password, hash_hmac('sha256', (string) $id, $key), 600000, 32), 0, 29);
     }
     private function verify(string $password, array $user): bool {
-        $hash = $user['SENHA'];
+        $hash = $user['SENHA'] ?? '';
+        if ($hash === '') return false;
         return hash_equals($hash, str_starts_with($hash, 'p2$') ? $this->hash($password, (int) $user['ID']) : md5($password));
     }
     private function password(array $body): string {
@@ -29,7 +30,7 @@ final class Accounts
     }
     public function current(bool $required = false): ?array {
         $user = isset($this->session->data['id']) ? $this->db->one('SELECT * FROM USUARIOS WHERE ID = ?', [(int) $this->session->data['id']]) : null;
-        if ($user && ($user['ATIVO'] !== 'S' || !hash_equals($this->session->data['fingerprint'] ?? '', hash('sha256', $user['SENHA'])) || ($this->session->data['expires'] ?? 0) < time())) $user = null;
+        if ($user && ($user['ATIVO'] !== 'S' || ($user['SENHA'] ?? '') === '' || !hash_equals($this->session->data['fingerprint'] ?? '', hash('sha256', $user['SENHA'])) || ($this->session->data['expires'] ?? 0) < time())) $user = null;
         if (!$user) { unset($this->session->data['id'], $this->session->data['fingerprint']); if ($required) throw new HttpError(401, 'login_required', 'Entre na sua conta para continuar.'); }
         return $user;
     }
@@ -49,7 +50,7 @@ final class Accounts
         $password = $body['password'] ?? '';
         if (!is_string($password) || strlen($password) > 1024) throw new HttpError(422, 'invalid_password', 'Senha inválida.');
         $u = $this->db->one('SELECT * FROM USUARIOS WHERE EMAIL = ?', [$email]);
-        if (!$u || !$this->verify($password, $u)) throw new HttpError(401, 'invalid_credentials', 'E-mail ou senha inválidos.');
+        if (!$u || !$this->verify($password, $u)) throw new HttpError(401, 'invalid_credentials', 'E-mail ou senha inválidos. Se você ainda precisa cadastrar uma senha, use a opção de redefinição.');
         if ($u['ATIVO'] !== 'S') throw new HttpError(403, 'inactive_account', 'Ative sua conta pelo código enviado por e-mail.');
         if (!str_starts_with($u['SENHA'], 'p2$')) { $u['SENHA'] = $this->hash($password, (int) $u['ID']); $this->db->run('UPDATE USUARIOS SET SENHA = ?, SENHA_PROV = NULL WHERE ID = ?', [$u['SENHA'], (int) $u['ID']]); }
         $lifetime=($body['remember'] ?? false)===true?2592000:43200;
