@@ -1,6 +1,6 @@
 # Testar a migração do legado
 
-O comando importa as 29 tabelas físicas do dump legado, incluindo páginas, revisões, usuários, mídia, relações, configurações e históricos. A API continua conectada ao banco legado durante os testes. Views e rotinas SQL são objetos derivados e ficam fora da cópia de registros.
+O comando importa páginas, revisões, seus arquivos de mídia, comentários, usuários, configurações, níveis, regras wiki e modelos de e-mail. Logs operacionais, filas, cache e vínculos derivados da wiki ficam fora da importação.
 
 ## Preparar
 
@@ -29,7 +29,7 @@ Se o MySQL retornar `1045`, o comando indica se a conexão rejeitada foi a orige
 
 - Os IDs dos usuários, níveis de acesso e status de ativação são preservados. Hashes MD5 aceitos pela API são copiados. Hashes `p2# Testar a migração do legado
 
-O comando importa as 29 tabelas físicas do dump legado, incluindo páginas, revisões, usuários, mídia, relações, configurações e históricos. A API continua conectada ao banco legado durante os testes. Views e rotinas SQL são objetos derivados e ficam fora da cópia de registros.
+O comando importa páginas, revisões, seus arquivos de mídia, comentários, usuários, configurações, níveis, regras wiki e modelos de e-mail. Logs operacionais, filas, cache e vínculos derivados da wiki ficam fora da importação.
 
 ## Preparar
 
@@ -57,8 +57,6 @@ Se o MySQL retornar `1045`, o comando indica se a conexão rejeitada foi a orige
  exigem a mesma `APP_KEY` no ambiente que passará a autenticar pela nova base.
 - Hash ausente ou em formato incompatível fica vazio. Contas ativas usam a opção de redefinição por e-mail para cadastrar uma senha. Contas inativas seguem o fluxo de ativação. A migração preserva a senha já gravada no destino nas reexecuções. Tokens e senhas provisórias devem ser emitidos novamente.
 - Avatares em Base64 passam pela mesma deduplicação das imagens. Os caminhos antigos são preservados como referência para registros sem Base64.
-- Relações preservam as chaves legadas para futura adaptação do backend. Presença, cache e histórico de e-mails ficam como registros legados, sem reativar sessões ou reenviar mensagens. Tabelas sem chave primária usam hash da linha e número da ocorrência para manter duplicatas legítimas. Exclusões na origem ficam fora da sincronização automática.
-- Logs de visitas e entregas podem ser grandes. O comando lê as linhas em fluxo e apresenta um resumo por tabela. Faça o ensaio com uma cópia e confira o tempo antes de escolher a janela final.
 
 ## Reexecutar e conferir
 
@@ -78,4 +76,8 @@ Em destinos já importados, a primeira execução requer também permissão ALTE
 
 `pages.title` guarda o título exibido, `pages.slug` guarda a forma canônica com hífens, caixa e acentos do título, e `pages.identifier` guarda a chave normalizada, com índice único. Por exemplo, `EspéciAlidade Teste` produz `EspéciAlidade-Teste` e `especialidade-teste`. Títulos sem caracteres aproveitáveis usam a URL legada. Colisões entre páginas legadas distintas são registradas em `migration_errors`.
 
-O importador cria chaves estrangeiras para as páginas relacionadas. Os valores textuais legados permanecem como dados auxiliares e históricos. Referências sem correspondência ficam com ID nulo. Reexecute sobre o destino para preencher as novas colunas preservando os IDs existentes. O usuário de migração precisa de ALTER e REFERENCES. A API em uso continua conectada ao legado. Na troca para a nova base, a busca de páginas deve aplicar a mesma normalização e consultar o identificador indexado.
+As relações derivadas começam vazias e as páginas importadas são marcadas com `needs_rebuild = 1`. A rotina de atualização conectada à nova base deverá reconstruir os vínculos a partir do conteúdo. A API em uso continua no legado.
+
+### Destino com esquema anterior
+
+Use uma base de destino nova se já tiver executado a versão anterior da migração. O importador preserva as bases anteriores. Os comentários são importados com IDs de página quando disponíveis. O histórico editorial é importado em `page_revisions`, e `migration_errors` registra apenas falhas da nova execução.
