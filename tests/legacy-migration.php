@@ -28,12 +28,13 @@ $revision = $db->prepare("INSERT INTO PAGINAS_LOGS (NOME_URL_ID, IDENT, NOME_URL
 $revision->execute([2, $a]);
 $revision->execute([5, $b]);
 $revision->execute([9, $a]);
+$db->exec("INSERT INTO PAGINAS_CATEGORIAS (IDENT, NOME_URL, CATEGORIA_IDENT, CATEGORIA_URL) VALUES ('article', 'Artigo_Exemplo', 'category', 'Categoria')");
+$db->exec('DROP TABLE ACESSOS_LOGS, EMAIL_LOGS, CRONJOB_LOGS');
 $db->exec("INSERT INTO COMENTARIOS (ID, NOME_URL) VALUES (1, 'Artigo_Exemplo'), (2, 'Pagina_Ausente')");
 $insertUser = $db->prepare("INSERT INTO USUARIOS (ID, EMAIL, SENHA, ATIVO, FOTO_64) VALUES (?, ?, ?, 'S', ?)");
 $insertUser->execute([100, 'migrated@example.test', md5('legacy-password'), $a]);
 $insertUser->execute([101, 'reset@example.test', 'unsupported', null]);
 $db->exec("INSERT INTO CONFIG (CHAVE, VALOR) VALUES ('test', 'first')");
-$db->exec("INSERT INTO ACESSOS_LOGS (UID) VALUES ('same'), ('same')");
 
 $db->exec('USE migration_target');
 $root = sys_get_temp_dir() . '/mdawiki-migration-' . bin2hex(random_bytes(8));
@@ -55,6 +56,10 @@ $run = static function (int $expected = 0): void {
 };
 
 $run();
+check((int) $db->query('SELECT COUNT(*) FROM page_categories')->fetchColumn() === 0, 'Categoria derivada foi importada.');
+check((int) $db->query("SELECT needs_rebuild FROM pages WHERE legacy_identifier = 'article'")->fetchColumn() === 1, 'Página não marcada para reconstrução.');
+check(array_column($db->query('SHOW COLUMNS FROM page_categories')->fetchAll(PDO::FETCH_ASSOC), 'Field')
+    === ['id', 'page_id', 'category_id', 'position'], 'Estrutura de categorias incorreta.');
 $importedPage = $db->query("SELECT id, slug, identifier FROM pages WHERE legacy_identifier = 'article'")->fetch(PDO::FETCH_ASSOC);
 check($importedPage['slug'] === 'EspéciAlidade-Teste' && $importedPage['identifier'] === 'especialidade-teste', 'Slug e identificador incorretos.');
 check((int) $db->query('SELECT page_id FROM comments WHERE id = 1')->fetchColumn() === (int) $importedPage['id'], 'Comentário sem vínculo por ID.');
@@ -65,7 +70,6 @@ check((int) $db->query('SELECT avatar_file_id FROM users WHERE id = 100')->fetch
 $db->exec("UPDATE users SET password_hash = 'reset-in-destination' WHERE id = 101");
 $run();
 check($db->query('SELECT password_hash FROM users WHERE id = 101')->fetchColumn() === 'reset-in-destination', 'Reexecução sobrescreveu senha.');
-check((int) $db->query('SELECT COUNT(*) FROM session_events')->fetchColumn() === 2, 'Ocorrências sem chave não foram preservadas.');
 check($db->query("SELECT setting_value FROM settings WHERE setting_key = 'test'")->fetchColumn() === 'first', 'Configuração não importada.');
 check((int) $db->query('SELECT COUNT(*) FROM pages')->fetchColumn() === 2, 'Duplicação de páginas.');
 check((int) $db->query('SELECT COUNT(*) FROM files')->fetchColumn() === 3, 'Deduplicação por pasta incorreta.');

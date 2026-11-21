@@ -181,29 +181,14 @@ function pageSlugs(?string $title, string $fallback): array
     throw new RuntimeException('Título e URL legada não geraram um identificador válido.');
 }
 
-function applyPageRelationships(PDO $target, array $references): void
+function validateDestinationSchema(PDO $target): void
 {
-    $columns = $target->query('SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS
-        WHERE TABLE_SCHEMA = DATABASE()')->fetchAll();
-    $existing = [];
-    foreach ($columns as $column) {
-        $existing[$column['TABLE_NAME']][$column['COLUMN_NAME']] = true;
-    }
-    if (!isset($existing['pages']['identifier'])) {
-        $target->exec('ALTER TABLE pages ADD COLUMN identifier VARCHAR(250) COLLATE utf8mb4_bin NULL,
-            ADD UNIQUE KEY pages_identifier_unique (identifier)');
-    }
-    foreach ($references as $table => $fields) {
-        $changes = [];
-        foreach (array_keys($fields) as $field) {
-            if (!isset($existing[$table][$field])) {
-                $changes[] = 'ADD COLUMN ' . $field . ' BIGINT UNSIGNED NULL';
-                $changes[] = 'ADD FOREIGN KEY (' . $field . ') REFERENCES pages (id)';
-            }
-        }
-        if ($changes !== []) {
-            $target->exec('ALTER TABLE ' . $table . ' ' . implode(', ', $changes));
-        }
+    $legacyColumns = $target->query("SELECT COUNT(*) FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+        AND ((TABLE_NAME = 'comments' AND COLUMN_NAME = 'page_slug')
+          OR (TABLE_NAME = 'page_categories' AND COLUMN_NAME = 'legacy_page_identifier'))")->fetchColumn();
+    if ((int) $legacyColumns !== 0) {
+        throw new RuntimeException('O destino tem o esquema anterior. Configure uma nova base de destino para importar com o esquema atual.');
     }
 }
 
@@ -223,26 +208,6 @@ function buildPageLookup(PDO $source, PDO $target): array
     }
 
     return $lookup;
-}
-
-function resolvePageReference(array $lookup, string $field, array $values, array $columns): ?int
-{
-    foreach ($columns as $column) {
-        $value = $values[$column] ?? '';
-        if ($value === '') {
-            continue;
-        }
-        $index = str_ends_with($column, '_identifier') ? 'identifier' : 'slug';
-        $match = $lookup[$index][$value] ?? null;
-        if ($match === null && $field === 'image_page_id' && $index === 'identifier') {
-            $match = $lookup[$index]['imagem@' . $value] ?? null;
-        }
-        if ($match !== null) {
-            return $match;
-        }
-    }
-
-    return null;
 }
 
 function migratePage(PDO $source, PDO $target, string $root, array $row, array &$counts, array &$context): void
@@ -272,7 +237,7 @@ function migratePage(PDO $source, PDO $target, string $root, array $row, array &
             'plain_text' => $isImage ? null : legacyText($row['CONTEUDO_TXT']),
             'is_searchable' => legacyFlag($row['BUSCA']),
             'access_level_id' => $row['NIVEL'],
-            'needs_rebuild' => legacyFlag($row['ATUALIZAR']),
+            'needs_rebuild' => 1,
             'view_count' => $row['ACESSOS'],
             'is_html' => legacyFlag($row['HTML']),
             'is_sponsored' => legacyFlag($row['PATROCINADO']),
@@ -379,7 +344,7 @@ function recordMigrationError(PDO $target, string $runId, array $context, Throwa
     ]);
 }
 
-function migrateRemainingTables(PDO $source, PDO $target, string $root, string $appKey, string $runId, array $references): int
+function migrateRemainingTables(PDO $source, PDO $target, string $root, string $appKey, string $runId): int
 {
     $errors = 0;
     $lookup = buildPageLookup($source, $target);
@@ -387,8 +352,6 @@ function migrateRemainingTables(PDO $source, PDO $target, string $root, string $
     $tables = require __DIR__ . '/legacy-table-map.php';
     foreach ($tables as $legacyTable => [$table, $keys, $fields]) {
         $users = $legacyTable === 'USUARIOS';
-        $keyless = $keys === ['source_hash', 'source_occurrence'];
-        $occurrences = [];
         $statement = null;
         $copied = 0;
         $failed = 0;
@@ -415,15 +378,9 @@ function migrateRemainingTables(PDO $source, PDO $target, string $root, string $
                         default => legacyText($value),
                     };
                 }
-                if ($keyless) {
-                    $hash = checksum($row);
-                    $occurrences[$hash] = ($occurrences[$hash] ?? 0) + 1;
-                    $values['source_hash'] = $hash;
-                    $values['source_occurrence'] = $occurrences[$hash];
-                    $context['key'] = ['hash' => $hash, 'occurrence' => $occurrences[$hash]];
-                }
-                foreach ($references[$table] ?? [] as $field => $columnsForReference) {
-                    $values[$field] = resolvePageReference($lookup, $field, $values, $columnsForReference);
+                if ($table === 'comments') {
+                    $values['page_id'] = $lookup['slug'][$values['page_slug']] ?? null;
+                    unset($values['page_slug']);
                 }
                 $protected = $keys;
                 if ($users) {
@@ -504,9 +461,8 @@ try {
         throw new RuntimeException('Já existe uma migração executando nesse destino.');
     }
     $stage = 'Aplicação do esquema no destino';
+    validateDestinationSchema($target);
     applyDestinationSchema($target);
-    $references = require __DIR__ . '/legacy-page-references.php';
-    applyPageRelationships($target, $references);
     // Existing destinations used a unique hash across all media. The unique
     // storage key now deduplicates each media folder independently.
     if ($target->query("SHOW INDEX FROM files WHERE Key_name = 'sha256' AND Non_unique = 0")->fetch()) {
@@ -556,7 +512,7 @@ try {
         fwrite(STDOUT, json_encode($counts, JSON_THROW_ON_ERROR) . PHP_EOL);
     }
     $stage = 'Importação das tabelas complementares';
-    $counts['table_errors'] = migrateRemainingTables($source, $target, $root, $config['app_key'], $runId, $references);
+    $counts['table_errors'] = migrateRemainingTables($source, $target, $root, $config['app_key'], $runId);
     fwrite(STDOUT, 'Total: ' . json_encode($counts, JSON_THROW_ON_ERROR) . PHP_EOL);
     exit($counts['errors'] + $counts['table_errors'] === 0 ? 0 : 1);
 } catch (Throwable $error) {
