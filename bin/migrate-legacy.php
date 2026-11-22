@@ -16,23 +16,6 @@ function setting(string $name, ?string $default = null): string
     return $value === false ? $default : $value;
 }
 
-function connectDestination(): PDO
-{
-    $dsn = sprintf(
-        'mysql:host=%s;port=%s;dbname=%s;charset=utf8mb4',
-        setting('MIGRATION_DB_HOST', '127.0.0.1'),
-        setting('MIGRATION_DB_PORT', '3306'),
-        setting('MIGRATION_DB_DATABASE'),
-    );
-
-    return new PDO($dsn, setting('MIGRATION_DB_USERNAME'), setting('MIGRATION_DB_PASSWORD', ''), [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        PDO::ATTR_EMULATE_PREPARES => false,
-        PDO::MYSQL_ATTR_MULTI_STATEMENTS => false,
-    ]);
-}
-
 function query(PDO $db, string $sql, array $values = []): PDOStatement
 {
     $statement = $db->prepare($sql);
@@ -177,7 +160,8 @@ function validateDestinationSchema(PDO $target): void
     $legacyColumns = $target->query("SELECT COUNT(*) FROM information_schema.COLUMNS
         WHERE TABLE_SCHEMA = DATABASE()
         AND ((TABLE_NAME = 'comments' AND COLUMN_NAME = 'page_slug')
-          OR (TABLE_NAME = 'page_categories' AND COLUMN_NAME = 'legacy_page_identifier'))")->fetchColumn();
+          OR (TABLE_NAME = 'page_categories' AND COLUMN_NAME = 'legacy_page_identifier')
+          OR (UPPER(TABLE_NAME) = 'PAGINAS' AND UPPER(COLUMN_NAME) = 'NOME_URL'))")->fetchColumn();
     if ((int) $legacyColumns !== 0) {
         throw new RuntimeException('O destino tem o esquema anterior. Configure uma nova base de destino para importar com o esquema atual.');
     }
@@ -315,6 +299,7 @@ function migratePage(PDO $source, PDO $target, string $root, array $row, array &
 function applyDestinationSchema(PDO $target): void
 {
     foreach (['001_content_and_media.sql', '002_remaining_legacy_tables.sql', '003_migration_errors.sql'] as $migration) {
+        fwrite(STDOUT, "Aplicando {$migration}..." . PHP_EOL);
         $path = dirname(__DIR__) . '/migrations/' . $migration;
         $sql = is_readable($path) ? file_get_contents($path) : false;
         if ($sql === false || trim($sql) === '') {
@@ -356,7 +341,8 @@ function migrateRemainingTables(PDO $source, PDO $target, string $root, string $
         $statement = null;
         $copied = 0;
         $failed = 0;
-        fwrite(STDOUT, "Importando {$legacyTable} → {$table}..." . PHP_EOL);
+        $total = (int) $source->query("SELECT COUNT(*) FROM `{$legacyTable}`")->fetchColumn();
+        fwrite(STDOUT, "Importando {$legacyTable} → {$table} ({$total} registros)..." . PHP_EOL);
         $columns = array_keys($fields);
         if ($users) {
             array_push($columns, 'FOTO_64', 'FOTO_32X32_64');
@@ -416,6 +402,10 @@ function migrateRemainingTables(PDO $source, PDO $target, string $root, string $
                     fwrite(STDERR, "{$legacyTable}: {$message}" . PHP_EOL);
                 }
             }
+            $attempted = $copied + $failed;
+            if ($attempted % 1000 === 0) {
+                fwrite(STDOUT, "{$table}: {$attempted}/{$total} registros. Falhas: {$failed}." . PHP_EOL);
+            }
         }
         $result->closeCursor();
         fwrite(STDOUT, "{$table}: {$copied} processados, {$failed} erros." . PHP_EOL);
@@ -439,16 +429,25 @@ try {
         throw new RuntimeException('Habilite a extensão PHP intl para normalizar os slugs.');
     }
     $config = require dirname(__DIR__) . '/config/bootstrap.php';
-    $stage = 'Conexão com a origem (DB_*)';
-    $source = MDAWiki\LegacyPageRepository::connect($config['db'], $config['public_max_level'])->connection();
-    $stage = 'Conexão com o destino (MIGRATION_DB_*)';
-    $target = connectDestination();
+    $stage = 'Conexão com a origem legada (MIGRATION_DB_*)';
+    fwrite(STDOUT, $stage . PHP_EOL);
+    $source = MDAWiki\LegacyPageRepository::connect([
+        'host' => setting('MIGRATION_DB_HOST', '127.0.0.1'),
+        'port' => setting('MIGRATION_DB_PORT', '3306'),
+        'database' => setting('MIGRATION_DB_DATABASE'),
+        'username' => setting('MIGRATION_DB_USERNAME'),
+        'password' => setting('MIGRATION_DB_PASSWORD', ''),
+        'charset' => setting('MIGRATION_DB_CHARSET', 'latin1'),
+    ], $config['public_max_level'])->connection();
+    $stage = 'Conexão com a nova base (DB_*)';
+    fwrite(STDOUT, $stage . PHP_EOL);
+    $target = MDAWiki\LegacyPageRepository::connect(['charset' => 'utf8mb4'] + $config['db'], $config['public_max_level'])->connection();
     $stage = 'Validação das bases';
     $identity = 'SELECT CONCAT(@@hostname, "/", @@port, "/", @@server_id, "/", DATABASE())';
     $originIdentity = $source->query($identity)->fetchColumn();
     $targetIdentity = $target->query($identity)->fetchColumn();
-    if ($originIdentity === null || $targetIdentity === null) {
-        throw new RuntimeException('Informe dbname nos dois DSNs.');
+    if (!$originIdentity || !$targetIdentity) {
+        throw new RuntimeException('Informe o nome das duas bases de dados.');
     }
     if ($originIdentity === $targetIdentity) {
         throw new RuntimeException('Origem e destino apontam para a mesma base.');
@@ -479,6 +478,9 @@ try {
     }
     $counts = ['inserted' => 0, 'updated' => 0, 'unchanged' => 0, 'revisions' => 0, 'errors' => 0];
 
+    $total = (int) $source->query('SELECT COUNT(*) FROM PAGINAS')->fetchColumn();
+    fwrite(STDOUT, "Importando {$total} páginas, revisões e mídias..." . PHP_EOL);
+    $attempted = 0;
     $after = null;
     while (true) {
         // Select only keys for batching to avoid loading multiple images at once.
@@ -489,6 +491,7 @@ try {
             break;
         }
         foreach ($keys as $after) {
+            $attempted++;
             $row = query($source, 'SELECT * FROM PAGINAS WHERE IDENT = ?', [$after])->fetch();
             if ($row === false) {
                 continue;
@@ -510,12 +513,14 @@ try {
                     . ': ' . ($error instanceof PDOException ? 'Erro SQL ' . $error->getCode() : $error->getMessage()) . PHP_EOL);
             }
         }
-        fwrite(STDOUT, json_encode($counts, JSON_THROW_ON_ERROR) . PHP_EOL);
+        fwrite(STDOUT, "Páginas: {$attempted}/{$total}. " . json_encode($counts, JSON_THROW_ON_ERROR) . PHP_EOL);
     }
     $stage = 'Importação das tabelas complementares';
     $counts['table_errors'] = migrateRemainingTables($source, $target, $root, $config['app_key'], $runId);
+    $stage = 'Reprocessamento final das páginas';
+    $counts['rebuild_errors'] = MDAWiki\NormalizedPageRebuild::run(new MDAWiki\Database($target), $config);
     fwrite(STDOUT, 'Total: ' . json_encode($counts, JSON_THROW_ON_ERROR) . PHP_EOL);
-    exit($counts['errors'] + $counts['table_errors'] === 0 ? 0 : 1);
+    exit($counts['errors'] + $counts['table_errors'] + $counts['rebuild_errors'] === 0 ? 0 : 1);
 } catch (Throwable $error) {
     $code = $error instanceof PDOException ? (int) ($error->errorInfo[1] ?? $error->getCode()) : 0;
     $message = match (true) {
