@@ -60,7 +60,13 @@ $run = static function (int $expected = 0): void {
     check($status === $expected, 'Código de saída inesperado do importador.');
 };
 
+foreach (['mail_template_recipients', 'mail_templates', 'mail_profile_settings'] as $obsolete) {
+    $db->exec("CREATE TABLE {$obsolete} (id INT PRIMARY KEY)");
+}
 $run();
+check((int) $db->query("SELECT COUNT(*) FROM information_schema.tables
+    WHERE table_schema = DATABASE() AND table_name IN ('mail_template_recipients', 'mail_templates', 'mail_profile_settings')")->fetchColumn() === 0,
+    'As tabelas obsoletas de e-mail devem ser removidas da base migrada.');
 foreach (['pages', 'images', 'image_revisions'] as $table) {
     check((int) $db->query("SELECT MIN(created_by) FROM $table")->fetchColumn() === 100,
         "A migração deve localizar o autor por e-mail e gravar o ID em $table.");
@@ -157,8 +163,11 @@ $authConfig = [
     'frontend_url' => 'https://example.test', 'media_public_url' => 'https://api.example.test/media',
     'storage_dir' => $root, 'media_root' => $root, 'app_key' => str_repeat('a', 32), 'public_max_level' => 1,
 ];
+$authConfig['mail'] = ['admin_to' => 'admin@example.test'];
+$subjects = [];
 $session = new MDAWiki\Session(false);
-$features = new MDAWiki\Features(new MDAWiki\Database($db), $session, $authConfig, static fn () => null);
+$features = new MDAWiki\Features(new MDAWiki\Database($db), $session, $authConfig,
+    static function (string $to, string $subject) use (&$subjects): void { $subjects[] = $subject; });
 $auth = new MDAWiki\Application(static fn () => $normalized, $authConfig, static fn () => $features);
 $origin = 'http://localhost:5173';
 $publicUser = $auth->handle('GET', '/v1/public-users/' . $publicId, [], $origin);
@@ -183,6 +192,7 @@ $change = ['title' => 'EspéciAlidade Teste', 'source' => 'Texto novo', 'base_ve
 check($auth->handle('POST', $slug . '/preview', [], $origin, $change, $csrf)->status === 200, 'Prévia do artigo falhou.');
 $saved = $auth->handle('PUT', $slug, [], $origin, $change, $csrf);
 check($saved->status === 200, 'Salvamento do artigo migrado falhou.');
+check(end($subjects) === '[page][update] EspéciAlidade Teste', 'Alteração do artigo deve notificar o admin.');
 check($auth->handle('PUT', $slug, [], $origin, $change, $csrf)->status === 409, 'Versão desatualizada sobrescreveu artigo.');
 $history = $auth->handle('GET', $slug . '/history', [], $origin);
 check($history->status === 200 && $history->body['data']['revisions'][0]['source'] === 'Texto novo', 'Revisão salva não consta no histórico.');
@@ -217,11 +227,13 @@ $db->exec("DELETE FROM page_categories WHERE page_id = $articleId");
 $db->exec("UPDATE pages SET rendered_html = 'desatualizado', needs_rebuild = 1 WHERE id = $articleId");
 $queue = $auth->handle('GET', '/v1/catalog', ['type' => 'atualizar'], $origin);
 check($queue->status === 200 && (int) $queue->body['data']['items'][0]['id'] === (int) $articleId, 'Página pendente ausente da fila.');
+$beforeRebuild = count($subjects);
 $rebuilt = $auth->handle('POST', $slug . '/rebuild', [], $origin, [], $csrf);
 check($rebuilt->status === 200 && $rebuilt->body['data'] === $saved->body['data'], 'Atualizar alterou a revisão ou versão de edição.');
 check((int) $db->query("SELECT COUNT(*) FROM page_revisions WHERE page_id = $articleId")->fetchColumn() === 2, 'Atualizar criou histórico.');
 check($db->query("SELECT category_id FROM page_categories WHERE page_id = $articleId ORDER BY position")->fetchAll(PDO::FETCH_COLUMN) === $expectedCategories, 'Atualizar não refez categorias.');
 check($db->query("SELECT rendered_html FROM pages WHERE id = $articleId")->fetchColumn() !== 'desatualizado', 'Atualizar não refez HTML.');
+check(count($subjects) === $beforeRebuild, 'Reprocessamento não deve enviar e-mail.');
 $imageKey = $db->query("SELECT f.storage_key FROM images i JOIN files f ON f.id = i.file_id WHERE i.id = $imageId")->fetchColumn();
 
 check($normalized->canServeArticleFile($imageKey), 'Imagem pública fora da busca deve carregar nos artigos.');
@@ -250,12 +262,16 @@ check($upload->status === 200 && $upload->body['data']['slug'] === 'Esd', 'Envio
 $changedImage = $auth->handle('PUT', '/v1/images/Esd', [], $origin, ['data' => $b, 'base_version' => $upload->body['data']['version']], $csrf);
 check($changedImage->status === 200 && $changedImage->body['data']['history'][0]['url'] === $upload->body['data']['url'],
     'Substituição deve preservar o arquivo anterior.');
+check(array_slice($subjects, -2) === ['[img][new] Esd', '[img][update] Esd'], 'Envio e substituição devem notificar o admin.');
 $oldImage = $changedImage->body['data']['history'][0];
 check($oldImage['author'] === 'Editor de teste', 'Histórico deve mostrar o autor do arquivo anterior.');
 $restore = $auth->handle('PUT', '/v1/images/Esd', [], $origin,
     ['revision_id' => $oldImage['id'], 'base_version' => $changedImage->body['data']['version']], $csrf);
 check($restore->status === 200 && $restore->body['data']['url'] === $upload->body['data']['url']
     && count($restore->body['data']['history']) === 2, 'Restaurar deve preservar a versão substituída.');
+$cleared = $auth->handle('PUT', '/v1/images/Esd', [], $origin,
+    ['clear' => true, 'base_version' => $restore->body['data']['version']], $csrf);
+check($cleared->status === 200 && end($subjects) === '[img][delete] Esd', 'Remoção do arquivo deve notificar o admin.');
 check($auth->handle('GET', '/v1/pages/I/editor', [], $origin)->status === 422, 'Endereço de um caractere deve ser reservado.');
 $change['source'] = 'Sem vínculos';
 $change['base_version'] = $rebuilt->body['data']['base_version'];

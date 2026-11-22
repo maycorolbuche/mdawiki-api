@@ -8,13 +8,13 @@ final class Features
     private Pages $pages;
     private WikiRenderer $renderer;
     private RateLimiter $rate;
-    private LegacyMail $notifications;
+    private WikiMail $notifications;
     public function __construct(private Database $db, private Session $session, private array $config, Closure $mail) {
-        $this->notifications=new LegacyMail($db,$config,$mail);$this->accounts=new Accounts($db,$session,$config,$mail,$this->notifications);$this->renderer=new WikiRenderer($db,$config);$this->pages=new Pages($db,$this->accounts,$this->renderer,$config,$this->notifications);$this->rate=new RateLimiter($config['storage_dir'].'/rates');
+        $this->notifications=new WikiMail($config,$mail);$this->accounts=new Accounts($db,$session,$config,$mail,$this->notifications);$this->renderer=new WikiRenderer($db,$config);$this->pages=new Pages($db,$this->accounts,$this->renderer,$config,$this->notifications);$this->rate=new RateLimiter($config['storage_dir'].'/rates');
     }
     private function normalizedPages(): NormalizedPages
     {
-        return new NormalizedPages($this->db, $this->accounts, $this->renderer);
+        return new NormalizedPages($this->db, $this->accounts, $this->renderer, $this->notifications);
     }
 
     public function handle(string $method,string $path,array $query,array $body,string $csrf,string $ip): Response {
@@ -199,7 +199,7 @@ final class Features
     }
     private function image(string $method, string $slug, array $body): array
     {
-        $images = new NormalizedImages($this->db, $this->config, $method === 'GET' ? null : $this->normalizedPages());
+        $images = new NormalizedImages($this->db, $this->config, $method === 'GET' ? null : $this->normalizedPages(), $this->notifications);
         if ($method === 'GET') return $images->show($slug);
         $user = $this->accounts->current(true);
         if ((int) $user['NIVEL'] < 1) throw new HttpError(403, 'permission_denied', 'Você não pode enviar imagens.');
@@ -217,11 +217,12 @@ final class Features
         $file = (new Media($this->config))->upload($body, 'users', true);
         if ($this->config['normalized_read_only'] ?? false) {
             $this->db->run('UPDATE users SET avatar_filename = ?, updated_at = NOW() WHERE id = ?', [$file['filename'], (int) $user['ID']]);
+            $this->accounts->notifyProfile((int) $user['ID']);
             return $file;
         }
         $this->db->run('UPDATE USUARIOS SET FOTO = ?, FOTO_32X32 = ?, FOTO_64 = NULL, FOTO_32X32_64 = NULL WHERE ID = ?',
             [$file['filename'], $file['filename'], (int) $user['ID']]);
-        $this->notifications->notify('USU_ALTERACAO', $user['EMAIL']);
+        $this->accounts->notifyProfile((int) $user['ID']);
         return $file;
     }
 }

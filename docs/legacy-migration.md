@@ -17,7 +17,7 @@ A origem é acessada em modo somente leitura. Ajuste `MIGRATION_DB_CHARSET` conf
 php bin/migrate-legacy.php
 ```
 
-O terminal mostra as etapas, o número de registros processados e os erros. A rotina cria as tabelas ausentes e importa páginas, revisões, mídias, usuários, comentários, configurações, níveis, regras wiki e modelos de e-mail. Depois, usa a mesma rotina de `php bin/rebuild-normalized-pages.php` para renderizar as páginas e reconstruir seus vínculos, sem criar revisões. Logs operacionais e filas ficam fora da migração.
+O terminal mostra as etapas, o número de registros processados e os erros. A rotina cria as tabelas ausentes e importa páginas, revisões, mídias, usuários, comentários, configurações, níveis, e regras wiki. Depois, usa a mesma rotina de `php bin/rebuild-normalized-pages.php` para renderizar as páginas e reconstruir seus vínculos, sem criar revisões. Logs operacionais e filas ficam fora da migração.
 
 As mídias são geradas do Base64 original sob `articles/` e `users/`, no `MEDIA_ROOT` da API nova. O padrão é `var/media`. Cada arquivo usa o hash SHA-256 no nome.
 

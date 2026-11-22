@@ -16,26 +16,6 @@ return [
         'CHAVE' => 'setting_key',
         'VALOR' => 'setting_value',
     ]],
-    'EMAIL_CONFIG' => ['mail_profile_settings', ['profile_key', 'setting_key'], [
-        'IDENTIF' => 'profile_key',
-        'CHAVE' => 'setting_key',
-        'VALOR' => 'setting_value',
-    ]],
-    'EMAIL_ENVIO' => ['mail_template_recipients', ['event_key', 'to_address'], [
-        'TIPO_EMAIL' => 'event_key',
-        'EMAIL' => 'to_address',
-        'CC' => 'cc',
-        'CCO' => 'bcc',
-        'ASSUNTO' => 'subject_override',
-        'MENSAGEM' => 'body_override',
-    ]],
-    'EMAIL_MSG' => ['mail_templates', ['event_key'], [
-        'TIPO_EMAIL' => 'event_key',
-        'DESCRICAO' => 'description',
-        'ASSUNTO' => 'subject',
-        'MENSAGEM' => 'body',
-        'IDENTIF' => 'profile_key',
-    ]],
     'NIVEL' => ['access_levels', ['id'], [
         'NIVEL' => 'id:number',
         'DESCRICAO' => 'description',

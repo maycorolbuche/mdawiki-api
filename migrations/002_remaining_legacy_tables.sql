@@ -15,32 +15,6 @@ CREATE TABLE IF NOT EXISTS settings (
     PRIMARY KEY (`setting_key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS mail_profile_settings (
-    `profile_key` VARCHAR(50) COLLATE utf8mb4_bin NOT NULL,
-    `setting_key` VARCHAR(50) COLLATE utf8mb4_bin NOT NULL,
-    `setting_value` VARCHAR(50),
-    PRIMARY KEY (`profile_key`, `setting_key`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS mail_template_recipients (
-    `event_key` VARCHAR(50) COLLATE utf8mb4_bin NOT NULL,
-    `to_address` VARCHAR(100) COLLATE utf8mb4_bin NOT NULL,
-    `cc` VARCHAR(100),
-    `bcc` VARCHAR(100),
-    `subject_override` VARCHAR(50),
-    `body_override` LONGTEXT,
-    PRIMARY KEY (`event_key`, `to_address`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS mail_templates (
-    `event_key` VARCHAR(50) COLLATE utf8mb4_bin NOT NULL,
-    `description` LONGTEXT,
-    `subject` VARCHAR(50),
-    `body` LONGTEXT,
-    `profile_key` VARCHAR(50),
-    PRIMARY KEY (`event_key`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
 CREATE TABLE IF NOT EXISTS access_levels (
     `id` INT NOT NULL,
     `description` VARCHAR(50),
