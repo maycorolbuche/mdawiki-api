@@ -30,3 +30,5 @@ A rotina termina com código 1 se houver falhas de importação ou reprocessamen
 ## Imagens e endereços reservados
 
 Em uma base de destino vazia, os registros legados `imagem@...` entram em `images`, as versões entram em `image_revisions` e os vínculos regenerados em `page_media` apontam para `images.id`. O endereço público da imagem é `/i/<slug>`. A importação registra como falha páginas comuns com identificador de um único caractere, reservado ao sistema.
+
+Páginas legadas com prefixo `doc@` no identificador ou na URL e suas revisões ficam fora da importação.
