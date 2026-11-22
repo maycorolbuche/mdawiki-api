@@ -35,7 +35,7 @@ final class Accounts
         }
         $column = $field === 'ID' ? 'id' : 'email';
         $rows = $this->db->rows("SELECT id AS ID, email AS EMAIL, password_hash AS SENHA,
-            name AS NOME, display_name AS APELIDO, access_level_id AS NIVEL,
+            name AS NOME, display_name AS APELIDO, access_level_id AS NIVEL, avatar_filename AS FOTO,
             birth_date AS DATA_NASC, city AS CIDADE, state_code AS ESTADO, club AS CLUBE,
             association AS ASSOCIACAO, club_type AS TIPO_CLUBE, biography AS BIOGRAFIA,
             created_at AS DT_CADASTRO, updated_at AS DT_ALTERACAO,
@@ -63,6 +63,16 @@ final class Accounts
         $file=$thumbnail && !empty($user['FOTO_32X32']) ? $user['FOTO_32X32'] : ($user['FOTO'] ?? '');
         return $file!=='' && $file!==null ? rtrim($config['media_public_url'],'/').'/users/'.rawurlencode(basename($file)) : null;
     }
+    public function publicProfile(string $publicId): array
+    {
+        $user = $this->db->one('SELECT name, display_name, birth_date, city, state_code, club, association,
+            club_type, biography, avatar_filename AS FOTO FROM users WHERE public_id = ? AND is_active = 1', [$publicId]);
+        if (!$user) throw new HttpError(404, 'user_not_found', 'Perfil não encontrado.');
+        $user['photo'] = self::photoUrl($user, $this->config);
+        unset($user['FOTO']);
+        return $user;
+    }
+
     public function session(): array { $u = $this->current(); return ['user'=>$u ? $this->profile($u) : null, 'csrf_token'=>$this->session->data['csrf']]; }
     public function login(array $body): array {
         $email = $this->email($body['email'] ?? null);

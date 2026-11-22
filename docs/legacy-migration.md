@@ -19,7 +19,7 @@ php bin/migrate-legacy.php
 
 O terminal mostra as etapas, o número de registros processados e os erros. A rotina cria as tabelas ausentes e importa páginas, revisões, mídias, usuários, comentários, configurações, níveis, regras wiki e modelos de e-mail. Depois, usa a mesma rotina de `php bin/rebuild-normalized-pages.php` para renderizar as páginas e reconstruir seus vínculos, sem criar revisões. Logs operacionais e filas ficam fora da migração.
 
-As mídias são geradas do Base64 original sob `articles/` e `avatars/`, no `MEDIA_ROOT` da API nova. O padrão é `var/media`. Cada arquivo usa o hash SHA-256 no nome.
+As mídias são geradas do Base64 original sob `articles/` e `users/`, no `MEDIA_ROOT` da API nova. O padrão é `var/media`. Cada arquivo usa o hash SHA-256 no nome.
 
 ## Reexecutar
 
@@ -34,3 +34,5 @@ Em uma base de destino vazia, os registros legados `imagem@...` entram em `image
 Páginas legadas com prefixo `doc@` no identificador ou na URL e suas revisões ficam fora da importação.
 
 Para o esquema de autoria por ID, use uma base de destino vazia. O importador carrega os usuários antes do conteúdo e resolve a autoria por e-mail durante a importação. Guarda os IDs em created_by e updated_by. Se o autor não puder ser identificado, o vínculo fica vazio.
+
+A migração de perfis exige o esquema novo em uma base de destino vazia. O identificador público é aleatório e estável nas reexecuções, e `avatar_filename` guarda o arquivo em `users/`.

@@ -14,8 +14,8 @@ CREATE TABLE IF NOT EXISTS users (
     `password_hash` VARCHAR(255) NOT NULL,
     `is_active` BOOLEAN,
     `display_name` VARCHAR(50),
-    `legacy_avatar_path` LONGTEXT,
-    `legacy_thumbnail_path` LONGTEXT,
+    avatar_filename VARCHAR(100),
+    public_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL UNIQUE,
     `birth_date` DATE,
     `city` VARCHAR(150),
     `state_code` CHAR(2),
@@ -39,10 +39,6 @@ CREATE TABLE IF NOT EXISTS users (
     `legacy_access_level` INT,
     `created_at` DATETIME,
     `updated_at` DATETIME,
-    avatar_file_id BIGINT UNSIGNED NULL,
-    thumbnail_file_id BIGINT UNSIGNED NULL,
-    FOREIGN KEY (avatar_file_id) REFERENCES files (id),
-    FOREIGN KEY (thumbnail_file_id) REFERENCES files (id),
     INDEX users_email_idx (email),
     PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

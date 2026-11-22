@@ -161,6 +161,7 @@ function validateDestinationSchema(PDO $target): void
         WHERE TABLE_SCHEMA = DATABASE()
         AND ((TABLE_NAME = 'comments' AND COLUMN_NAME = 'page_slug')
           OR (TABLE_NAME = 'pages' AND COLUMN_NAME = 'created_by_legacy')
+          OR (TABLE_NAME = 'users' AND COLUMN_NAME = 'legacy_avatar_path')
           OR (TABLE_NAME = 'page_categories' AND COLUMN_NAME = 'legacy_page_identifier')
           OR (UPPER(TABLE_NAME) = 'PAGINAS' AND UPPER(COLUMN_NAME) = 'NOME_URL'))")->fetchColumn();
     if ((int) $legacyColumns !== 0) {
@@ -422,10 +423,12 @@ function migrateRemainingTables(PDO $source, PDO $target, string $root, string $
                         default => '',
                     };
                     $protected[] = 'password_hash';
-                    $context['field'] = 'FOTO_64';
-                    $values['avatar_file_id'] = fileId($target, $root, 'avatars', $row['FOTO_64']);
-                    $context['field'] = 'FOTO_32X32_64';
-                    $values['thumbnail_file_id'] = fileId($target, $root, 'avatars', $row['FOTO_32X32_64']);
+                    $values['public_id'] = bin2hex(random_bytes(16));
+                    $protected[] = 'public_id';
+                    $context['field'] = trim($row['FOTO_64'] ?? '') !== '' ? 'FOTO_64' : 'FOTO_32X32_64';
+                    $avatar = fileId($target, $root, 'users', $row[$context['field']]);
+                    $values['avatar_filename'] = $avatar === null ? null
+                        : basename(query($target, 'SELECT storage_key FROM files WHERE id = ?', [$avatar])->fetchColumn());
                     $context['field'] = null;
                 }
                 $statement ??= prepareUpsert($target, $table, array_keys($values), $protected);

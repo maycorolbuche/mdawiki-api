@@ -52,12 +52,16 @@ final class NormalizedPages
         $user = $this->accounts->current(true);
         $page = $this->page($slug, $user);
         $rows = $this->db->rows('SELECT r.revision_number AS id, r.title, COALESCE(r.source, \'\') AS source,
-            r.created_at, u.display_name AS author, NULL AS author_photo
+            r.created_at, COALESCE(NULLIF(u.display_name, \'\'), u.name) AS author, u.avatar_filename AS FOTO, CASE WHEN u.is_active = 1 THEN u.public_id END AS author_profile_id
             FROM page_revisions r LEFT JOIN users u ON u.id = r.created_by
             WHERE r.page_id = ? AND r.revision_number < ? AND COALESCE(r.access_level_id, 1) <= ?
             AND COALESCE(r.is_expired, 0) = 0 ORDER BY r.revision_number DESC LIMIT 51',
             [$page['id'], $before, (int) $user['NIVEL']]);
-        $revisions = array_slice($rows, 0, 50);
+        $revisions = array_map(function (array $row): array {
+            $row['author_photo'] = $this->accounts->profile($row)['photo'];
+            unset($row['FOTO']);
+            return $row;
+        }, array_slice($rows, 0, 50));
         return ['title' => $page['title'], 'revisions' => $revisions,
             'next_cursor' => count($rows) > 50 ? (int) end($revisions)['id'] : null,
             'base_version' => $this->version($page)];

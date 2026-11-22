@@ -40,14 +40,14 @@ final class NormalizedImages
             WHERE m.image_id = ? AND p.is_searchable = 1 AND COALESCE(p.access_level_id, 1) <= ?
             AND p.legacy_identifier NOT LIKE 'page@%' ORDER BY title, p.id", [$image['id'], $this->config['public_max_level']]);
         $history = $this->db->rows("SELECT r.id, r.created_at, f.storage_key,
-            COALESCE(NULLIF(u.display_name, ''), NULLIF(u.name, '')) AS author FROM image_revisions r
+            COALESCE(NULLIF(u.display_name, ''), NULLIF(u.name, '')) AS author, CASE WHEN u.is_active = 1 THEN u.public_id END AS author_profile_id FROM image_revisions r
             JOIN files f ON f.id = r.file_id LEFT JOIN users u ON u.id = r.created_by
             WHERE r.image_id = ? AND r.access_level_id <= ?
             ORDER BY r.created_at DESC, r.id DESC", [$image['id'], $this->config['public_max_level']]);
         return ['slug' => $image['slug'], 'title' => $image['title'],
             'url' => $this->url($image['storage_key']), 'meta' => json_decode($image['meta'], true, 512, JSON_THROW_ON_ERROR),
             'version' => (string) ($image['file_id'] ?? ''), 'pages' => $members,
-            'history' => array_map(fn (array $row): array => ['id' => $row['id'], 'author' => $row['author'], 'created_at' => $row['created_at'],
+            'history' => array_map(fn (array $row): array => ['id' => $row['id'], 'author' => $row['author'], 'author_profile_id' => $row['author_profile_id'], 'created_at' => $row['created_at'],
                 'url' => $this->url($row['storage_key'])], $history)];
     }
 

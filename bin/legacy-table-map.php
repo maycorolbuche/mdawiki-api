@@ -56,8 +56,6 @@ return [
         'SENHA' => 'password_hash',
         'ATIVO' => 'is_active:flag',
         'APELIDO' => 'display_name',
-        'FOTO' => 'legacy_avatar_path',
-        'FOTO_32X32' => 'legacy_thumbnail_path',
         'DATA_NASC' => 'birth_date:date',
         'CIDADE' => 'city',
         'ESTADO' => 'state_code',
