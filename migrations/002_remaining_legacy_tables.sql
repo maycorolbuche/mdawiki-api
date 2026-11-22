@@ -111,11 +111,11 @@ CREATE TABLE IF NOT EXISTS page_categories (
 CREATE TABLE IF NOT EXISTS page_media (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     page_id BIGINT UNSIGNED NOT NULL,
-    image_page_id BIGINT UNSIGNED NOT NULL,
+    image_id BIGINT UNSIGNED NOT NULL,
     position INT NOT NULL,
     is_template BOOLEAN,
     FOREIGN KEY (page_id) REFERENCES pages (id),
-    FOREIGN KEY (image_page_id) REFERENCES pages (id)
+    FOREIGN KEY (image_id) REFERENCES images (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS page_includes (

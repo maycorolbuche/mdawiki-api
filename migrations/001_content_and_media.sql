@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS files (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    sha256 CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL UNIQUE,
+    sha256 CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     storage_key VARCHAR(100) CHARACTER SET ascii COLLATE ascii_bin NOT NULL UNIQUE,
     mime_type VARCHAR(100) NOT NULL,
     size_bytes BIGINT UNSIGNED NOT NULL,
@@ -55,17 +55,24 @@ CREATE TABLE IF NOT EXISTS page_revisions (
 
 CREATE TABLE IF NOT EXISTS images (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    page_id BIGINT UNSIGNED NOT NULL UNIQUE,
+    identifier VARCHAR(250) COLLATE utf8mb4_bin NOT NULL UNIQUE,
+    slug VARCHAR(250) COLLATE utf8mb4_bin NOT NULL,
+    title VARCHAR(250) NOT NULL,
+    meta JSON NOT NULL,
     file_id BIGINT UNSIGNED,
-    FOREIGN KEY (page_id) REFERENCES pages (id),
+    legacy_identifier VARCHAR(250) COLLATE utf8mb4_bin UNIQUE,
+    access_level_id INT NOT NULL DEFAULT 1,
     FOREIGN KEY (file_id) REFERENCES files (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS image_revisions (
-    page_revision_id BIGINT UNSIGNED PRIMARY KEY,
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     image_id BIGINT UNSIGNED NOT NULL,
     file_id BIGINT UNSIGNED,
-    FOREIGN KEY (page_revision_id) REFERENCES page_revisions (id),
+    legacy_revision_number INT NULL,
+    access_level_id INT NOT NULL DEFAULT 1,
+    created_at DATETIME,
+    UNIQUE (image_id, legacy_revision_number),
     FOREIGN KEY (image_id) REFERENCES images (id),
     FOREIGN KEY (file_id) REFERENCES files (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

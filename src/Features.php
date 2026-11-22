@@ -27,6 +27,8 @@ final class Features
                 if ($auth) $this->rate->check('account:'.hash('sha256',strtolower(is_string($body['email'] ?? null)?$body['email']:$ip)),20);
             }
             $data=match (true) {
+                ($this->config['normalized_editor'] ?? false) && in_array($method, ['GET', 'PUT'], true) && preg_match('~^/v1/images/([^/]+)$~D', $path, $m) === 1
+                    => $this->image($method, $this->slug(rawurldecode($m[1])), $body),
                 $method==='GET' && $path==='/v1/auth/session' => $this->accounts->session(),
                 $method==='POST' && $path==='/v1/auth/login' => $this->accounts->login($body),
                 $method==='POST' && $path==='/v1/auth/logout' => $this->accounts->logout(),
@@ -193,6 +195,16 @@ final class Features
         $rows=$this->db->rows('SELECT * FROM USUARIOS'.($filters?' WHERE '.implode(' AND ',$filters):'').' ORDER BY ID DESC LIMIT ? OFFSET ?',$values);
         return ['items'=>array_map($this->accounts->profile(...),array_slice($rows,0,$limit)),'next_offset'=>count($rows)>$limit?$offset+$limit:null];
     }
+    private function image(string $method, string $slug, array $body): array
+    {
+        $images = new NormalizedImages($this->db, $this->config);
+        if ($method === 'GET') return $images->show($slug);
+        $user = $this->accounts->current(true);
+        if ((int) $user['NIVEL'] < 1) throw new HttpError(403, 'permission_denied', 'Você não pode enviar imagens.');
+        $this->rate->check('media-user:' . $user['ID'], 20, 3600);
+        return $images->save($slug, $body, $user);
+    }
+
     private function upload(array $body): array { $u=$this->accounts->current(true);if ((int)$u['NIVEL']<1) throw new HttpError(403,'permission_denied','Você não tem permissão para enviar imagens da wiki.');$this->rate->check('media-user:'.$u['ID'],20,3600);return (new Media($this->config))->upload($body); }
     private function photo(array $body): array { $u=$this->accounts->current(true);$file=(new Media($this->config))->upload($body,'users',true);$this->db->run('UPDATE USUARIOS SET FOTO = ?, FOTO_32X32 = ?, FOTO_64 = NULL, FOTO_32X32_64 = NULL WHERE ID = ?',[$file['filename'],$file['filename'],(int)$u['ID']]);$this->notifications->notify('USU_ALTERACAO',$u['EMAIL']);return $file; }
 }

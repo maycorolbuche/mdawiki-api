@@ -5,10 +5,10 @@ namespace MDAWiki;
 
 final class NormalizedPageRepository implements PageRepository
 {
-    private const PUBLIC_PAGE = "p.is_searchable = 1 AND COALESCE(p.access_level_id, 1) <= ? AND p.legacy_identifier NOT LIKE 'page@%'";
+    private const PUBLIC_PAGE = "p.is_searchable = 1 AND COALESCE(p.access_level_id, 1) <= ? AND CHAR_LENGTH(p.identifier) > 1 AND p.legacy_identifier NOT LIKE 'page@%'";
     private const SELECT_PAGE = 'SELECT p.id, p.slug, p.title, p.kind, p.rendered_html AS html,
-        p.plain_text AS text, COALESCE(p.rebuilt_at, p.updated_at) AS updated_at, f.storage_key
-        FROM pages p LEFT JOIN images i ON i.page_id = p.id LEFT JOIN files f ON f.id = i.file_id';
+        p.plain_text AS text, COALESCE(p.rebuilt_at, p.updated_at) AS updated_at
+        FROM pages p';
 
     public function __construct(private readonly Database $db, private readonly int $maxLevel, private readonly string $mediaUrl, private readonly string $frontendUrl = 'https://mda.wiki.br')
     {
@@ -63,8 +63,6 @@ final class NormalizedPageRepository implements PageRepository
         $page['related_pages'] = $this->relationCards(
             'page_categories own JOIN page_categories related ON related.category_id = own.category_id JOIN pages p ON p.id = related.page_id',
             'own.page_id = ? AND p.id <> ?', [$page['id'], $page['id']], true);
-        $page['image_usage'] = $row['kind'] === 'image' ? $this->relationCards('page_media m JOIN pages p ON p.id = m.page_id',
-            'm.image_page_id = ?', [$page['id']]) : [];
         $categories = $this->db->rows('SELECT p.id, p.slug, p.title FROM page_categories c
             JOIN pages p ON p.id = c.category_id WHERE c.page_id = ? AND ' . self::PUBLIC_PAGE
             . ' ORDER BY c.position, c.id', [$page['id'], $this->maxLevel]);
@@ -118,8 +116,8 @@ final class NormalizedPageRepository implements PageRepository
 
     public function statistics(): array
     {
-        $row = $this->db->one("SELECT SUM(p.kind <> 'image') AS pages, SUM(p.kind = 'image') AS images,
-            SUM(p.view_count) AS views FROM pages p WHERE " . self::PUBLIC_PAGE, [$this->maxLevel]);
+        $row = $this->db->one("SELECT COUNT(*) AS pages, (SELECT COUNT(*) FROM images WHERE access_level_id <= ?) AS images,
+            SUM(p.view_count) AS views FROM pages p WHERE " . self::PUBLIC_PAGE, [$this->maxLevel, $this->maxLevel]);
         return array_map('intval', $row);
     }
 
@@ -145,22 +143,15 @@ final class NormalizedPageRepository implements PageRepository
 
     public function canServeArticleFile(string $key): bool
     {
-        return $this->db->one("SELECT p.id FROM files f JOIN images i ON i.file_id = f.id
-            JOIN pages p ON p.id = i.page_id WHERE f.storage_key = ? AND p.kind = 'image' AND COALESCE(p.access_level_id, 1) <= ? LIMIT 1",
-            [$key, $this->maxLevel]) !== null;
+        return $this->db->one('SELECT f.id FROM files f JOIN images i ON i.access_level_id <= ?
+            WHERE f.storage_key = ? AND (i.file_id = f.id OR EXISTS
+                (SELECT 1 FROM image_revisions r WHERE r.image_id = i.id AND r.file_id = f.id AND r.access_level_id <= ?)) LIMIT 1',
+            [$this->maxLevel, $key, $this->maxLevel]) !== null;
     }
 
     private function present(array $row): array
     {
         $row['id'] = (string) $row['id'];
-        if ($row['kind'] === 'image') {
-            $file = $row['storage_key'] ?? '';
-            $row['html'] = preg_match('~\Aarticles/[a-f0-9]{64}\.(?:avif|gif|jpe?g|png|svg|webp)\z~D', $file)
-                ? '<figure><img src="' . htmlspecialchars($this->mediaUrl . '/' . $file, ENT_QUOTES, 'UTF-8')
-                    . '" alt="' . htmlspecialchars($row['title'] ?? $row['slug'], ENT_QUOTES, 'UTF-8') . '"></figure>'
-                : '<p>Esta página está sem imagem.</p>';
-        }
-
         return $row;
     }
 }
