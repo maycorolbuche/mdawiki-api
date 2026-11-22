@@ -93,7 +93,7 @@ final class NormalizedPageRepository implements PageRepository
     }
 
     private const CARD = 'p.id, p.slug, COALESCE(p.title, p.slug) AS title,
-        LEFT(p.plain_text, 240) AS description, COALESCE(p.updated_at, p.created_at) AS updated_at';
+        COALESCE(p.updated_at, p.created_at) AS updated_at';
 
     public function search(array $query): array
     {
@@ -107,7 +107,7 @@ final class NormalizedPageRepository implements PageRepository
             return ['items' => [], 'next_offset' => null];
         }
         $like = '%' . str_replace(['!', '%', '_'], ['!!', '!%', '!_'], trim($term)) . '%';
-        $rows = $this->db->rows('SELECT ' . self::CARD . ' FROM pages p WHERE ' . self::PUBLIC_PAGE
+        $rows = $this->db->rows('SELECT ' . self::CARD . ', LEFT(p.plain_text, 240) AS description FROM pages p WHERE ' . self::PUBLIC_PAGE
             . " AND (p.title LIKE ? ESCAPE '!' OR p.plain_text LIKE ? ESCAPE '!') ORDER BY p.title, p.id LIMIT ? OFFSET ?",
             [$this->maxLevel, $like, $like, $limit + 1, $offset]);
         return ['items' => array_map($this->card(...), array_slice($rows, 0, $limit)),
@@ -148,7 +148,7 @@ final class NormalizedPageRepository implements PageRepository
 
     public function home(): array
     {
-        $columns = self::CARD . ', (SELECT f.storage_key FROM page_media m
+        $columns = self::CARD . ', p.plain_text AS description, (SELECT f.storage_key FROM page_media m
             JOIN images i ON i.id = m.image_id JOIN files f ON f.id = i.file_id
             WHERE m.page_id = p.id AND COALESCE(m.is_template, 0) = 0 AND i.access_level_id <= ?
             ORDER BY m.position, m.id LIMIT 1) AS image';
@@ -157,9 +157,9 @@ final class NormalizedPageRepository implements PageRepository
         $levels = [$this->maxLevel, $this->maxLevel];
         $result = [
             'statistics' => $this->statistics(),
-            'random' => array_map($this->card(...), $this->db->rows($sql . $withContent . ' ORDER BY RAND() LIMIT 3', $levels)),
-            'recent' => array_map($this->card(...), $this->db->rows($sql . ' ORDER BY updated_at DESC, p.id LIMIT 10', $levels)),
-            'popular' => array_map($this->card(...), $this->db->rows($sql . $withContent . ' ORDER BY p.view_count DESC, p.id LIMIT 10', $levels)),
+            'random' => array_map($this->homeCard(...), $this->db->rows($sql . $withContent . ' ORDER BY RAND() LIMIT 3', $levels)),
+            'recent' => array_map($this->homeCard(...), $this->db->rows($sql . ' ORDER BY updated_at DESC, p.id LIMIT 10', $levels)),
+            'popular' => array_map($this->homeCard(...), $this->db->rows($sql . $withContent . ' ORDER BY p.view_count DESC, p.id LIMIT 10', $levels)),
             'missing' => [],
         ];
         $now = time();
@@ -169,10 +169,16 @@ final class NormalizedPageRepository implements PageRepository
                     WHERE visited_at >= ? AND visited_at <= ? GROUP BY page_id) v ON v.page_id = p.id
                 WHERE ' . self::PUBLIC_PAGE . $withContent . ' ORDER BY v.views DESC, p.id LIMIT 10',
                 [$this->maxLevel, $now - $days * 86400, $now, $this->maxLevel]);
-            $result[$key] = array_map($this->card(...), $rows);
+            $result[$key] = array_map($this->homeCard(...), $rows);
         }
         $result['top_today'] = $result['top_24h']; // Compatibility with older home clients.
         return $result;
+    }
+
+    private function homeCard(array $row): array
+    {
+        $row['description'] = PageSummary::shorten($row['description'], 240);
+        return $this->card($row);
     }
 
     private function card(array $row): array
