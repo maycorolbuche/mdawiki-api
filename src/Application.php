@@ -44,11 +44,15 @@ final class Application
         if ($method === 'OPTIONS') {
             return new Response(204, [], $headers + ['Access-Control-Allow-Methods' => 'GET, POST, PUT, OPTIONS', 'Access-Control-Allow-Headers' => 'Accept, Content-Type, X-CSRF-Token']);
         }
-        if (($this->config['normalized_read_only'] ?? false)
+        $normalized = $this->config['normalized_read_only'] ?? false;
+        $previewAccountRoute = ($method === 'GET' && in_array($path, ['/v1/auth/session', '/v1/profile'], true))
+            || ($method === 'POST' && in_array($path, ['/v1/auth/login', '/v1/auth/logout'], true))
+            || ($method === 'GET' && preg_match('~^/v1/view/[^/]+$~D', $path));
+        if ($normalized && !$previewAccountRoute
             && ($method !== 'GET' || !preg_match('~^/(?:health|v1/(?:home|search|statistics)|v1/pages(?:/[^/]+)?|media/.*)?$~D', $path))) {
             return new Response(501, ['error' => ['code' => 'read_only_preview', 'message' => 'A base migrada está em prévia de leitura pública.']], $headers);
         }
-        if ($this->features !== null && (preg_match('~^/v1/(auth/|profile(?:/|$)|media$|search$|catalog$|statistics$|home$|visits$|view/|users(?:/|$))~', $path) || preg_match('~^/v1/pages/[^/]+/(editor|history|preview|restore|rebuild)$~D', $path) || ($method === 'PUT' && str_starts_with($path, '/v1/pages/')))) {
+        if ($this->features !== null && ($normalized ? $previewAccountRoute : (preg_match('~^/v1/(auth/|profile(?:/|$)|media$|search$|catalog$|statistics$|home$|visits$|view/|users(?:/|$))~', $path) || preg_match('~^/v1/pages/[^/]+/(editor|history|preview|restore|rebuild)$~D', $path) || ($method === 'PUT' && str_starts_with($path, '/v1/pages/'))))) {
             if ($method !== 'GET' && $origin === '') return new Response(403, ['error'=>['code'=>'origin_required','message'=>'Origem da solicitação ausente.']], $headers);
             try {
                 $response = (($this->features)())->handle($method,$path,$query,$body,$csrf,$ip);
