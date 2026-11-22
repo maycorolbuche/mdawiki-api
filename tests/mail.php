@@ -54,6 +54,7 @@ checkMail(end($messages)['subject'] === '[user][update] Nome alterado', 'Profile
 $pages = new Pages($db, $accounts, new WikiRenderer($db, $config), $config, $mail);
 $page = $pages->save('Mail_article', ['title' => 'Artigo de teste', 'source' => 'Texto original', 'base_version' => '']);
 checkMail(end($messages)['subject'] === '[page][new] Artigo de teste' && str_contains(end($messages)['body'], 'Texto original'), 'Page creation includes content');
+checkMail(str_contains(end($messages)['body'], 'href="https://site.mda.wiki.br/Mail_article"'), 'Page notice links to the article');
 $pages->save('Mail_article', ['title' => 'Artigo alterado', 'source' => 'Texto novo', 'base_version' => $page['base_version']]);
 checkMail(end($messages)['subject'] === '[page][update] Artigo alterado', 'Page update notifies admins');
 $accounts->requestCode(['email' => $email], true);

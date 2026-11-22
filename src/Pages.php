@@ -76,10 +76,10 @@ final class Pages
                 if ($source !== '' || $cleared) {
                     $imageUrl = isset($metadata['url']) ? str_replace('@imgs_wiki/', $this->config['media_public_url'] . '/wiki/', $metadata['url']) : null;
                     $this->notifications?->event('img', $cleared ? 'delete' : $action, $title, $u,
-                        ['Arquivo' => $imageUrl, 'Endereço' => $slug], $imageUrl);
+                        ['Arquivo' => $imageUrl, 'Endereço' => $slug], $imageUrl, '/imagem@' . rawurlencode(substr($slug, 7)));
                 }
             } else {
-                $this->notifications?->event('page', $action, $title, $u, ['Endereço' => $slug, 'Conteúdo' => $source]);
+                $this->notifications?->event('page', $action, $title, $u, ['Endereço' => $slug, 'Conteúdo' => $source], path: '/' . rawurlencode($slug));
             }
             return ['slug'=>$slug,'revision'=>$revision,'base_version'=>self::version($this->source($slug))];
         } finally { flock($lock,LOCK_UN);fclose($lock); }

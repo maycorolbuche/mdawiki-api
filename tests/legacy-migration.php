@@ -165,9 +165,13 @@ $authConfig = [
 ];
 $authConfig['mail'] = ['admin_to' => 'admin@example.test'];
 $subjects = [];
+$mailBody = '';
 $session = new MDAWiki\Session(false);
 $features = new MDAWiki\Features(new MDAWiki\Database($db), $session, $authConfig,
-    static function (string $to, string $subject) use (&$subjects): void { $subjects[] = $subject; });
+    static function (string $to, string $subject, string $body) use (&$subjects, &$mailBody): void {
+        $subjects[] = $subject;
+        $mailBody = $body;
+    });
 $auth = new MDAWiki\Application(static fn () => $normalized, $authConfig, static fn () => $features);
 $origin = 'http://localhost:5173';
 $publicUser = $auth->handle('GET', '/v1/public-users/' . $publicId, [], $origin);
@@ -194,6 +198,7 @@ $saved = $auth->handle('PUT', $slug, [], $origin, $change, $csrf);
 check($saved->status === 200, 'Salvamento do artigo migrado falhou.');
 check(end($subjects) === '[page][update] EspéciAlidade Teste', 'Alteração do artigo deve notificar o admin.');
 check($auth->handle('PUT', $slug, [], $origin, $change, $csrf)->status === 409, 'Versão desatualizada sobrescreveu artigo.');
+check(str_contains($mailBody, 'href="https://example.test/Esp%C3%A9ciAlidade-Teste"'), 'E-mail deve usar o endereço canônico do artigo.');
 $history = $auth->handle('GET', $slug . '/history', [], $origin);
 check($history->status === 200 && $history->body['data']['revisions'][0]['source'] === 'Texto novo', 'Revisão salva não consta no histórico.');
 $db->exec("UPDATE users SET access_level_id = 5 WHERE id = 100");
@@ -259,6 +264,7 @@ check((int) $shownImage['pages'][0]['id'] === (int) $articleId && $shownImage['m
 $db->exec("UPDATE users SET display_name = 'Editor de teste' WHERE id = 100");
 $upload = $auth->handle('PUT', '/v1/images/Esd', [], $origin, ['data' => $a, 'base_version' => ''], $csrf);
 check($upload->status === 200 && $upload->body['data']['slug'] === 'Esd', 'Envio inicial da imagem falhou.');
+check(str_contains($mailBody, 'href="https://example.test/i/Esd"'), 'E-mail deve apontar para a página da imagem.');
 $changedImage = $auth->handle('PUT', '/v1/images/Esd', [], $origin, ['data' => $b, 'base_version' => $upload->body['data']['version']], $csrf);
 check($changedImage->status === 200 && $changedImage->body['data']['history'][0]['url'] === $upload->body['data']['url'],
     'Substituição deve preservar o arquivo anterior.');
@@ -279,6 +285,10 @@ check($auth->handle('PUT', $slug, [], $origin, $change, $csrf)->status === 200, 
 foreach (['page_categories', 'page_media', 'page_links', 'page_templates', 'page_headings', 'page_external_links', 'page_videos'] as $table) {
     check((int) $db->query("SELECT COUNT(*) FROM $table WHERE page_id = $articleId")->fetchColumn() === 0, "Vínculos antigos em $table.");
 }
+$accountService = new MDAWiki\Accounts(new MDAWiki\Database($db), $session, $authConfig,
+    static function (string $to, string $subject, string $body) use (&$mailBody): void { $mailBody = $body; });
+$accountService->notifyProfile(100);
+check(str_contains($mailBody, 'href="https://example.test/u/' . $publicId . '"'), 'E-mail deve apontar para o perfil público do usuário.');
 check($auth->handle('POST', '/v1/auth/logout', [], $origin, [], $login->body['data']['csrf_token'])->status === 200, 'Logout migrado falhou.');
 
 $db->exec('USE migration_source');

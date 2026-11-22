@@ -206,7 +206,7 @@ final class NormalizedImages
             'Endereço' => $slug, 'Arquivo' => $url, 'Formato' => $properties['extension'] ?? null,
             'Largura' => $properties['width'] ?? null, 'Altura' => $properties['height'] ?? null,
             'Tamanho em bytes' => $properties['size_bytes'] ?? null,
-        ], $url);
+        ], $url, '/i/' . rawurlencode($slug));
     }
 
     private function replace(array $image, int|string|null $file, string $meta, int $author): void
