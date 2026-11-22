@@ -153,12 +153,13 @@ final class NormalizedPageRepository implements PageRepository
             WHERE m.page_id = p.id AND COALESCE(m.is_template, 0) = 0 AND i.access_level_id <= ?
             ORDER BY m.position, m.id LIMIT 1) AS image';
         $sql = 'SELECT ' . $columns . ' FROM pages p WHERE ' . self::PUBLIC_PAGE;
+        $withContent = " AND p.source REGEXP '[^[:space:]]'";
         $levels = [$this->maxLevel, $this->maxLevel];
         $result = [
             'statistics' => $this->statistics(),
-            'random' => array_map($this->card(...), $this->db->rows($sql . ' ORDER BY RAND() LIMIT 3', $levels)),
+            'random' => array_map($this->card(...), $this->db->rows($sql . $withContent . ' ORDER BY RAND() LIMIT 3', $levels)),
             'recent' => array_map($this->card(...), $this->db->rows($sql . ' ORDER BY updated_at DESC, p.id LIMIT 10', $levels)),
-            'popular' => array_map($this->card(...), $this->db->rows($sql . ' ORDER BY p.view_count DESC, p.id LIMIT 10', $levels)),
+            'popular' => array_map($this->card(...), $this->db->rows($sql . $withContent . ' ORDER BY p.view_count DESC, p.id LIMIT 10', $levels)),
             'missing' => [],
         ];
         $now = time();
@@ -166,7 +167,7 @@ final class NormalizedPageRepository implements PageRepository
             $rows = $this->db->rows('SELECT ' . $columns . ', v.views FROM pages p JOIN
                 (SELECT page_id, COUNT(*) AS views FROM page_visits
                     WHERE visited_at >= ? AND visited_at <= ? GROUP BY page_id) v ON v.page_id = p.id
-                WHERE ' . self::PUBLIC_PAGE . ' ORDER BY v.views DESC, p.id LIMIT 10',
+                WHERE ' . self::PUBLIC_PAGE . $withContent . ' ORDER BY v.views DESC, p.id LIMIT 10',
                 [$this->maxLevel, $now - $days * 86400, $now, $this->maxLevel]);
             $result[$key] = array_map($this->card(...), $rows);
         }

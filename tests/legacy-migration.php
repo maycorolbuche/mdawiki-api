@@ -444,3 +444,17 @@ check(str_contains($home['top_24h'][0]['image'] ?? '', '/media/articles/'), 'O c
 $db->prepare('UPDATE images SET access_level_id = 5 WHERE id = ?')->execute([$imageId]);
 $home = $auth->handle('GET', '/v1/home', [], $origin)->body['data'];
 check($home['top_24h'][0]['image'] === null, 'O card público deve ocultar imagens restritas.');
+
+$db->prepare('UPDATE pages SET is_searchable = 0 WHERE id <> ?')->execute([$articleId]);
+$insert = $db->prepare("INSERT INTO pages (legacy_identifier, identifier, slug, title, kind, source, is_searchable, access_level_id, legacy_checksum, view_count)
+    VALUES (?, ?, ?, ?, 'article', ?, ?, 1, ?, 100)");
+foreach ([['Sem-Conteudo', " \n\t ", 1], ['Fora-Da-Busca', 'Texto de teste', 0]] as [$title, $source, $searchable]) {
+    $identifier = strtolower($title);
+    $insert->execute([$identifier, $identifier, $title, $title, $source, $searchable, str_repeat('0', 64)]);
+    $db->prepare('INSERT INTO page_visits (page_id, visited_at) VALUES (?, ?)')->execute([$db->lastInsertId(), time()]);
+}
+$home = $auth->handle('GET', '/v1/home', [], $origin)->body['data'];
+foreach (['random', 'popular', 'top_24h', 'top_week', 'top_month'] as $section) {
+    check(array_column($home[$section], 'id') === [(string) $articleId],
+        "O bloco {$section} deve exibir apenas artigos buscáveis com conteúdo.");
+}
