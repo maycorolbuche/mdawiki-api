@@ -113,7 +113,7 @@ final class NormalizedPages
         if (!is_string($source) || strlen($source) > 500000) {
             throw new HttpError(422, 'invalid_page', 'Conteúdo inválido (limite de 500 KB).');
         }
-        return $this->renderer->render($source, $page['slug'], (bool) $page['is_html']);
+        return $this->renderer->render($source, $page['slug'], (bool) $page['is_html'], isset($page['id']) ? (int) $page['id'] : null);
     }
 
     public function save(string $slug, array $body, ?int $restore = null, bool $rebuild = false): array
@@ -133,7 +133,8 @@ final class NormalizedPages
     private function write(string $slug, array $body, ?int $restore, bool $rebuild, array $user): array
     {
         $pdo = $this->db->pdo;
-        $pdo->beginTransaction();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) $pdo->beginTransaction();
         try {
             $creating = !$rebuild && $restore === null && ($body['base_version'] ?? null) === '';
             $page = $this->page($slug, $user, !$creating, $creating);
@@ -183,10 +184,10 @@ final class NormalizedPages
                 $this->db->run('UPDATE pages SET needs_rebuild = 1 WHERE id IN
                     (SELECT page_id FROM page_includes WHERE target_page_id = ?)', [$page['id']]);
             }
-            $pdo->commit();
+            if ($ownsTransaction) $pdo->commit();
             return ['slug' => $page['slug'], 'revision' => $number, 'base_version' => $this->version($page)];
         } catch (\Throwable $error) {
-            $pdo->rollBack();
+            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
             throw $error;
         }
     }

@@ -49,7 +49,7 @@ final class WikiRenderer
             return $this->includes($text,[...$stack,$id]);
         },$source);
     }
-    public function render(string $source, string $slug, bool $rawHtml=false): array {
+    public function render(string $source, string $slug, bool $rawHtml=false, ?int $pageId = null): array {
         $source=str_replace(["\r\n","\r"],"\n",$source);
         $source=$this->includes($source,[Database::id($slug)]);
         $meta=['categories'=>[],'links'=>[],'external_links'=>[],'includes'=>[],'templates'=>[],'images'=>[],'videos'=>[],'headings'=>[],'redirect'=>null];
@@ -104,10 +104,39 @@ final class WikiRenderer
             }
         }
         $html=$this->urls($html);
+        if ($pageId !== null && ($this->config['normalized_editor'] ?? false)) {
+            $html = $this->refreshLinkedMedia($html, $pageId, $meta['image_refs'] ?? []);
+        }
+
         preg_match_all('~<img[^>]+src=[\'"]([^\'"<>]+)[\'"]~i',$html,$images); $meta['images']=$images[1];
         // Dynamic list macros are links to the new live catalog, never old PHP.
         $html=(new PublicLists($this->db,$this->config))->render($html);
         return $meta+['html'=>$html,'text'=>trim(html_entity_decode(strip_tags($html),ENT_QUOTES|ENT_HTML5,'UTF-8'))];
     }
+    private function refreshLinkedMedia(string $html, int $pageId, array $references): string
+    {
+        $base = rtrim($this->config['media_public_url'], '/') . '/';
+        $generated = array_fill_keys(array_column($references, 'url'), true);
+        return preg_replace_callback('~(<img\b[^>]*?\s+src\s*=\s*)(["\x27])(.*?)\2~is',
+            function (array $image) use ($pageId, $base, $generated): string {
+                $url = html_entity_decode($image[3], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                [$urlWithoutQuery] = explode('?', $url, 2);
+                if (!str_starts_with($urlWithoutQuery, $base) || isset($generated[$urlWithoutQuery])) {
+                    return $image[0];
+                }
+                $key = substr($urlWithoutQuery, strlen($base));
+                if (!preg_match('~^articles/[a-f0-9]{64}\.[a-z0-9]+$~D', $key)) return $image[0];
+                $matches = $this->db->rows('SELECT DISTINCT current_file.storage_key
+                    FROM page_media m JOIN images i ON i.id = m.image_id JOIN files current_file ON current_file.id = i.file_id
+                    JOIN files referenced ON referenced.storage_key = ?
+                    WHERE m.page_id = ? AND i.access_level_id <= ? AND (i.file_id = referenced.id OR EXISTS
+                        (SELECT 1 FROM image_revisions r WHERE r.image_id = i.id AND r.file_id = referenced.id
+                            AND r.access_level_id <= ?)) LIMIT 2',
+                    [$key, $pageId, $this->config['public_max_level'], $this->config['public_max_level']]);
+                if (count($matches) !== 1 || $matches[0]['storage_key'] === $key) return $image[0];
+                return $image[1] . '"' . self::e($base . $matches[0]['storage_key']) . '"';
+            }, $html) ?? $html;
+    }
+
 }
 
