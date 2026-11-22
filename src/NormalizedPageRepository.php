@@ -25,6 +25,18 @@ final class NormalizedPageRepository implements PageRepository
         return array_map($this->present(...), $rows);
     }
 
+    public static function lookup(Database $db, string $slug, bool $lock = false): ?array
+    {
+        try {
+            [, $identifier] = PageSlugs::fromTitle($slug, '');
+        } catch (\RuntimeException) {
+            return null;
+        }
+        return $db->one('SELECT * FROM pages WHERE identifier = ? OR legacy_identifier = ?
+            ORDER BY identifier = ? DESC LIMIT 1' . ($lock ? ' FOR UPDATE' : ''),
+            [$identifier, Database::id($slug), $identifier]);
+    }
+
     public function find(string $slug): ?array
     {
         try {

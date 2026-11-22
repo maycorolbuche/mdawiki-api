@@ -12,6 +12,11 @@ final class Features
     public function __construct(private Database $db, private Session $session, private array $config, Closure $mail) {
         $this->notifications=new LegacyMail($db,$config,$mail);$this->accounts=new Accounts($db,$session,$config,$mail,$this->notifications);$this->renderer=new WikiRenderer($db,$config);$this->pages=new Pages($db,$this->accounts,$this->renderer,$config,$this->notifications);$this->rate=new RateLimiter($config['storage_dir'].'/rates');
     }
+    private function normalizedPages(): NormalizedPages
+    {
+        return new NormalizedPages($this->db, $this->accounts, $this->renderer);
+    }
+
     public function handle(string $method,string $path,array $query,array $body,string $csrf,string $ip): Response {
         try {
             if (!in_array($method,['GET','POST','PUT'],true)) throw new HttpError(405,'method_not_allowed','Método não permitido.');
@@ -44,7 +49,9 @@ final class Features
                 $method==='GET' && preg_match('~^/v1/view/([^/]+)$~D',$path,$m)===1 => $this->view(rawurldecode($m[1])),
                 $method==='GET' && preg_match('~^/v1/users(?:/(\d+))?$~D',$path,$m)===1 => $this->users($query,isset($m[1])?(int)$m[1]:null),
                 preg_match('~^/v1/pages/([^/]+)/(editor|history|preview|restore|rebuild)$~D',$path,$m)===1 => $this->pageAction($method,rawurldecode($m[1]),$m[2],$query,$body),
-                $method==='PUT' && preg_match('~^/v1/pages/([^/]+)$~D',$path,$m)===1 => $this->pages->save($this->slug(rawurldecode($m[1])),$body),
+                $method==='PUT' && preg_match('~^/v1/pages/([^/]+)$~D',$path,$m)===1 => ($this->config['normalized_editor'] ?? false)
+                    ? $this->normalizedPages()->save($this->slug(rawurldecode($m[1])), $body)
+                    : $this->pages->save($this->slug(rawurldecode($m[1])), $body),
                 default => throw new HttpError(404,'route_not_found','Rota não encontrada.'),
             };
             return new Response(200,['data'=>$data]);
@@ -71,6 +78,17 @@ final class Features
     }
     private function pageAction(string $method,string $slug,string $action,array $query,array $body): array {
         $slug=$this->slug($slug);
+        if ($this->config['normalized_editor'] ?? false) {
+            $pages = $this->normalizedPages();
+            return match ([$method, $action]) {
+                ['GET', 'editor'] => $pages->editor($slug),
+                ['GET', 'history'] => $pages->history($slug, $this->integer($query['before'] ?? PHP_INT_MAX, 1, PHP_INT_MAX)),
+                ['POST', 'preview'] => $pages->preview($slug, $body),
+                ['POST', 'restore'] => $pages->save($slug, $body, $this->integer($body['revision'] ?? 0, 1, PHP_INT_MAX)),
+                ['POST', 'rebuild'] => $pages->save($slug, [], rebuild: true),
+                default => throw new HttpError(405, 'method_not_allowed', 'Método não permitido.'),
+            };
+        }
         if ($method==='GET' && $action==='editor') return $this->pages->editor($slug);
         if ($method==='GET' && $action==='history') return $this->pages->history($slug,$this->integer($query['before'] ?? PHP_INT_MAX,1,PHP_INT_MAX));
         if ($method==='POST' && $action==='preview') return $this->pages->preview($slug,$body);

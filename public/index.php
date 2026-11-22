@@ -28,6 +28,7 @@ if ($path !== '/' && rtrim($path, '/') !== '/health' && ($_SERVER['REQUEST_METHO
     }
 }
 $config['normalized_read_only'] = $normalized;
+$config['normalized_editor'] = $normalized;
 $repository = static function () use ($config, $normalized, $connection) {
     $legacy = $connection ?? LegacyPageRepository::connect($config['db'], $config['public_max_level'], $config);
     return $normalized
