@@ -115,6 +115,18 @@ final class Features
     }
     private function catalog(array $q): array {
         [$limit,$offset]=$this->bounds($q);$type=Database::id(is_string($q['type'] ?? null)?$q['type']:'paginas');$filter=$this->publicFilter();$params=[];
+        if (($this->config['normalized_editor'] ?? false) && $type === 'atualizar') {
+            $user = $this->accounts->current(true);
+            if ((int) $user['NIVEL'] < 5) {
+                throw new HttpError(403, 'permission_denied', 'Acesso restrito a administradores.');
+            }
+            $rows = $this->db->rows("SELECT id, slug, COALESCE(title, slug) AS title FROM pages
+                WHERE needs_rebuild = 1 AND kind <> 'image' AND legacy_identifier NOT LIKE 'page@%'
+                AND COALESCE(access_level_id, 1) <= ? ORDER BY title, id LIMIT ? OFFSET ?",
+                [(int) $user['NIVEL'], $limit + 1, $offset]);
+            return ['type' => $type, 'items' => array_slice($rows, 0, $limit),
+                'next_offset' => count($rows) > $limit ? $offset + $limit : null];
+        }
         $sql=match($type) {
             'categorias' => "SELECT c.CATEGORIA_IDENT AS id,c.CATEGORIA_URL AS slug,MIN(c.CATEGORIA) AS title,COUNT(*) AS count FROM PAGINAS_CATEGORIAS c JOIN PAGINAS p ON p.IDENT=c.IDENT WHERE $filter GROUP BY c.CATEGORIA_IDENT,c.CATEGORIA_URL ORDER BY title",
             'links_inexistentes' => "SELECT DISTINCT l.LINK_IDENT AS id,l.LINK_URL AS slug,l.LINK AS title FROM PAGINAS_LINKS l JOIN PAGINAS p ON p.IDENT=l.IDENT LEFT JOIN PAGINAS target ON target.IDENT=l.LINK_IDENT WHERE $filter AND target.IDENT IS NULL AND l.LINK_URL IS NOT NULL AND l.LINK_IDENT NOT LIKE '#%' ORDER BY title",

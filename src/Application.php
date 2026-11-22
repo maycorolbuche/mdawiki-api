@@ -47,7 +47,9 @@ final class Application
         $normalized = $this->config['normalized_read_only'] ?? false;
         $previewAccountRoute = ($method === 'GET' && in_array($path, ['/v1/auth/session', '/v1/profile'], true))
             || ($method === 'POST' && in_array($path, ['/v1/auth/login', '/v1/auth/logout'], true))
-            || ($method === 'GET' && preg_match('~^/v1/view/[^/]+$~D', $path));
+            || ($method === 'GET' && preg_match('~^/v1/view/[^/]+$~D', $path))
+            || ($method === 'GET' && $path === '/v1/catalog' && ($query['type'] ?? null) === 'atualizar'
+                && ($this->config['normalized_editor'] ?? false));
         $normalizedPageRoute = ($this->config['normalized_editor'] ?? false) && (
             ($method === 'GET' && preg_match('~^/v1/pages/[^/]+/(editor|history)$~D', $path))
             || ($method === 'POST' && preg_match('~^/v1/pages/[^/]+/(preview|restore|rebuild)$~D', $path))

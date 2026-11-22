@@ -100,25 +100,29 @@ final class NormalizedPages
             $last = $this->db->one('SELECT MAX(revision_number) AS revision, LEAST(COALESCE(MIN(legacy_revision_number), 0), 0) AS legacy
                 FROM page_revisions WHERE page_id = ?', [$page['id']]);
             $number = (int) $last['revision'];
-            if ($rebuild || $title !== $page['title'] || $source !== ($page['source'] ?? '')) {
-                $rendered = $this->render($page, $source);
-                $now = date('Y-m-d H:i:s');
-                if (!$rebuild) {
-                    $number++;
-                    $this->db->run('INSERT INTO page_revisions
-                        (page_id, legacy_revision_number, revision_number, slug, title, source, rendered_html,
-                         is_searchable, access_level_id, editor_email, legacy_user_id, is_expired, created_at, legacy_checksum)
-                         VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?)',
-                        [$page['id'], (int) $last['legacy'] - 1, $number, $page['slug'], $title, $source, $rendered['html'],
-                         $page['is_searchable'], $page['access_level_id'], $user['EMAIL'], $user['ID'], $now, str_repeat('0', 64)]);
-                    $this->db->run('UPDATE pages SET title = ?, source = ?, updated_at = ?, updated_by_legacy = ? WHERE id = ?',
-                        [$title, $source, $now, $user['EMAIL'], $page['id']]);
-                    $page['title'] = $title;
-                    $page['source'] = $source;
-                    $page['updated_at'] = $now;
-                }
-                $this->db->run('UPDATE pages SET rendered_html = ?, plain_text = ?, rebuilt_at = ?, needs_rebuild = 0 WHERE id = ?',
-                    [$rendered['html'], $rendered['text'], $now, $page['id']]);
+            $rendered = $this->render($page, $source);
+            $now = date('Y-m-d H:i:s');
+            if (!$rebuild && ($title !== $page['title'] || $source !== ($page['source'] ?? ''))) {
+                $number++;
+                $this->db->run('INSERT INTO page_revisions
+                    (page_id, legacy_revision_number, revision_number, slug, title, source, rendered_html,
+                     is_searchable, access_level_id, editor_email, legacy_user_id, is_expired, created_at, legacy_checksum)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?)',
+                    [$page['id'], (int) $last['legacy'] - 1, $number, $page['slug'], $title, $source, $rendered['html'],
+                     $page['is_searchable'], $page['access_level_id'], $user['EMAIL'], $user['ID'], $now, str_repeat('0', 64)]);
+                $this->db->run('UPDATE pages SET title = ?, source = ?, updated_at = ?, updated_by_legacy = ? WHERE id = ?',
+                    [$title, $source, $now, $user['EMAIL'], $page['id']]);
+                $page['title'] = $title;
+                $page['source'] = $source;
+                $page['updated_at'] = $now;
+                $page['updated_by_legacy'] = $user['EMAIL'];
+            }
+            $this->db->run('UPDATE pages SET rendered_html = ?, plain_text = ?, rebuilt_at = ?, needs_rebuild = 0 WHERE id = ?',
+                [$rendered['html'], $rendered['text'], $now, $page['id']]);
+            (new PageRelations($this->db))->replace((int) $page['id'], $source, $rendered);
+            if ($page['rendered_html'] !== $rendered['html']) {
+                $this->db->run('UPDATE pages SET needs_rebuild = 1 WHERE id IN
+                    (SELECT page_id FROM page_includes WHERE target_page_id = ?)', [$page['id']]);
             }
             $pdo->commit();
             return ['slug' => $page['slug'], 'revision' => $number, 'base_version' => $this->version($page)];

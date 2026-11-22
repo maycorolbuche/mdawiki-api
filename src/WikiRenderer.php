@@ -21,7 +21,11 @@ final class WikiRenderer
                 return [];
             }
             $file = $this->db->one('SELECT f.storage_key FROM images i JOIN files f ON f.id = i.file_id WHERE i.page_id = ?', [$page['id']]);
-            return $file ? ['IMAGEM' => json_encode(array_fill_keys(['url', 'url_mini', 'url_cp'], $file['storage_key']), JSON_THROW_ON_ERROR)] : [];
+            if (!$file) return [];
+            $key = $file['storage_key'];
+            $size = isset($this->config['media_root']) ? @getimagesize($this->config['media_root'] . '/' . $key) : false;
+            return ['IMAGEM' => json_encode(array_fill_keys(['url', 'url_mini', 'url_cp'], $key)
+                + ['w' => $size[0] ?? 100, 'h' => $size[1] ?? 100], JSON_THROW_ON_ERROR), 'page_id' => (int) $page['id']];
         }
         $row=$this->db->one("SELECT CONTEUDO FROM PAGINAS WHERE IDENT = ? AND COALESCE(NIVEL,1) <= ?",['imagem@'.Database::id(preg_replace('/!tmpl$/','',$name)),(int)$this->config['public_max_level']]);
         $file=json_decode($row['CONTEUDO'] ?? '',true);
@@ -66,7 +70,7 @@ final class WikiRenderer
                     $result=$this->image($name);$file=json_decode($result['IMAGEM'] ?? '',true) ?: [];
                     $title=preg_replace('/!tmpl$/','',$name);$url=$file['url'] ?? '';
                     if ($url!=='' && !preg_match('~^https?://~',$url)) $url=rtrim($this->config['media_public_url'],'/').'/'.ltrim($url,'/');
-                    $meta['image_refs'][]=['name'=>$title,'id'=>Database::id($title),'url'=>$url,'template'=>str_ends_with($name,'!tmpl')?'S':'N'];
+                    $meta['image_refs'][]=['name'=>$title,'id'=>Database::id($title),'url'=>$url,'template'=>str_ends_with($name,'!tmpl')?'S':'N','page_id'=>$result['page_id'] ?? null];
                     return $result;
                 };
                 $html=\MDAWiki\Wiki\page_tabelas($html);

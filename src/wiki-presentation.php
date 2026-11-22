@@ -648,7 +648,7 @@ function page_templates($conteudo, $page)
 			$value = substr($value, 0, -5);
 			$img_t = "S";
 		}
-		$rs = resolve_image($value);
+		$rs = resolve_image($value . ($img_t === "S" ? "!tmpl" : ""));
 		if (count($rs) > 0) {
 			$linha = $rs;
 			$file = json_decode($linha["IMAGEM"], true);
