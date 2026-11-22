@@ -133,6 +133,7 @@ check($home->status === 200 && count($home->body['data']['recent']) === 1, 'Iní
 
 
 $authConfig = [
+    'normalized_editor' => true,
     'normalized_read_only' => true, 'origins' => ['http://localhost:5173'],
     'frontend_url' => 'https://example.test', 'media_public_url' => 'https://api.example.test/media',
     'storage_dir' => $root, 'app_key' => str_repeat('a', 32), 'public_max_level' => 1,
@@ -147,4 +148,18 @@ check($auth->handle('POST', '/v1/auth/login', [], $origin, $credentials, 'wrong'
 $login = $auth->handle('POST', '/v1/auth/login', [], $origin, $credentials, $initial->body['data']['csrf_token']);
 check($login->status === 200 && (int) $login->body['data']['user']['ID'] === 100, 'Login do usuário migrado falhou.');
 check($auth->handle('GET', '/v1/view/Imagem', [], $origin)->status === 200, 'Sessão migrada não conseguiu ler artigo público.');
+$db->exec("UPDATE pages SET access_level_id = 1 WHERE legacy_identifier = 'article'");
+$slug = '/v1/pages/Especialidade_Teste';
+$public = $auth->handle('GET', $slug, [], $origin);
+check($public->status === 200 && $public->body['data']['read_only'] === false, 'Botões do artigo ficaram ocultos.');
+$editor = $auth->handle('GET', $slug . '/editor', [], $origin);
+check($editor->status === 200 && $editor->body['data']['source'] === 'Editado', 'Editor não abriu o artigo migrado.');
+$csrf = $login->body['data']['csrf_token'];
+$change = ['title' => 'EspéciAlidade Teste', 'source' => 'Texto novo', 'base_version' => $editor->body['data']['base_version']];
+check($auth->handle('POST', $slug . '/preview', [], $origin, $change, $csrf)->status === 200, 'Prévia do artigo falhou.');
+$saved = $auth->handle('PUT', $slug, [], $origin, $change, $csrf);
+check($saved->status === 200, 'Salvamento do artigo migrado falhou.');
+check($auth->handle('PUT', $slug, [], $origin, $change, $csrf)->status === 409, 'Versão desatualizada sobrescreveu artigo.');
+$history = $auth->handle('GET', $slug . '/history', [], $origin);
+check($history->status === 200 && $history->body['data']['revisions'][0]['source'] === 'Texto novo', 'Revisão salva não consta no histórico.');
 check($auth->handle('POST', '/v1/auth/logout', [], $origin, [], $login->body['data']['csrf_token'])->status === 200, 'Logout migrado falhou.');

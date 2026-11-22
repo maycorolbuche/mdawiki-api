@@ -216,7 +216,12 @@ function migratePage(PDO $source, PDO $target, string $root, array $row, array &
     $fingerprint = checksum($row);
     $current = query($target, 'SELECT id, slug, identifier, updated_at, legacy_checksum FROM pages WHERE legacy_identifier = ?', [$key])->fetch();
 
-    if ($current === false || $current['identifier'] !== $identifier || $current['slug'] !== $slug || $current['updated_at'] !== $updatedAt || $current['legacy_checksum'] !== $fingerprint) {
+    if ($current !== false && $current['legacy_checksum'] !== $fingerprint
+        && query($target, 'SELECT id FROM page_revisions WHERE page_id = ? AND legacy_revision_number < 0 LIMIT 1', [$current['id']])->fetch()) {
+        throw new RuntimeException('Página editada no destino também foi alterada no legado.');
+    }
+
+    if ($current === false || $current['identifier'] !== $identifier || $current['slug'] !== $slug || $current['legacy_checksum'] !== $fingerprint) {
         upsert($target, 'pages', [
             'legacy_identifier' => $key,
             'slug' => $slug,
@@ -293,7 +298,7 @@ function migratePage(PDO $source, PDO $target, string $root, array $row, array &
 
     $number = 0;
     $order = query($target, 'SELECT id, revision_number FROM page_revisions
-        WHERE page_id = ? ORDER BY legacy_revision_number', [$pageId]);
+        WHERE page_id = ? ORDER BY legacy_revision_number < 0, ABS(legacy_revision_number)', [$pageId]);
     foreach ($order as $revision) {
         $number++;
         if ((int) $revision['revision_number'] !== $number) {

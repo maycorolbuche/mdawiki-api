@@ -14,6 +14,15 @@ final class WikiRenderer
         return preg_replace_callback('~(href=[\'"])(?:https?://mda\.wiki\.br)/([^\'"<>]*)~i',fn($m)=>$m[1].rtrim($this->config['frontend_url'],'/').'/'.$m[2],$html);
     }
     public function image(string $name): array {
+        if ($this->config['normalized_editor'] ?? false) {
+            $page = NormalizedPageRepository::lookup($this->db, 'imagem@' . preg_replace('/!tmpl$/', '', $name));
+            if (!$page || $page['kind'] !== 'image' || !$page['is_searchable']
+                || (int) ($page['access_level_id'] ?? 1) > (int) $this->config['public_max_level']) {
+                return [];
+            }
+            $file = $this->db->one('SELECT f.storage_key FROM images i JOIN files f ON f.id = i.file_id WHERE i.page_id = ?', [$page['id']]);
+            return $file ? ['IMAGEM' => json_encode(array_fill_keys(['url', 'url_mini', 'url_cp'], $file['storage_key']), JSON_THROW_ON_ERROR)] : [];
+        }
         $row=$this->db->one("SELECT CONTEUDO FROM PAGINAS WHERE IDENT = ? AND COALESCE(NIVEL,1) <= ?",['imagem@'.Database::id(preg_replace('/!tmpl$/','',$name)),(int)$this->config['public_max_level']]);
         $file=json_decode($row['CONTEUDO'] ?? '',true);
         if (!is_array($file) || empty($file['url'])) return [];
@@ -25,7 +34,13 @@ final class WikiRenderer
         return preg_replace_callback('~{{Incluir:([^{}]+)}}~iu',function($m) use($stack) {
             [$name,$section]=array_pad(explode('#',trim($m[1]),2),2,''); $id=Database::id($name);
             if (in_array($id,$stack,true)) throw new HttpError(422,'include_cycle','Inclusão circular: '.$name);
-            $p=$this->db->one("SELECT CONTEUDO_CODE FROM PAGINAS WHERE IDENT = ? AND BUSCA = 'S' AND COALESCE(NIVEL,1) <= ? AND IDENT NOT LIKE 'page@%'",[$id,(int)$this->config['public_max_level']]);
+            if ($this->config['normalized_editor'] ?? false) {
+                $row = NormalizedPageRepository::lookup($this->db, $name);
+                $p = $row && $row['is_searchable'] && (int) ($row['access_level_id'] ?? 1) <= (int) $this->config['public_max_level']
+                    && !str_starts_with($row['legacy_identifier'], 'page@') ? ['CONTEUDO_CODE' => $row['source']] : null;
+            } else {
+                $p=$this->db->one("SELECT CONTEUDO_CODE FROM PAGINAS WHERE IDENT = ? AND BUSCA = 'S' AND COALESCE(NIVEL,1) <= ? AND IDENT NOT LIKE 'page@%'",[$id,(int)$this->config['public_max_level']]);
+            }
             if (!$p) return '<strong>Página incluída não encontrada: '.self::e($name).'</strong>';
             $text=$p['CONTEUDO_CODE'] ?? '';
             if ($section==='!') $text=explode('==',$text,2)[0];
@@ -70,7 +85,11 @@ final class WikiRenderer
                 },$html);
                 $html=str_replace(['{{Imagens}}','{{/Imagens}}'],['<div class="wiki-gallery">','</div>'],$html);
             }
-            foreach ($this->db->rows('SELECT ID,PARAM_CODE,PARAM_HTML FROM TAGS WHERE POSICAO = ? AND FUNCAO = ? ORDER BY ORDEM',[$position,'preg_replace']) as $rule) {
+            $sql = ($this->config['normalized_editor'] ?? false)
+                ? 'SELECT rule_key AS ID, source_pattern AS PARAM_CODE, html_pattern AS PARAM_HTML
+                    FROM wiki_markup_rules WHERE scope = ? AND handler = ? ORDER BY position, rule_key'
+                : 'SELECT ID,PARAM_CODE,PARAM_HTML FROM TAGS WHERE POSICAO = ? AND FUNCAO = ? ORDER BY ORDEM';
+            foreach ($this->db->rows($sql, [$position, 'preg_replace']) as $rule) {
                 $invalidRule='Regra inválida na tabela TAGS (ID: '.($rule['ID'] ?? '?').'; posição: '.$position.').';
                 $pattern=$rule['PARAM_CODE'];
                 if (!is_string($pattern) || trim($pattern)==='') throw new HttpError(422,'invalid_wiki_rule',$invalidRule.' Expressão regular ausente.');

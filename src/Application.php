@@ -48,6 +48,11 @@ final class Application
         $previewAccountRoute = ($method === 'GET' && in_array($path, ['/v1/auth/session', '/v1/profile'], true))
             || ($method === 'POST' && in_array($path, ['/v1/auth/login', '/v1/auth/logout'], true))
             || ($method === 'GET' && preg_match('~^/v1/view/[^/]+$~D', $path));
+        $normalizedPageRoute = ($this->config['normalized_editor'] ?? false) && (
+            ($method === 'GET' && preg_match('~^/v1/pages/[^/]+/(editor|history)$~D', $path))
+            || ($method === 'POST' && preg_match('~^/v1/pages/[^/]+/(preview|restore|rebuild)$~D', $path))
+            || ($method === 'PUT' && preg_match('~^/v1/pages/[^/]+$~D', $path)));
+        $previewAccountRoute = $previewAccountRoute || $normalizedPageRoute;
         if ($normalized && !$previewAccountRoute
             && ($method !== 'GET' || !preg_match('~^/(?:health|v1/(?:home|search|statistics)|v1/pages(?:/[^/]+)?|media/.*)?$~D', $path))) {
             return new Response(501, ['error' => ['code' => 'read_only_preview', 'message' => 'A base migrada está em prévia de leitura pública.']], $headers);
@@ -169,7 +174,7 @@ final class Application
             'missing_links' => $row['missing_links'] ?? [],
             'redirect_slug' => $row['redirect_slug'] ?? null,
             'image_usage' => $row['image_usage'] ?? [],
-            ...(($this->config['normalized_read_only'] ?? false) ? ['read_only' => true] : []),
+            ...(($this->config['normalized_read_only'] ?? false) ? ['read_only' => !($this->config['normalized_editor'] ?? false) || ($row['kind'] ?? '') === 'image'] : []),
         ];
     }
 }
