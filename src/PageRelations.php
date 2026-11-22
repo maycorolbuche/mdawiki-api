@@ -18,7 +18,7 @@ final class PageRelations
 
         $categories = [];
         foreach ($rendered['categories'] as $category) {
-            $id = $this->target($category['slug']);
+            $id = $this->category($category['title']);
             if ($id !== null && !isset($categories[$id])) {
                 $this->db->run('INSERT INTO page_categories (page_id, category_id, position) VALUES (?, ?, ?)',
                     [$pageId, $id, count($categories) + 1]);
@@ -90,6 +90,32 @@ final class PageRelations
                     [$pageId, $row['page_id'], ++$position]);
             }
         }
+    }
+
+    private function category(string $title): int
+    {
+        $existing = $this->target($title);
+        if ($existing !== null) {
+            return $existing;
+        }
+        try {
+            [$slug, $identifier] = PageSlugs::fromTitle($title, '');
+        } catch (\RuntimeException) {
+            throw new HttpError(422, 'invalid_category', 'Informe um nome de categoria válido.');
+        }
+        if (mb_strlen($title) > 250 || mb_strlen($identifier) > 250
+            || str_starts_with(mb_strtolower($title), 'page@')) {
+            throw new HttpError(422, 'invalid_category', 'Informe um nome de categoria válido.');
+        }
+        $now = date('Y-m-d H:i:s');
+        $this->db->run("INSERT INTO pages
+            (legacy_identifier, identifier, slug, title, kind, source, rendered_html, plain_text,
+             is_searchable, access_level_id, needs_rebuild, view_count, is_html, created_at, updated_at, rebuilt_at, legacy_checksum)
+            VALUES (?, ?, ?, ?, 'article', '', '', '', 1, 1, 0, 0, 0, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE id = id",
+            ['@category:' . hash('sha256', $identifier), $identifier, $slug, $title, $now, $now, $now, str_repeat('0', 64)]);
+        $page = $this->db->one('SELECT id FROM pages WHERE identifier = ? FOR UPDATE', [$identifier]);
+        return (int) $page['id'];
     }
 
     private function target(string $slug): ?int
