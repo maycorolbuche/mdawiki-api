@@ -64,10 +64,11 @@ final class LegacyPageRepository implements DiagnosablePageRepository
         $ids = array_map(fn ($row) => $this->databaseValue($row['id']), $rows);
         $placeholders = implode(',', array_fill(0, count($ids), '?'));
         $public = "p.BUSCA = 'S' AND COALESCE(p.NIVEL, 1) <= ? AND p.IDENT NOT LIKE 'page@%' AND p.IDENT NOT LIKE 'imagem@%'";
+        $randomOrder = $this->db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite' ? 'RANDOM()' : 'RAND()';
         $queries = [
             'categories' => ["SELECT c.IDENT AS owner, c.CATEGORIA_IDENT AS id, c.CATEGORIA_URL AS slug, c.CATEGORIA AS title FROM PAGINAS_CATEGORIAS c LEFT JOIN PAGINAS p ON p.IDENT = c.CATEGORIA_IDENT WHERE c.IDENT IN ($placeholders) AND (p.IDENT IS NULL OR ($public)) ORDER BY c.ORDEM, c.CATEGORIA", true],
             'mentions' => ["SELECT DISTINCT l.LINK_IDENT AS owner, p.IDENT AS id, p.NOME_URL AS slug, p.NOME AS title FROM PAGINAS_LINKS l JOIN PAGINAS p ON p.IDENT = l.IDENT WHERE l.LINK_IDENT IN ($placeholders) AND $public ORDER BY p.NOME, p.IDENT", true],
-            'related_pages' => ["SELECT DISTINCT related.CATEGORIA_IDENT AS owner, p.IDENT AS id, p.NOME_URL AS slug, p.NOME AS title FROM PAGINAS_CATEGORIAS related JOIN PAGINAS p ON p.IDENT = related.IDENT WHERE related.CATEGORIA_IDENT IN (SELECT CATEGORIA_IDENT FROM PAGINAS_CATEGORIAS WHERE IDENT IN ($placeholders)) AND $public ORDER BY RAND()", true],
+            'related_pages' => ["SELECT DISTINCT related.CATEGORIA_IDENT AS owner, p.IDENT AS id, p.NOME_URL AS slug, p.NOME AS title FROM PAGINAS_CATEGORIAS related JOIN PAGINAS p ON p.IDENT = related.IDENT WHERE related.CATEGORIA_IDENT IN (SELECT CATEGORIA_IDENT FROM PAGINAS_CATEGORIAS WHERE IDENT IN ($placeholders)) AND $public ORDER BY $randomOrder", true],
             'category_members' => ["SELECT DISTINCT c.CATEGORIA_IDENT AS owner, p.IDENT AS id, p.NOME_URL AS slug, p.NOME AS title FROM PAGINAS_CATEGORIAS c JOIN PAGINAS p ON p.IDENT = c.IDENT WHERE c.CATEGORIA_IDENT IN ($placeholders) AND $public ORDER BY p.NOME, p.IDENT", true],
             'missing_links' => ["SELECT DISTINCT l.IDENT AS owner, l.LINK_IDENT AS id, l.LINK_URL AS slug, l.LINK_TXT AS title FROM PAGINAS_LINKS l LEFT JOIN PAGINAS p ON p.IDENT = l.LINK_IDENT WHERE l.IDENT IN ($placeholders) AND p.IDENT IS NULL AND COALESCE(l.LINK_URL, '') <> '' AND l.LINK_IDENT NOT LIKE '#%' ORDER BY l.LINK_TXT", false],
         ];

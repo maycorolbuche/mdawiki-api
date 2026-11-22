@@ -130,7 +130,10 @@ if (in_array('sqlite', PDO::getAvailableDrivers(), true)) {
     $data = $diagnostic->handle('GET', '/v1/pages/Cães', [])->body['data'];
     check($data['categories'][0]['title'] === 'Animais & Natureza', 'Category title is decoded and original URL retained');
     check(count($data['mentions']) === 1 && $data['mentions'][0]['slug'] === 'Animais', 'Deduplicate mentions and exclude restricted/hidden sources');
-    check(count($data['related_pages']) === 5 && $data['related_pages'][0]['slug'] === 'Relacionado_1', 'Five stable related pages, without current/private/hidden articles');
+    $related = array_column($data['related_pages'], 'slug');
+    $candidates = array_map(static fn (int $i): string => 'Relacionado_' . $i, range(1, 7));
+    check(count($related) === 5 && count(array_unique($related)) === 5 && array_diff($related, $candidates) === [],
+        'Five distinct related pages, without current/private/hidden articles');
     check($data['missing_links'][0]['slug'] === 'Novo#Seção', 'Preserve missing link anchor');
     $members = $legacy->find('Animais')['category_members'];
     check(count($members) === 8 && count(array_filter($members, static fn ($row) => in_array($row['slug'], ['Restrito', 'Oculto'], true))) === 0, 'Category members respect publication rules');
