@@ -78,13 +78,15 @@ check((int) $db->query('SELECT page_id FROM comments WHERE id = 1')->fetchColumn
 check($db->query('SELECT page_id FROM comments WHERE id = 2')->fetchColumn() === null, 'Referência inexistente recebeu ID.');
 check($db->query('SELECT password_hash FROM users WHERE id = 101')->fetchColumn() === '', 'Hash incompatível não ficou vazio.');
 check($db->query('SELECT password_hash FROM users WHERE id = 100')->fetchColumn() === md5('legacy-password'), 'Hash compatível perdido.');
-check((int) $db->query('SELECT avatar_file_id FROM users WHERE id = 100')->fetchColumn() > 0, 'Avatar não vinculado.');
+check(preg_match('/^[a-f0-9]{64}\.gif$/D', $db->query('SELECT avatar_filename FROM users WHERE id = 100')->fetchColumn()) === 1, 'Avatar não vinculado.');
 $db->exec("UPDATE users SET password_hash = 'reset-in-destination' WHERE id = 101");
 check((int) $db->query('SELECT COUNT(*) FROM page_headings')->fetchColumn() === 1, 'Reprocessamento não reconstruiu subtítulos.');
 $db->exec('DROP TABLE page_headings');
 $removedMedia = $root . '/' . $db->query("SELECT storage_key FROM files WHERE storage_key LIKE 'articles/%' LIMIT 1")->fetchColumn();
 check(unlink($removedMedia), 'A simulação de limpeza de mídia falhou.');
+$publicId = $db->query('SELECT public_id FROM users WHERE id = 100')->fetchColumn();
 $run();
+check($db->query('SELECT public_id FROM users WHERE id = 100')->fetchColumn() === $publicId, 'Perfil público mudou na reexecução.');
 check(is_file($removedMedia), 'Reexecução não recuperou arquivo removido.');
 check((int) $db->query('SELECT COUNT(*) FROM page_headings')->fetchColumn() === 1, 'Reexecução não recriou a tabela e seus subtítulos.');
 check($db->query('SELECT password_hash FROM users WHERE id = 101')->fetchColumn() === 'reset-in-destination', 'Reexecução sobrescreveu senha.');
@@ -96,7 +98,7 @@ check($db->query('SELECT GROUP_CONCAT(legacy_revision_number ORDER BY legacy_rev
 $links = $db->query('SELECT file_id FROM image_revisions ORDER BY legacy_revision_number')->fetchAll(PDO::FETCH_COLUMN);
 check(count($links) === 3 && $links[0] === $links[2] && $links[0] !== $links[1], 'Histórico A → B → A incorreto.');
 foreach ($db->query('SELECT sha256, storage_key FROM files') as $file) {
-    check(preg_match('~^(articles|avatars)/[a-f0-9]{64}\.gif$~D', $file['storage_key']) === 1, 'A chave deve incluir a pasta de mídia.');
+    check(preg_match('~^(articles|users)/[a-f0-9]{64}\.gif$~D', $file['storage_key']) === 1, 'A chave deve incluir a pasta de mídia.');
     check(hash_file('sha256', $root . '/' . $file['storage_key']) === $file['sha256'], 'Binário incorreto.');
 }
 
@@ -119,7 +121,7 @@ $run(1);
 check((int) $db->query('SELECT COUNT(*) FROM image_revisions')->fetchColumn() === 4, 'Falha parcial gravou revisão inválida.');
 echo "Migração testada com reexecução, atualização e deduplicação.\n";
 
-check((int) $db->query("SELECT COUNT(*) FROM files WHERE storage_key LIKE 'avatars/%'")->fetchColumn() === 1, 'Pasta de avatares incorreta.');
+check((int) $db->query("SELECT COUNT(*) FROM files WHERE storage_key LIKE 'users/%'")->fetchColumn() === 1, 'Pasta de avatares incorreta.');
 check((int) $db->query("SELECT COUNT(*) FROM migration_errors WHERE source_table = 'USUARIOS' AND source_field = 'FOTO_64'")->fetchColumn() === 1, 'Erro de avatar não registrado.');
 check((int) $db->query("SELECT COUNT(*) FROM migration_errors WHERE source_table = 'PAGINAS_LOGS' AND source_field = 'CONTEUDO_CODE'")->fetchColumn() === 1, 'Erro de revisão não registrado.');
 
@@ -159,11 +161,16 @@ $session = new MDAWiki\Session(false);
 $features = new MDAWiki\Features(new MDAWiki\Database($db), $session, $authConfig, static fn () => null);
 $auth = new MDAWiki\Application(static fn () => $normalized, $authConfig, static fn () => $features);
 $origin = 'http://localhost:5173';
+$publicUser = $auth->handle('GET', '/v1/public-users/' . $publicId, [], $origin);
+check($publicUser->status === 200 && str_contains($publicUser->body['data']['photo'], '/media/users/')
+    && array_keys($publicUser->body['data']) === ['name', 'display_name', 'birth_date', 'city', 'state_code', 'club',
+        'association', 'club_type', 'biography', 'photo'], 'Perfil público expôs campos privados ou perdeu o avatar.');
 $initial = $auth->handle('GET', '/v1/auth/session', [], $origin);
 $credentials = ['email' => 'migrated@example.test', 'password' => 'legacy-password'];
 check($auth->handle('POST', '/v1/auth/login', [], $origin, $credentials, 'wrong')->status === 403, 'Login ignorou CSRF.');
 $login = $auth->handle('POST', '/v1/auth/login', [], $origin, $credentials, $initial->body['data']['csrf_token']);
 check($login->status === 200 && (int) $login->body['data']['user']['ID'] === 100, 'Login do usuário migrado falhou.');
+check($login->body['data']['user']['photo'] === $publicUser->body['data']['photo'], 'Avatar migrado não apareceu na sessão.');
 check($auth->handle('GET', '/v1/images/Sample', [], $origin)->status === 200, 'Imagem migrada indisponível.');
 $db->exec("UPDATE pages SET access_level_id = 1 WHERE legacy_identifier = 'article'");
 $slug = '/v1/pages/Especialidade_Teste';
