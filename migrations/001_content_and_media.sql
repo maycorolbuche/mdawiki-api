@@ -7,6 +7,46 @@ CREATE TABLE IF NOT EXISTS files (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS users (
+    `id` INT NOT NULL,
+    `email` VARCHAR(150),
+    `name` VARCHAR(150),
+    `password_hash` VARCHAR(255) NOT NULL,
+    `is_active` BOOLEAN,
+    `display_name` VARCHAR(50),
+    `legacy_avatar_path` LONGTEXT,
+    `legacy_thumbnail_path` LONGTEXT,
+    `birth_date` DATE,
+    `city` VARCHAR(150),
+    `state_code` CHAR(2),
+    `club` VARCHAR(50),
+    `association` VARCHAR(50),
+    `club_type` VARCHAR(50),
+    `biography` LONGTEXT,
+    `needs_related_page_rebuild` BOOLEAN,
+    `receives_notifications` BOOLEAN,
+    `has_logged_in` BOOLEAN,
+    `access_level_id` INT,
+    `uuid` VARCHAR(100),
+    `last_created_page_at` DATETIME,
+    `created_page_count` INT,
+    `last_edited_page_at` DATETIME,
+    `edited_page_count` INT,
+    `last_deleted_page_at` DATETIME,
+    `deleted_page_count` INT,
+    `last_seen_at` DATETIME,
+    `visit_count` INT,
+    `legacy_access_level` INT,
+    `created_at` DATETIME,
+    `updated_at` DATETIME,
+    avatar_file_id BIGINT UNSIGNED NULL,
+    thumbnail_file_id BIGINT UNSIGNED NULL,
+    FOREIGN KEY (avatar_file_id) REFERENCES files (id),
+    FOREIGN KEY (thumbnail_file_id) REFERENCES files (id),
+    INDEX users_email_idx (email),
+    PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS pages (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     legacy_identifier VARCHAR(250) COLLATE utf8mb4_bin NOT NULL UNIQUE,
@@ -23,12 +63,14 @@ CREATE TABLE IF NOT EXISTS pages (
     view_count BIGINT,
     is_html BOOLEAN,
     is_sponsored BOOLEAN,
-    created_by_legacy VARCHAR(200),
-    updated_by_legacy VARCHAR(200),
+    created_by INT,
+    updated_by INT,
     created_at DATETIME,
     updated_at DATETIME,
     rebuilt_at DATETIME,
     legacy_checksum CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL,
+    FOREIGN KEY (updated_by) REFERENCES users (id) ON DELETE SET NULL,
     INDEX pages_slug_idx (slug)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -43,11 +85,11 @@ CREATE TABLE IF NOT EXISTS page_revisions (
     rendered_html LONGTEXT,
     is_searchable BOOLEAN,
     access_level_id INT,
-    editor_email VARCHAR(200),
-    legacy_user_id INT,
+    created_by INT,
     is_expired BOOLEAN,
     created_at DATETIME,
     legacy_checksum CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL,
     UNIQUE KEY page_revisions_legacy_unique (page_id, legacy_revision_number),
     INDEX page_revisions_order_idx (page_id, revision_number),
     FOREIGN KEY (page_id) REFERENCES pages (id)
@@ -59,11 +101,15 @@ CREATE TABLE IF NOT EXISTS images (
     slug VARCHAR(250) COLLATE utf8mb4_bin NOT NULL,
     title VARCHAR(250) NOT NULL,
     meta JSON NOT NULL,
-    author_email VARCHAR(200),
+    created_by INT,
+    created_at DATETIME,
+    updated_by INT,
     updated_at DATETIME,
     file_id BIGINT UNSIGNED,
     legacy_identifier VARCHAR(250) COLLATE utf8mb4_bin UNIQUE,
     access_level_id INT NOT NULL DEFAULT 1,
+    FOREIGN KEY (updated_by) REFERENCES users (id) ON DELETE SET NULL,
+    FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL,
     FOREIGN KEY (file_id) REFERENCES files (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -72,10 +118,11 @@ CREATE TABLE IF NOT EXISTS image_revisions (
     image_id BIGINT UNSIGNED NOT NULL,
     file_id BIGINT UNSIGNED,
     legacy_revision_number INT NULL,
-    author_email VARCHAR(200),
+    created_by INT,
     access_level_id INT NOT NULL DEFAULT 1,
     created_at DATETIME,
     UNIQUE (image_id, legacy_revision_number),
     FOREIGN KEY (image_id) REFERENCES images (id),
+    FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL,
     FOREIGN KEY (file_id) REFERENCES files (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

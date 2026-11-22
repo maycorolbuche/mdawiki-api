@@ -160,6 +160,7 @@ function validateDestinationSchema(PDO $target): void
     $legacyColumns = $target->query("SELECT COUNT(*) FROM information_schema.COLUMNS
         WHERE TABLE_SCHEMA = DATABASE()
         AND ((TABLE_NAME = 'comments' AND COLUMN_NAME = 'page_slug')
+          OR (TABLE_NAME = 'pages' AND COLUMN_NAME = 'created_by_legacy')
           OR (TABLE_NAME = 'page_categories' AND COLUMN_NAME = 'legacy_page_identifier')
           OR (UPPER(TABLE_NAME) = 'PAGINAS' AND UPPER(COLUMN_NAME) = 'NOME_URL'))")->fetchColumn();
     if ((int) $legacyColumns !== 0) {
@@ -185,13 +186,25 @@ function buildPageLookup(PDO $source, PDO $target): array
     return $lookup;
 }
 
+function authorId(PDO $target, ?string $email, ?int $knownId = null): ?int
+{
+    $email = trim(legacyText($email) ?? '');
+    if ($email !== '') {
+        $ids = query($target, 'SELECT id FROM users WHERE email = ? LIMIT 2', [$email])->fetchAll(PDO::FETCH_COLUMN);
+        if (count($ids) === 1) return (int) $ids[0];
+        if ($ids) return in_array($knownId, array_map('intval', $ids), true) ? $knownId : null;
+    }
+    if ($knownId === null) return null;
+    return query($target, 'SELECT id FROM users WHERE id = ?', [$knownId])->fetchColumn() === false ? null : $knownId;
+}
+
 function migrateImage(PDO $source, PDO $target, string $root, array $row, array &$counts, array &$context): void
 {
     $key = legacyText($row['IDENT']);
     $name = preg_replace('/^imagem@/iu', '', legacyText($row['NOME_URL']));
     $title = trim(preg_replace('/^imagem@/iu', '', legacyText($row['NOME']) ?? ''));
     [$slug, $identifier] = pageSlugs(null, $name);
-    $image = query($target, 'SELECT id, legacy_identifier, file_id, meta, author_email, updated_at FROM images WHERE identifier = ?', [$identifier])->fetch();
+    $image = query($target, 'SELECT id, legacy_identifier, file_id, meta, updated_by, updated_at FROM images WHERE identifier = ?', [$identifier])->fetch();
     if ($image && $image['legacy_identifier'] !== $key) {
         throw new RuntimeException('Identificador de imagem já utilizado.');
     }
@@ -206,7 +219,9 @@ function migrateImage(PDO $source, PDO $target, string $root, array $row, array 
         'meta' => $replaced ? $image['meta'] : json_encode((object) $meta, JSON_THROW_ON_ERROR),
         'file_id' => $replaced ? $image['file_id'] : $file, 'legacy_identifier' => $key,
         'access_level_id' => $row['NIVEL'] ?? 1,
-        'author_email' => $replaced ? $image['author_email'] : legacyText($row['USU_ALTERACAO'] ?: $row['USU_CADASTRO']),
+        'created_by' => authorId($target, $row['USU_CADASTRO']),
+        'created_at' => legacyDate($row['DT_CADASTRO']),
+        'updated_by' => $replaced ? $image['updated_by'] : authorId($target, $row['USU_ALTERACAO'] ?: $row['USU_CADASTRO']),
         'updated_at' => $replaced ? $image['updated_at'] : legacyDate($row['DT_ALTERACAO']) ?? legacyDate($row['DT_CADASTRO'])], ['identifier']);
     $imageId = $image['id'] ?? $target->lastInsertId();
     $counts[$image ? 'updated' : 'inserted']++;
@@ -214,7 +229,7 @@ function migrateImage(PDO $source, PDO $target, string $root, array $row, array 
         $context = ['table' => 'PAGINAS_LOGS', 'key' => ['IDENT' => $key, 'NOME_URL_ID' => $revision['NOME_URL_ID']], 'field' => 'CONTEUDO_CODE'];
         upsert($target, 'image_revisions', ['image_id' => $imageId,
             'file_id' => fileId($target, $root, 'articles', $revision['CONTEUDO_CODE']),
-            'author_email' => legacyText($revision['EMAIL']),
+            'created_by' => authorId($target, $revision['EMAIL'], $revision['ID_USUARIO'] === null ? null : (int) $revision['ID_USUARIO']),
             'legacy_revision_number' => (int) $revision['NOME_URL_ID'], 'access_level_id' => $revision['NIVEL'] ?? $row['NIVEL'] ?? 1, 'created_at' => legacyDate($revision['DATAHORA'])],
             ['image_id', 'legacy_revision_number']);
         $counts['revisions']++;
@@ -269,8 +284,8 @@ function migratePage(PDO $source, PDO $target, string $root, array $row, array &
             'view_count' => $row['ACESSOS'],
             'is_html' => legacyFlag($row['HTML']),
             'is_sponsored' => legacyFlag($row['PATROCINADO']),
-            'created_by_legacy' => legacyText($row['USU_CADASTRO']),
-            'updated_by_legacy' => legacyText($row['USU_ALTERACAO']),
+            'created_by' => authorId($target, $row['USU_CADASTRO']),
+            'updated_by' => authorId($target, $row['USU_ALTERACAO']),
             'created_at' => legacyDate($row['DT_CADASTRO']),
             'updated_at' => $updatedAt,
             'rebuilt_at' => legacyDate($row['DT_ATUALIZACAO']),
@@ -302,8 +317,7 @@ function migratePage(PDO $source, PDO $target, string $root, array $row, array &
                 'rendered_html' => legacyText($revision['CONTEUDO']),
                 'is_searchable' => legacyFlag($revision['BUSCA']),
                 'access_level_id' => $revision['NIVEL'],
-                'editor_email' => legacyText($revision['EMAIL']),
-                'legacy_user_id' => $revision['ID_USUARIO'],
+                'created_by' => authorId($target, $revision['EMAIL'], $revision['ID_USUARIO'] === null ? null : (int) $revision['ID_USUARIO']),
                 'is_expired' => legacyFlag($revision['EXPIRADO']),
                 'created_at' => legacyDate($revision['DATAHORA']),
                 'legacy_checksum' => $fingerprint,
@@ -340,14 +354,7 @@ function applyDestinationSchema(PDO $target): void
             }
         }
     }
-    foreach (['images' => ['author_email' => 'VARCHAR(200)', 'updated_at' => 'DATETIME'],
-        'image_revisions' => ['author_email' => 'VARCHAR(200)']] as $table => $columns) {
-        foreach ($columns as $column => $type) {
-            if (!query($target, "SHOW COLUMNS FROM `{$table}` WHERE Field = ?", [$column])->fetch()) {
-                $target->exec("ALTER TABLE `{$table}` ADD COLUMN `{$column}` {$type} NULL");
-            }
-        }
-    }
+
 }
 
 function recordMigrationError(PDO $target, string $runId, array $context, Throwable $error): void
@@ -365,14 +372,15 @@ function recordMigrationError(PDO $target, string $runId, array $context, Throwa
     ]);
 }
 
-function migrateRemainingTables(PDO $source, PDO $target, string $root, string $appKey, string $runId): int
+function migrateRemainingTables(PDO $source, PDO $target, string $root, string $appKey, string $runId, bool $onlyUsers = false): int
 {
     $errors = 0;
-    $lookup = buildPageLookup($source, $target);
+    $lookup = $onlyUsers ? [] : buildPageLookup($source, $target);
     $source->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, false);
     $tables = require __DIR__ . '/legacy-table-map.php';
     foreach ($tables as $legacyTable => [$table, $keys, $fields]) {
         $users = $legacyTable === 'USUARIOS';
+        if ($users !== $onlyUsers) continue;
         $statement = null;
         $copied = 0;
         $failed = 0;
@@ -447,6 +455,7 @@ function migrateRemainingTables(PDO $source, PDO $target, string $root, string $
         $errors += $failed;
     }
 
+    $source->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, true);
     return $errors;
 }
 
@@ -513,6 +522,9 @@ try {
     }
     $counts = ['inserted' => 0, 'updated' => 0, 'unchanged' => 0, 'revisions' => 0, 'errors' => 0];
 
+    $stage = 'Importação dos usuários';
+    $userErrors = migrateRemainingTables($source, $target, $root, $config['app_key'], $runId, true);
+    $stage = 'Importação de conteúdo';
     $eligiblePages = "LOWER(IDENT) NOT LIKE 'doc@%' AND (NOME_URL IS NULL OR LOWER(NOME_URL) NOT LIKE 'doc@%')";
     $total = (int) $source->query("SELECT COUNT(*) FROM PAGINAS WHERE $eligiblePages")->fetchColumn();
     fwrite(STDOUT, "Importando {$total} páginas, revisões e mídias..." . PHP_EOL);
@@ -552,7 +564,7 @@ try {
         fwrite(STDOUT, "Páginas: {$attempted}/{$total}. " . json_encode($counts, JSON_THROW_ON_ERROR) . PHP_EOL);
     }
     $stage = 'Importação das tabelas complementares';
-    $counts['table_errors'] = migrateRemainingTables($source, $target, $root, $config['app_key'], $runId);
+    $counts['table_errors'] = $userErrors + migrateRemainingTables($source, $target, $root, $config['app_key'], $runId);
     $stage = 'Reprocessamento final das páginas';
     $counts['rebuild_errors'] = MDAWiki\NormalizedPageRebuild::run(new MDAWiki\Database($target), $config);
     fwrite(STDOUT, 'Total: ' . json_encode($counts, JSON_THROW_ON_ERROR) . PHP_EOL);

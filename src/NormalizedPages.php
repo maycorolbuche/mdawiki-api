@@ -29,7 +29,7 @@ final class NormalizedPages
 
     private function version(?array $page): string
     {
-        return $page === null ? '' : hash('sha256', serialize([$page['id'], $page['title'], $page['source'], $page['updated_at'], $page['updated_by_legacy']]));
+        return $page === null ? '' : hash('sha256', serialize([$page['id'], $page['title'], $page['source'], $page['updated_at'], $page['updated_by']]));
     }
 
     public function editor(string $slug): array
@@ -53,7 +53,7 @@ final class NormalizedPages
         $page = $this->page($slug, $user);
         $rows = $this->db->rows('SELECT r.revision_number AS id, r.title, COALESCE(r.source, \'\') AS source,
             r.created_at, u.display_name AS author, NULL AS author_photo
-            FROM page_revisions r LEFT JOIN users u ON u.id = r.legacy_user_id
+            FROM page_revisions r LEFT JOIN users u ON u.id = r.created_by
             WHERE r.page_id = ? AND r.revision_number < ? AND COALESCE(r.access_level_id, 1) <= ?
             AND COALESCE(r.is_expired, 0) = 0 ORDER BY r.revision_number DESC LIMIT 51',
             [$page['id'], $before, (int) $user['NIVEL']]);
@@ -92,9 +92,9 @@ final class NormalizedPages
         try {
             $this->db->run("INSERT INTO pages
                 (legacy_identifier, identifier, slug, kind, is_searchable, access_level_id, needs_rebuild, view_count,
-                 is_html, created_by_legacy, created_at, legacy_checksum)
+                 is_html, created_by, created_at, legacy_checksum)
                 VALUES (?, ?, ?, 'article', 1, 1, 0, 0, 0, ?, ?, ?)",
-                ['@article:' . hash('sha256', $identifier), $identifier, $canonical, $user['EMAIL'], $now, str_repeat('0', 64)]);
+                ['@article:' . hash('sha256', $identifier), $identifier, $canonical, $user['ID'], $now, str_repeat('0', 64)]);
         } catch (\PDOException $error) {
             if ((int) ($error->errorInfo[1] ?? 0) !== 1062) {
                 throw $error;
@@ -161,16 +161,16 @@ final class NormalizedPages
                 $number++;
                 $this->db->run('INSERT INTO page_revisions
                     (page_id, legacy_revision_number, revision_number, slug, title, source, rendered_html,
-                     is_searchable, access_level_id, editor_email, legacy_user_id, is_expired, created_at, legacy_checksum)
-                     VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?)',
+                     is_searchable, access_level_id, created_by, is_expired, created_at, legacy_checksum)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?)',
                     [$page['id'], (int) $last['legacy'] - 1, $number, $page['slug'], $title, $source, $rendered['html'],
-                     $page['is_searchable'], $page['access_level_id'], $user['EMAIL'], $user['ID'], $now, str_repeat('0', 64)]);
-                $this->db->run('UPDATE pages SET title = ?, source = ?, updated_at = ?, updated_by_legacy = ? WHERE id = ?',
-                    [$title, $source, $now, $user['EMAIL'], $page['id']]);
+                     $page['is_searchable'], $page['access_level_id'], $user['ID'], $now, str_repeat('0', 64)]);
+                $this->db->run('UPDATE pages SET title = ?, source = ?, updated_at = ?, updated_by = ? WHERE id = ?',
+                    [$title, $source, $now, $user['ID'], $page['id']]);
                 $page['title'] = $title;
                 $page['source'] = $source;
                 $page['updated_at'] = $now;
-                $page['updated_by_legacy'] = $user['EMAIL'];
+                $page['updated_by'] = $user['ID'];
             }
             $this->db->run('UPDATE pages SET rendered_html = ?, plain_text = ?, rebuilt_at = ?, needs_rebuild = 0 WHERE id = ?',
                 [$rendered['html'], $rendered['text'], $now, $page['id']]);

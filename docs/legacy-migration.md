@@ -33,4 +33,4 @@ Em uma base de destino vazia, os registros legados `imagem@...` entram em `image
 
 Páginas legadas com prefixo `doc@` no identificador ou na URL e suas revisões ficam fora da importação.
 
-Para habilitar o histórico de imagens em uma base que já foi importada, reexecute o importador. Ele adiciona as colunas de autoria e data quando faltarem e recupera esses dados do legado quando disponíveis.
+Para o esquema de autoria por ID, use uma base de destino vazia. O importador carrega os usuários antes do conteúdo e resolve a autoria por e-mail durante a importação. Guarda os IDs em created_by e updated_by. Se o autor não puder ser identificado, o vínculo fica vazio.

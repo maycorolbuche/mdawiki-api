@@ -39,11 +39,11 @@ final class NormalizedImages
             FROM page_media m JOIN pages p ON p.id = m.page_id
             WHERE m.image_id = ? AND p.is_searchable = 1 AND COALESCE(p.access_level_id, 1) <= ?
             AND p.legacy_identifier NOT LIKE 'page@%' ORDER BY title, p.id", [$image['id'], $this->config['public_max_level']]);
-        $history = $this->db->rows('SELECT r.id, r.created_at, f.storage_key,
-            (SELECT COALESCE(NULLIF(u.display_name, \'\'), NULLIF(u.name, \'\')) FROM users u
-                WHERE u.email = r.author_email ORDER BY u.id LIMIT 1) AS author FROM image_revisions r
-            JOIN files f ON f.id = r.file_id WHERE r.image_id = ? AND r.access_level_id <= ?
-            ORDER BY r.created_at DESC, r.id DESC', [$image['id'], $this->config['public_max_level']]);
+        $history = $this->db->rows("SELECT r.id, r.created_at, f.storage_key,
+            COALESCE(NULLIF(u.display_name, ''), NULLIF(u.name, '')) AS author FROM image_revisions r
+            JOIN files f ON f.id = r.file_id LEFT JOIN users u ON u.id = r.created_by
+            WHERE r.image_id = ? AND r.access_level_id <= ?
+            ORDER BY r.created_at DESC, r.id DESC", [$image['id'], $this->config['public_max_level']]);
         return ['slug' => $image['slug'], 'title' => $image['title'],
             'url' => $this->url($image['storage_key']), 'meta' => json_decode($image['meta'], true, 512, JSON_THROW_ON_ERROR),
             'version' => (string) ($image['file_id'] ?? ''), 'pages' => $members,
@@ -116,10 +116,10 @@ final class NormalizedImages
             $file = $this->db->one('SELECT id FROM files WHERE storage_key = ? FOR UPDATE', [$key])['id'];
             $meta = json_encode(self::properties($this->config['media_root'], $key), JSON_THROW_ON_ERROR);
             if (!$image) {
-                $this->db->run('INSERT INTO images (identifier, slug, title, meta, file_id, access_level_id, author_email, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())',
-                    [$identifier, $slug, str_replace(['-', '_'], ' ', $slug), $meta, $file, $level, $user['EMAIL']]);
+                $this->db->run('INSERT INTO images (identifier, slug, title, meta, file_id, access_level_id, created_by, created_at, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?, NOW())',
+                    [$identifier, $slug, str_replace(['-', '_'], ' ', $slug), $meta, $file, $level, $user['ID'], $user['ID']]);
             } elseif ((string) $image['file_id'] !== (string) $file) {
-                $this->replace($image, $file, $meta, $user['EMAIL']);
+                $this->replace($image, $file, $meta, (int) $user['ID']);
             }
             $pdo->commit();
         } catch (\Throwable $error) {
@@ -153,7 +153,7 @@ final class NormalizedImages
             }
             if ((string) $image['file_id'] !== (string) $revision['file_id']) {
                 $meta = json_encode(self::properties($this->config['media_root'], $revision['storage_key']), JSON_THROW_ON_ERROR);
-                $this->replace($image, $revision['file_id'], $meta, $user['EMAIL']);
+                $this->replace($image, $revision['file_id'], $meta, (int) $user['ID']);
             }
             $pdo->commit();
         } catch (\Throwable $error) {
@@ -163,13 +163,13 @@ final class NormalizedImages
         return $this->show($image['slug']);
     }
 
-    private function replace(array $image, int|string $file, string $meta, string $author): void
+    private function replace(array $image, int|string $file, string $meta, int $author): void
     {
         if ($image['file_id'] !== null) {
-            $this->db->run('INSERT INTO image_revisions (image_id, file_id, created_at, access_level_id, author_email)
-                VALUES (?, ?, ?, ?, ?)', [$image['id'], $image['file_id'], $image['updated_at'], $image['access_level_id'], $image['author_email']]);
+            $this->db->run('INSERT INTO image_revisions (image_id, file_id, created_at, access_level_id, created_by)
+                VALUES (?, ?, ?, ?, ?)', [$image['id'], $image['file_id'], $image['updated_at'], $image['access_level_id'], $image['updated_by'] ?? $image['created_by']]);
         }
-        $this->db->run('UPDATE images SET file_id = ?, meta = ?, author_email = ?, updated_at = NOW() WHERE id = ?',
+        $this->db->run('UPDATE images SET file_id = ?, meta = ?, updated_by = ?, updated_at = NOW() WHERE id = ?',
             [$file, $meta, $author, $image['id']]);
         $this->db->run('UPDATE pages SET needs_rebuild = 1 WHERE id IN (SELECT page_id FROM page_media WHERE image_id = ?)', [$image['id']]);
     }

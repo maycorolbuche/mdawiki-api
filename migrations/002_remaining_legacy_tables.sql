@@ -58,46 +58,6 @@ CREATE TABLE IF NOT EXISTS wiki_markup_rules (
     PRIMARY KEY (`rule_key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS users (
-    `id` INT NOT NULL,
-    `email` VARCHAR(150),
-    `name` VARCHAR(150),
-    `password_hash` VARCHAR(255) NOT NULL,
-    `is_active` BOOLEAN,
-    `display_name` VARCHAR(50),
-    `legacy_avatar_path` LONGTEXT,
-    `legacy_thumbnail_path` LONGTEXT,
-    `birth_date` DATE,
-    `city` VARCHAR(150),
-    `state_code` CHAR(2),
-    `club` VARCHAR(50),
-    `association` VARCHAR(50),
-    `club_type` VARCHAR(50),
-    `biography` LONGTEXT,
-    `needs_related_page_rebuild` BOOLEAN,
-    `receives_notifications` BOOLEAN,
-    `has_logged_in` BOOLEAN,
-    `access_level_id` INT,
-    `uuid` VARCHAR(100),
-    `last_created_page_at` DATETIME,
-    `created_page_count` INT,
-    `last_edited_page_at` DATETIME,
-    `edited_page_count` INT,
-    `last_deleted_page_at` DATETIME,
-    `deleted_page_count` INT,
-    `last_seen_at` DATETIME,
-    `visit_count` INT,
-    `legacy_access_level` INT,
-    `created_at` DATETIME,
-    `updated_at` DATETIME,
-    avatar_file_id BIGINT UNSIGNED NULL,
-    thumbnail_file_id BIGINT UNSIGNED NULL,
-    FOREIGN KEY (avatar_file_id) REFERENCES files (id),
-    FOREIGN KEY (thumbnail_file_id) REFERENCES files (id),
-    INDEX users_email_idx (email),
-    PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
 CREATE TABLE IF NOT EXISTS page_categories (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     page_id BIGINT UNSIGNED NOT NULL,
