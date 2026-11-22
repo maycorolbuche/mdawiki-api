@@ -62,7 +62,7 @@ final class NormalizedPageRepository implements PageRepository
             'l.target_page_id = ? AND p.id <> ?', [$page['id'], $page['id']]);
         $page['related_pages'] = $this->relationCards(
             'page_categories own JOIN page_categories related ON related.category_id = own.category_id JOIN pages p ON p.id = related.page_id',
-            'own.page_id = ? AND p.id <> ?', [$page['id'], $page['id']]);
+            'own.page_id = ? AND p.id <> ?', [$page['id'], $page['id']], true);
         $page['image_usage'] = $row['kind'] === 'image' ? $this->relationCards('page_media m JOIN pages p ON p.id = m.page_id',
             'm.image_page_id = ?', [$page['id']]) : [];
         $categories = $this->db->rows('SELECT p.id, p.slug, p.title FROM page_categories c
@@ -85,10 +85,12 @@ final class NormalizedPageRepository implements PageRepository
         return $page;
     }
 
-    private function relationCards(string $joins, string $where, array $params): array
+    private function relationCards(string $joins, string $where, array $params, bool $randomSample = false): array
     {
-        $rows = $this->db->rows("SELECT DISTINCT p.id, p.slug, COALESCE(p.title, p.slug) AS title FROM $joins
-            WHERE $where AND " . self::PUBLIC_PAGE . ' ORDER BY title, p.id', [...$params, $this->maxLevel]);
+        $sql = "SELECT DISTINCT p.id, p.slug, COALESCE(p.title, p.slug) AS title FROM $joins
+            WHERE $where AND " . self::PUBLIC_PAGE;
+        $sql = $randomSample ? "SELECT * FROM ($sql) AS candidates ORDER BY RAND() LIMIT 5" : $sql . ' ORDER BY title, p.id';
+        $rows = $this->db->rows($sql, [...$params, $this->maxLevel]);
         return array_map(static fn (array $row): array => ['id' => (string) $row['id']] + $row, $rows);
     }
 
