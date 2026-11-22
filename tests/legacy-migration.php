@@ -429,3 +429,18 @@ check($profileUpdate->status === 200 && $profileUpdate->body['data']['CIDADE'] =
     && $profileUpdate->body['data']['ENVIA_EMAIL'] === 'N', 'Perfil migrado deve aceitar atualizações.');
 $secondLogin = $auth->handle('POST', '/v1/auth/login', [], $origin, $registration, $csrf);
 check($secondLogin->status === 200 && $secondLogin->body['data']['first_login'] === false, 'Segundo login não deve repetir a sinalização.');
+
+$csrf = $secondLogin->body['data']['csrf_token'];
+$recorded = $auth->handle('POST', '/v1/visits', [], $origin, ['slug' => 'EspéciAlidade-Teste'], $csrf);
+check($recorded->status === 200 && $recorded->body['data']['counted'] === true, 'Visita pública deve ser contada.');
+$duplicate = $auth->handle('POST', '/v1/visits', [], $origin, ['slug' => 'EspéciAlidade-Teste'], $csrf);
+check($duplicate->status === 200 && $duplicate->body['data']['counted'] === false, 'Visita repetida na sessão deve ser ignorada.');
+
+$db->prepare('INSERT INTO page_visits (page_id, visited_at) VALUES (?, ?)')->execute([$articleId, time() - 86401]);
+$db->prepare('INSERT INTO page_media (page_id, image_id, position, is_template) VALUES (?, ?, 1, 0)')->execute([$articleId, $imageId]);
+$home = $auth->handle('GET', '/v1/home', [], $origin)->body['data'];
+check((int) $home['top_24h'][0]['views'] === 1 && (int) $home['top_week'][0]['views'] === 2, 'Visita antiga só deve contar no ranking semanal.');
+check(str_contains($home['top_24h'][0]['image'] ?? '', '/media/articles/'), 'O card deve receber a URL da imagem vinculada.');
+$db->prepare('UPDATE images SET access_level_id = 5 WHERE id = ?')->execute([$imageId]);
+$home = $auth->handle('GET', '/v1/home', [], $origin)->body['data'];
+check($home['top_24h'][0]['image'] === null, 'O card público deve ocultar imagens restritas.');

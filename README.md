@@ -81,3 +81,6 @@ Os avatares já cadastrados e a importação do acervo são preservados. Essa re
 ## Prévia da base migrada
 
 Em `dev`, aponte `DB_*` para a base importada. A API reconhece a estrutura pelo banco conectado. A base importada atende leitura pública, exportação, busca, início e contadores básicos. Autenticação, edição, histórico, catálogos e reconstrução dos vínculos da base migrada ainda estão em adaptação.
+
+
+A home da base migrada usa visitas com horário para calcular os rankings móveis de 24 horas, 7 e 30 dias. Em instalações existentes, execute `php bin/migrate-page-visits.php`. A coleta começa após a implantação, pois os contadores históricos não têm horário individual. O cron de manutenção remove registros com mais de 31 dias.

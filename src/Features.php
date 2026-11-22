@@ -171,7 +171,12 @@ final class Features
         return ['statistics'=>$this->statistics()] + (new Home($this->db,$this->renderer,$this->publicFilter()))->get();
     }
     private function visit(array $body): array {
-        $slug=$this->slug(is_string($body['slug'] ?? null)?$body['slug']:'');$filter=$this->publicFilter();
+        $slug = $this->slug(is_string($body['slug'] ?? null) ? $body['slug'] : '');
+        if ($this->config['normalized_read_only'] ?? false) {
+            $repository = new NormalizedPageRepository($this->db, (int) $this->config['public_max_level'], $this->config['media_public_url']);
+            return ['counted' => $repository->recordVisit($slug, $this->session)];
+        }
+        $filter=$this->publicFilter();
         $p=$this->db->one("SELECT p.IDENT,p.NOME_URL FROM PAGINAS p WHERE $filter AND p.NOME_URL = ?",[$slug]);
         if (!$p) throw new HttpError(404,'not_found','Página não encontrada.');
         if (($this->session->data['visits'][$p['IDENT']] ?? 0)>time()-30) return ['counted'=>false];

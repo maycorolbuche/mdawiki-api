@@ -121,23 +121,64 @@ final class NormalizedPageRepository implements PageRepository
         return array_map('intval', $row);
     }
 
+    public function recordVisit(string $slug, Session $session): bool
+    {
+        $page = self::lookup($this->db, $slug);
+        if (!$page || !$this->db->one('SELECT p.id FROM pages p WHERE p.id = ? AND ' . self::PUBLIC_PAGE,
+            [$page['id'], $this->maxLevel])) {
+            throw new HttpError(404, 'not_found', 'Página não encontrada.');
+        }
+        $id = (int) $page['id'];
+        $now = time();
+        $recent = array_filter($session->data['visits'] ?? [], static fn ($time) => $time > $now - 30);
+        if (isset($recent[$id])) return false;
+        $pdo = $this->db->pdo;
+        $pdo->beginTransaction();
+        try {
+            $this->db->run('INSERT INTO page_visits (page_id, visited_at) VALUES (?, ?)', [$id, $now]);
+            $this->db->run('UPDATE pages SET view_count = COALESCE(view_count, 0) + 1 WHERE id = ?', [$id]);
+            $pdo->commit();
+        } finally {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+        }
+        $recent[$id] = $now;
+        $session->data['visits'] = $recent;
+        return true;
+    }
+
     public function home(): array
     {
-        $sql = 'SELECT ' . self::CARD . ' FROM pages p WHERE ' . self::PUBLIC_PAGE;
-        return [
+        $columns = self::CARD . ', (SELECT f.storage_key FROM page_media m
+            JOIN images i ON i.id = m.image_id JOIN files f ON f.id = i.file_id
+            WHERE m.page_id = p.id AND COALESCE(m.is_template, 0) = 0 AND i.access_level_id <= ?
+            ORDER BY m.position, m.id LIMIT 1) AS image';
+        $sql = 'SELECT ' . $columns . ' FROM pages p WHERE ' . self::PUBLIC_PAGE;
+        $levels = [$this->maxLevel, $this->maxLevel];
+        $result = [
             'statistics' => $this->statistics(),
-            'random' => array_map($this->card(...), $this->db->rows($sql . ' ORDER BY RAND() LIMIT 3', [$this->maxLevel])),
-            'recent' => array_map($this->card(...), $this->db->rows($sql . ' ORDER BY updated_at DESC, p.id LIMIT 10', [$this->maxLevel])),
-            'popular' => array_map($this->card(...), $this->db->rows($sql . ' ORDER BY p.view_count DESC, p.id LIMIT 10', [$this->maxLevel])),
-            'top_today' => [], 'top_week' => [], 'top_month' => [], 'missing' => [],
+            'random' => array_map($this->card(...), $this->db->rows($sql . ' ORDER BY RAND() LIMIT 3', $levels)),
+            'recent' => array_map($this->card(...), $this->db->rows($sql . ' ORDER BY updated_at DESC, p.id LIMIT 10', $levels)),
+            'popular' => array_map($this->card(...), $this->db->rows($sql . ' ORDER BY p.view_count DESC, p.id LIMIT 10', $levels)),
+            'missing' => [],
         ];
+        $now = time();
+        foreach (['top_24h' => 1, 'top_week' => 7, 'top_month' => 30] as $key => $days) {
+            $rows = $this->db->rows('SELECT ' . $columns . ', v.views FROM pages p JOIN
+                (SELECT page_id, COUNT(*) AS views FROM page_visits
+                    WHERE visited_at >= ? AND visited_at <= ? GROUP BY page_id) v ON v.page_id = p.id
+                WHERE ' . self::PUBLIC_PAGE . ' ORDER BY v.views DESC, p.id LIMIT 10',
+                [$this->maxLevel, $now - $days * 86400, $now, $this->maxLevel]);
+            $result[$key] = array_map($this->card(...), $rows);
+        }
+        $result['top_today'] = $result['top_24h']; // Compatibility with older home clients.
+        return $result;
     }
 
     private function card(array $row): array
     {
         $row['id'] = (string) $row['id'];
         $row['description'] ??= '';
-        $row['image'] = null;
+        $row['image'] = empty($row['image']) ? null : rtrim($this->mediaUrl, '/') . '/' . $row['image'];
         return $row;
     }
 
