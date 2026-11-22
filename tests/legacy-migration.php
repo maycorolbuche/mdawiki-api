@@ -249,3 +249,22 @@ for ($i = 1; $i <= 8; $i++) {
 $related = array_column($normalized->find('Especialidade-Teste')['related_pages'], 'id');
 check(count($related) === 5 && count(array_unique($related)) === 5
     && array_diff($related, $publicIds) === [], 'A amostra deve ter cinco páginas relacionadas públicas e distintas.');
+
+$createSlug = '/v1/pages/Novo_artigo';
+check($auth->handle('GET', $createSlug . '/editor', [], $origin)->status === 401, 'Editor novo exige autenticação.');
+$credentials = ['email' => 'migrated@example.test', 'password' => 'legacy-password'];
+$login = $auth->handle('POST', '/v1/auth/login', [], $origin, $credentials, $session->data['csrf']);
+check($login->status === 200, 'Login para testar criação falhou.');
+$csrf = $login->body['data']['csrf_token'];
+$draft = $auth->handle('GET', $createSlug . '/editor', [], $origin);
+check($draft->status === 200 && $draft->body['data']['exists'] === false
+    && $draft->body['data']['title'] === 'Novo artigo' && $draft->body['data']['source'] === '', 'Editor novo deve abrir vazio.');
+check($auth->handle('POST', $createSlug . '/preview', [], $origin, ['source' => 'Prévia de artigo'], $csrf)->status === 200
+    && $auth->handle('GET', $createSlug, [], $origin)->status === 404, 'Prévia não deve criar artigo.');
+$create = ['title' => 'Novo artigo', 'source' => 'Primeiro conteúdo', 'base_version' => $draft->body['data']['base_version']];
+$created = $auth->handle('PUT', $createSlug, [], $origin, $create, $csrf);
+check($created->status === 200 && $created->body['data']['slug'] === 'Novo-artigo'
+    && $created->body['data']['revision'] === 1, 'Criação deve retornar URL canônica e primeira revisão.');
+check($auth->handle('PUT', $createSlug, [], $origin, $create, $csrf)->status === 409, 'Segundo rascunho não deve sobrescrever a página.');
+$createdPage = $auth->handle('GET', $createSlug, [], $origin);
+check($createdPage->status === 200 && str_contains($createdPage->body['data']['html'], 'Primeiro conteúdo'), 'Artigo salvo deve aparecer na leitura.');

@@ -9,9 +9,12 @@ final class NormalizedPages
     {
     }
 
-    private function page(string $slug, array $user, bool $lock = false): array
+    private function page(string $slug, array $user, bool $lock = false, bool $allowMissing = false): ?array
     {
         $page = NormalizedPageRepository::lookup($this->db, $slug, $lock);
+        if (!$page && $allowMissing) {
+            return null;
+        }
         if (!$page || str_starts_with($page['legacy_identifier'], 'page@')) {
             throw new HttpError(404, 'not_found', 'Página não encontrada.');
         }
@@ -24,14 +27,19 @@ final class NormalizedPages
         return $page;
     }
 
-    private function version(array $page): string
+    private function version(?array $page): string
     {
-        return hash('sha256', serialize([$page['id'], $page['title'], $page['source'], $page['updated_at'], $page['updated_by_legacy']]));
+        return $page === null ? '' : hash('sha256', serialize([$page['id'], $page['title'], $page['source'], $page['updated_at'], $page['updated_by_legacy']]));
     }
 
     public function editor(string $slug): array
     {
-        $page = $this->page($slug, $this->accounts->current(true));
+        $page = $this->page($slug, $this->accounts->current(true), allowMissing: true);
+        if ($page === null) {
+            [$canonical] = $this->newPageAddress($slug);
+            return ['slug' => $canonical, 'title' => str_replace(['-', '_'], ' ', $canonical), 'source' => '',
+                'base_version' => '', 'format' => 'wiki', 'exists' => false, 'media' => false];
+        }
         return [
             'slug' => $page['slug'], 'title' => $page['title'], 'source' => $page['source'] ?? '',
             'base_version' => $this->version($page), 'format' => $page['is_html'] ? 'html' : 'wiki',
@@ -57,8 +65,43 @@ final class NormalizedPages
 
     public function preview(string $slug, array $body): array
     {
-        $page = $this->page($slug, $this->accounts->current(true));
+        $page = $this->page($slug, $this->accounts->current(true), allowMissing: true);
+        $page ??= ['slug' => $this->newPageAddress($slug)[0], 'is_html' => false];
         return ['html' => $this->render($page, $body['source'] ?? null)['html']];
+    }
+
+    private function newPageAddress(string $slug): array
+    {
+        if (str_contains($slug, '@')) {
+            throw new HttpError(422, 'invalid_slug', 'Este endereço é reservado.');
+        }
+        try {
+            [$canonical, $identifier] = PageSlugs::fromTitle($slug, '');
+        } catch (\RuntimeException) {
+            throw new HttpError(422, 'invalid_slug', 'Endereço de página inválido.');
+        }
+        if (mb_strlen($canonical) > 250 || mb_strlen($identifier) > 250) {
+            throw new HttpError(422, 'invalid_slug', 'Endereço de página inválido.');
+        }
+        return [$canonical, $identifier];
+    }
+
+    private function insertPage(string $slug, array $user, string $now): array
+    {
+        [$canonical, $identifier] = $this->newPageAddress($slug);
+        try {
+            $this->db->run("INSERT INTO pages
+                (legacy_identifier, identifier, slug, kind, is_searchable, access_level_id, needs_rebuild, view_count,
+                 is_html, created_by_legacy, created_at, legacy_checksum)
+                VALUES (?, ?, ?, 'article', 1, 1, 0, 0, 0, ?, ?, ?)",
+                ['@article:' . hash('sha256', $identifier), $identifier, $canonical, $user['EMAIL'], $now, str_repeat('0', 64)]);
+        } catch (\PDOException $error) {
+            if ((int) ($error->errorInfo[1] ?? 0) !== 1062) {
+                throw $error;
+            }
+            throw new HttpError(409, 'edit_conflict', 'Este endereço já foi criado. Recarregue a página antes de salvar.');
+        }
+        return $this->page($canonical, $user, true);
     }
 
     private function render(array $page, mixed $source): array
@@ -88,7 +131,8 @@ final class NormalizedPages
         $pdo = $this->db->pdo;
         $pdo->beginTransaction();
         try {
-            $page = $this->page($slug, $user, true);
+            $creating = !$rebuild && $restore === null && ($body['base_version'] ?? null) === '';
+            $page = $this->page($slug, $user, !$creating, $creating);
             if (!$rebuild && (!is_string($body['base_version'] ?? null)
                 || !hash_equals($this->version($page), $body['base_version']))) {
                 throw new HttpError(409, 'edit_conflict', 'Outra edição foi salva. Recarregue a página antes de salvar.');
@@ -107,11 +151,12 @@ final class NormalizedPages
             if ($title === '' || mb_strlen($title ?? '') > 250) {
                 throw new HttpError(422, 'invalid_page', 'Título inválido.');
             }
+            $now = date('Y-m-d H:i:s');
+            $page ??= $this->insertPage($slug, $user, $now);
             $last = $this->db->one('SELECT MAX(revision_number) AS revision, LEAST(COALESCE(MIN(legacy_revision_number), 0), 0) AS legacy
                 FROM page_revisions WHERE page_id = ?', [$page['id']]);
             $number = (int) $last['revision'];
             $rendered = $this->render($page, $source);
-            $now = date('Y-m-d H:i:s');
             if (!$rebuild && ($title !== $page['title'] || $source !== ($page['source'] ?? ''))) {
                 $number++;
                 $this->db->run('INSERT INTO page_revisions
