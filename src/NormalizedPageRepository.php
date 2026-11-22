@@ -158,7 +158,7 @@ final class NormalizedPageRepository implements PageRepository
         $result = [
             'statistics' => $this->statistics(),
             'random' => array_map($this->homeCard(...), $this->db->rows($sql . $withContent . ' ORDER BY RAND() LIMIT 3', $levels)),
-            'recent' => array_map($this->homeCard(...), $this->db->rows($sql . ' ORDER BY updated_at DESC, p.id LIMIT 10', $levels)),
+            'recent' => array_map($this->homeCard(...), $this->db->rows($sql . $withContent . ' ORDER BY updated_at DESC, p.id LIMIT 10', $levels)),
             'popular' => array_map($this->homeCard(...), $this->db->rows($sql . $withContent . ' ORDER BY p.view_count DESC, p.id LIMIT 10', $levels)),
             'missing' => [],
         ];

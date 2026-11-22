@@ -454,7 +454,7 @@ foreach ([['Sem-Conteudo', " \n\t ", 1], ['Fora-Da-Busca', 'Texto de teste', 0]]
     $db->prepare('INSERT INTO page_visits (page_id, visited_at) VALUES (?, ?)')->execute([$db->lastInsertId(), time()]);
 }
 $home = $auth->handle('GET', '/v1/home', [], $origin)->body['data'];
-foreach (['random', 'popular', 'top_24h', 'top_week', 'top_month'] as $section) {
+foreach (['random', 'recent', 'popular', 'top_24h', 'top_week', 'top_month'] as $section) {
     check(array_column($home[$section], 'id') === [(string) $articleId],
         "O bloco {$section} deve exibir apenas artigos buscáveis com conteúdo.");
 }
