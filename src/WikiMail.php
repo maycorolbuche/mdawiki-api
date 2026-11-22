@@ -33,7 +33,7 @@ final class WikiMail
         }
     }
 
-    public function event(string $type, string $action, string $name, array $actor, array $details = [], ?string $image = null): void
+    public function event(string $type, string $action, string $name, array $actor, array $details = [], ?string $image = null, ?string $path = null): void
     {
         $recipients = $this->recipients('admin_to');
         if (!$recipients) return;
@@ -47,6 +47,16 @@ final class WikiMail
         }
         if ($image && preg_match('~^https?://~i', $image)) {
             $content .= '<img src="' . self::escape($image) . '" alt="Prévia" width="240" style="max-width:100%;height:auto">';
+        }
+        if ($path !== null) {
+            $label = match ($type) {
+                'img' => 'Abrir imagem',
+                'user' => 'Abrir perfil',
+                default => 'Abrir página',
+            };
+            $url = rtrim($this->config['frontend_url'], '/') . $path;
+            $content .= '<p><a style="display:inline-block;background:#164a77;color:#fff;padding:10px 18px;border-radius:6px" href="'
+                . self::escape($url) . '">' . $label . '</a></p>';
         }
         $this->optional(implode(',', $recipients), $subject, $content);
     }

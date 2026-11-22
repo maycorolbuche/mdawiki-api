@@ -34,7 +34,7 @@ final class Accounts
             return $this->db->one('SELECT * FROM USUARIOS WHERE ' . $field . ' = ?', [$value]);
         }
         $column = $field === 'ID' ? 'id' : 'email';
-        $rows = $this->db->rows("SELECT id AS ID, email AS EMAIL, password_hash AS SENHA,
+        $rows = $this->db->rows("SELECT id AS ID, email AS EMAIL, password_hash AS SENHA, public_id AS PUBLIC_ID,
             name AS NOME, display_name AS APELIDO, access_level_id AS NIVEL, avatar_filename AS FOTO,
             birth_date AS DATA_NASC, city AS CIDADE, state_code AS ESTADO, club AS CLUBE,
             association AS ASSOCIACAO, club_type AS TIPO_CLUBE, biography AS BIOGRAFIA,
@@ -73,7 +73,9 @@ final class Accounts
         ];
         $details = [];
         foreach ($fields as $key => $label) $details[$label] = $profile[$key] ?? null;
-        $this->notifications->event('user', $action, $user['NOME'] ?? $user['EMAIL'], $user, $details, $profile['photo']);
+        $path = ($user['ATIVO'] ?? null) === 'S' && !empty($user['PUBLIC_ID'])
+            ? '/u/' . rawurlencode($user['PUBLIC_ID']) : null;
+        $this->notifications->event('user', $action, $user['NOME'] ?? $user['EMAIL'], $user, $details, $profile['photo'], $path);
     }
 
     public static function photoUrl(array $user, array $config, bool $thumbnail = false): ?string {

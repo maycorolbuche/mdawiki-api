@@ -189,7 +189,7 @@ final class NormalizedPages
             if ($ownsTransaction) $pdo->commit();
             if ($ownsTransaction && $edited) {
                 $this->notifications?->event('page', $new ? 'new' : 'update', $title, $user,
-                    ['Endereço' => $page['slug'], 'Conteúdo' => $source]);
+                    ['Endereço' => $page['slug'], 'Conteúdo' => $source], path: '/' . rawurlencode($page['slug']));
             }
             return ['slug' => $page['slug'], 'revision' => $number, 'base_version' => $this->version($page)];
         } catch (\Throwable $error) {
