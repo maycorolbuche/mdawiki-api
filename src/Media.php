@@ -9,7 +9,11 @@ final class Media
         $base=rtrim($config['media_public_url'],'/');
         $prefixes=['https://mda.wiki.br/site/','http://mda.wiki.br/site/','https://www.mda.wiki.br/site/','http://www.mda.wiki.br/site/','https://mda.wiki.br/','http://mda.wiki.br/',$config['frontend_url'].'/site/',$config['frontend_url'].'/','{{{url_diretorio}}}','{{{url_site}}}','/site/'];
         foreach ($prefixes as $prefix) foreach(['@imgs_wiki/'=>'wiki/','@imgs_wiki_mini/'=>'wiki_mini/','@imgs_wiki_cp/'=>'wiki_cp/','@imgs_user/'=>'users/','@imgs/'=>'assets/'] as $old=>$new) $value=str_replace($prefix.$old,$base.'/'.$new,$value);
-        return str_replace(['{{{url_diretorio}}}','@imgs_wiki/','@imgs_wiki_mini/','@imgs_wiki_cp/','@imgs_user/','@imgs/'],[$base.'/',$base.'/wiki/',$base.'/wiki_mini/',$base.'/wiki_cp/',$base.'/users/',$base.'/assets/'],$value);
+        $value = str_replace(['{{{url_diretorio}}}','@imgs_wiki/','@imgs_wiki_mini/','@imgs_wiki_cp/','@imgs_user/','@imgs/'],[$base.'/',$base.'/wiki/',$base.'/wiki_mini/',$base.'/wiki_cp/',$base.'/users/',$base.'/assets/'],$value);
+        if ($config['normalized_read_only'] ?? false) {
+            $value = str_replace($base . '/assets/img_nao_encontrada.png', $base . '/' . self::MISSING_IMAGE, $value);
+        }
+        return $value;
     }
     public function __construct(private array $config) {}
     public function upload(array $body, string $group='wiki', bool $requireSquare=false): array {

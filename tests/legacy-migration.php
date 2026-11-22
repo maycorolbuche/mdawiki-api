@@ -362,3 +362,18 @@ foreach ($linkedArticles as $name => $source) {
     check(str_contains($stored, $firstImage['url']) && !str_contains($stored, 'img_nao_encontrada'),
         'A restauração após a exclusão deve atualizar novamente os artigos.');
 }
+
+$missingName = 'Imagem-Nunca-Cadastrada';
+$missingArticle = '/v1/pages/Teste-Imagem-Ausente';
+$createdMissing = $auth->handle('PUT', $missingArticle, [], $origin,
+    ['title' => 'Teste Imagem Ausente', 'source' => '{{Imagem:' . $missingName . '}}', 'base_version' => ''], $csrf);
+check($createdMissing->status === 200, 'O artigo com imagem inexistente deve salvar normalmente.');
+check($auth->handle('GET', '/v1/images/' . $missingName, [], $origin)->status === 404, 'O marcador não deve criar uma imagem no banco.');
+$article = $auth->handle('GET', $missingArticle, [], $origin)->body['data'];
+check(str_contains($article['html'], '/assets/img_nao_encontrada.svg'), 'Imagem nunca cadastrada deve renderizar o marcador.');
+$db->prepare('UPDATE pages SET rendered_html = ? WHERE slug = ?')->execute([
+    '<figure><img src="{{{url_diretorio}}}@imgs/img_nao_encontrada.png"></figure>', 'Teste-Imagem-Ausente',
+]);
+$article = $auth->handle('GET', $missingArticle, [], $origin)->body['data'];
+check(str_contains($article['html'], '/assets/img_nao_encontrada.svg') && !str_contains($article['html'], 'img_nao_encontrada.png'),
+    'O artigo processado anteriormente deve trocar o marcador antigo na leitura.');
