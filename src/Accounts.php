@@ -18,9 +18,9 @@ final class Accounts
         if ($hash === '') return false;
         return hash_equals($hash, str_starts_with($hash, 'p2$') ? $this->hash($password, (int) $user['ID']) : md5($password));
     }
-    private function password(array $body): string {
+    private function password(array $body, int $minimum = 10): string {
         $password = $body['password'] ?? '';
-        if (!is_string($password) || strlen($password) < 10 || strlen($password) > 1024) throw new HttpError(422, 'invalid_password', 'Use uma senha com pelo menos 10 caracteres.');
+        if (!is_string($password) || mb_strlen($password) < $minimum || strlen($password) > 1024) throw new HttpError(422, 'invalid_password', "Use uma senha com pelo menos {$minimum} caracteres.");
         if ($password !== ($body['password_confirmation'] ?? null)) throw new HttpError(422, 'password_mismatch', 'A confirmação de senha está diferente.');
         return $password;
     }
@@ -122,7 +122,7 @@ final class Accounts
     }
     public function logout(): array { $this->session->data = []; $this->session->rotate(); return $this->session(); }
     public function register(array $body): array {
-        $email = $this->email($body['email'] ?? null); $password = $this->password($body);
+        $email = $this->email($body['email'] ?? null); $password = $this->password($body, 6);
         $name = trim(is_string($body['name'] ?? null) ? $body['name'] : '');
         if (mb_strlen($name) < 2 || mb_strlen($name) > 150) throw new HttpError(422, 'invalid_name', 'Informe seu nome.');
         if ($this->config['normalized_read_only'] ?? false) {
@@ -130,13 +130,13 @@ final class Accounts
         }
         if ($this->db->one('SELECT ID FROM USUARIOS WHERE EMAIL = ?', [$email])) throw new HttpError(409, 'email_exists', 'Este e-mail já possui cadastro.');
         $this->hash($password, 0); // Check configuration before writing anything.
-        $code = bin2hex(random_bytes(10)); $now = date('Y-m-d H:i:s');
+        $code = $this->legacyActivationCode(); $now = date('Y-m-d H:i:s');
         $this->db->pdo->beginTransaction();
         try {
             $this->db->run("INSERT INTO USUARIOS (EMAIL,NOME,SENHA,APELIDO,CODIGO_CONTA,DATA_CODIGO_CONTA,DT_CADASTRO,ATIVO,NIVEL) VALUES (?,?,?,?,?,?,?,'N',1)", [$email,$name,bin2hex(random_bytes(16)),mb_substr(strstr($email, '@', true),0,50),$code,$now,$now]);
             $id = (int) $this->db->pdo->lastInsertId(); $this->db->run('UPDATE USUARIOS SET SENHA = ? WHERE ID = ?', [$this->hash($password,$id),$id]);
             $this->notifications->security($email, 'Ative sua conta MDAWiki', 'Use este código para ativar sua conta.', $code,
-                $this->config['frontend_url'] . '/page@AtivaConta?code=' . $code);
+                $this->config['frontend_url'] . '/page@AtivaConta?code=' . $code . '&email=' . rawurlencode($email));
             $this->db->pdo->commit();
         } catch (\Throwable $e) { if ($this->db->pdo->inTransaction()) $this->db->pdo->rollBack(); throw $e; }
         $this->notifyProfile($id, 'new');
@@ -176,18 +176,41 @@ final class Accounts
         return ['message' => 'Cadastro criado. Confira seu e-mail para ativar a conta.'];
     }
 
-    private function sendNormalizedActivation(int $id, string $email, string $subject): void
+    private function activationCode(): string
     {
-        $code = bin2hex(random_bytes(10));
-        $hash = hash('sha256', $code);
-        $expires = date('Y-m-d H:i:s', time() + 86400);
-        $this->db->run('DELETE FROM user_activations WHERE user_id = ?', [$id]);
-        $this->db->run('INSERT INTO user_activations (user_id, token_hash, expires_at) VALUES (?, ?, ?)', [$id, $hash, $expires]);
-        $this->notifications->security($email, $subject, 'Use este código para ativar sua conta.', $code,
-            $this->config['frontend_url'] . '/page@AtivaConta?code=' . $code);
+        return str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
     }
 
-    private function activateNormalized(string $code): array
+    private function legacyActivationCode(): string
+    {
+        do {
+            $code = $this->activationCode();
+        } while ($this->db->one("SELECT ID FROM USUARIOS WHERE CODIGO_CONTA = ? AND ATIVO = 'N' LIMIT 1", [$code]));
+        return $code;
+    }
+
+    private function sendNormalizedActivation(int $id, string $email, string $subject): void
+    {
+        $expires = date('Y-m-d H:i:s', time() + 86400);
+        $previous = $this->db->one('SELECT token_hash FROM user_activations WHERE user_id = ?', [$id]);
+        $this->db->run('DELETE FROM user_activations WHERE user_id = ?', [$id]);
+        for ($attempt = 0; $attempt < 10; $attempt++) {
+            $code = $this->activationCode();
+            $hash = hash('sha256', $code);
+            if ($hash === ($previous['token_hash'] ?? null)) continue;
+            try {
+                $this->db->run('INSERT INTO user_activations (user_id, token_hash, expires_at) VALUES (?, ?, ?)', [$id, $hash, $expires]);
+                break;
+            } catch (\PDOException $error) {
+                if ((int) ($error->errorInfo[1] ?? 0) !== 1062) throw $error;
+            }
+        }
+        if ($attempt === 10) throw new HttpError(503, 'activation_code_unavailable', 'Tente solicitar um código novamente.');
+        $this->notifications->security($email, $subject, 'Use este código para ativar sua conta.', $code,
+            $this->config['frontend_url'] . '/page@AtivaConta?code=' . $code . '&email=' . rawurlencode($email));
+    }
+
+    private function activateNormalized(string $code, ?string $email): array
     {
         $hash = hash('sha256', $code);
         $activation = $this->db->one('SELECT user_id FROM user_activations WHERE token_hash = ?', [$hash]);
@@ -196,8 +219,8 @@ final class Accounts
         $pdo = $this->db->pdo;
         $pdo->beginTransaction();
         try {
-            $user = $this->db->one('SELECT is_active FROM users WHERE id = ? FOR UPDATE', [$id]);
-            if (!$user || (int) $user['is_active'] !== 0 || $this->db->run(
+            $user = $this->db->one('SELECT is_active, email FROM users WHERE id = ? FOR UPDATE', [$id]);
+            if (!$user || ($email !== null && strcasecmp($user['email'], $email) !== 0) || (int) $user['is_active'] !== 0 || $this->db->run(
                 'DELETE FROM user_activations WHERE user_id = ? AND token_hash = ? AND expires_at > ?',
                 [$id, $hash, date('Y-m-d H:i:s')]
             )->rowCount() !== 1) {
@@ -230,10 +253,13 @@ final class Accounts
 
     public function activation(array $body): array {
         $code = is_string($body['code'] ?? null) ? $body['code'] : '';
-        if ($this->config['normalized_read_only'] ?? false) return $this->activateNormalized($code);
+        $email = preg_match('/^[0-9]{6}$/D', $code) ? $this->email($body['email'] ?? null) : null;
+        if ($this->config['normalized_read_only'] ?? false) return $this->activateNormalized($code, $email);
         $u = $code !== '' ? $this->db->one("SELECT * FROM USUARIOS WHERE CODIGO_CONTA = ? AND ATIVO = 'N'", [$code]) : null;
-        if (!$u || strtotime($u['DATA_CODIGO_CONTA'] ?? '') < time() - 86400) throw new HttpError(422, 'invalid_code', 'Código inválido ou expirado. Solicite outro código.');
-        $this->db->run("UPDATE USUARIOS SET ATIVO = 'S', CODIGO_CONTA = NULL, DATA_CODIGO_CONTA = NULL WHERE ID = ?", [(int) $u['ID']]);
+        if (!$u || ($email !== null && strcasecmp($u['EMAIL'], $email) !== 0) || strtotime($u['DATA_CODIGO_CONTA'] ?? '') < time() - 86400) throw new HttpError(422, 'invalid_code', 'Código inválido ou expirado. Solicite outro código.');
+        $activated = $this->db->run("UPDATE USUARIOS SET ATIVO = 'S', CODIGO_CONTA = NULL, DATA_CODIGO_CONTA = NULL
+            WHERE ID = ? AND CODIGO_CONTA = ? AND ATIVO = 'N'", [(int) $u['ID'], $code]);
+        if ($activated->rowCount() !== 1) throw new HttpError(422, 'invalid_code', 'Código inválido ou expirado. Solicite outro código.');
         $this->notifyProfile((int) $u['ID']);
         return ['message'=>'Conta ativada. Você já pode entrar.'];
     }
@@ -242,10 +268,10 @@ final class Accounts
         if (!$reset && ($this->config['normalized_read_only'] ?? false)) return $this->resendNormalized($email);
         $u = $this->db->one('SELECT * FROM USUARIOS WHERE EMAIL = ?', [$email]);
         if ($u && (($reset && $u['ATIVO'] === 'S') || (!$reset && $u['ATIVO'] !== 'S'))) {
-            $token = bin2hex(random_bytes($reset ? 32 : 10)); $now = date('Y-m-d H:i:s');
+            $token = $reset ? bin2hex(random_bytes(32)) : $this->legacyActivationCode(); $now = date('Y-m-d H:i:s');
             $column = $reset ? 'SENHA_PROV' : 'CODIGO_CONTA';
             $stored = $reset ? substr(hash('sha256', $token),0,32) : $token;
-            $link = $this->config['frontend_url'] . ($reset ? '/page@RedefinirSenha?email=' . rawurlencode($email) . '&token=' : '/page@AtivaConta?code=') . $token;
+            $link = $this->config['frontend_url'] . ($reset ? '/page@RedefinirSenha?email=' . rawurlencode($email) . '&token=' : '/page@AtivaConta?code=') . $token . ($reset ? '' : '&email=' . rawurlencode($email));
             $this->db->pdo->beginTransaction();
             try {
                 $this->db->run("UPDATE USUARIOS SET $column = ?, DATA_CODIGO_CONTA = ? WHERE ID = ?", [$stored,$now,(int) $u['ID']]);

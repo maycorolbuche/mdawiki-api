@@ -36,9 +36,10 @@ $accounts = new Accounts($db, new Session(), $config, $send, $mail);
 
 $email = 'mail-new@example.test';
 $registration = ['name' => 'Nome <Teste>', 'email' => $email,
-    'password' => 'new-password-123', 'password_confirmation' => 'new-password-123'];
+    'password' => 'abc123', 'password_confirmation' => 'abc123'];
 $accounts->register($registration);
 $user = $db->one('SELECT * FROM USUARIOS WHERE EMAIL = ?', [$email]);
+checkMail(preg_match('/^[0-9]{6}$/D', $user['CODIGO_CONTA']) === 1, 'Activation code has six digits');
 checkMail(count($messages) === 3, 'Sends activation, blind copy and admin notice');
 [$personal, $copy, $admin] = $messages;
 checkMail($personal['to'] === $email && str_contains($personal['body'], $user['CODIGO_CONTA']), 'User receives their code');
@@ -47,8 +48,8 @@ checkMail($copy['options']['original_to'] === $email && !str_contains($copy['bod
 checkMail($admin['subject'] === '[user][new] Nome <Teste>' && $admin['to'] === 'admin@example.test,staff@example.test', 'Administrative subject and recipients');
 checkMail(str_contains($admin['body'], '&lt;Teste&gt;') && str_contains($admin['body'], $email)
     && !str_contains($admin['body'], $user['SENHA']), 'Administrative profile safely includes user data');
-$accounts->activation(['code' => $user['CODIGO_CONTA']]);
-$accounts->login(['email' => $email, 'password' => 'new-password-123']);
+$accounts->activation(['code' => $user['CODIGO_CONTA'], 'email' => $email]);
+$accounts->login(['email' => $email, 'password' => 'abc123']);
 $accounts->update(['NOME' => 'Nome alterado']);
 checkMail(end($messages)['subject'] === '[user][update] Nome alterado', 'Profile changes notify admins');
 $pages = new Pages($db, $accounts, new WikiRenderer($db, $config), $config, $mail);
