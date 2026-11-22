@@ -231,3 +231,21 @@ $run(1);
 $category = $db->query("SELECT id, source FROM pages WHERE identifier = 'abc'")->fetch(PDO::FETCH_ASSOC);
 check((int) $category['id'] === (int) $abc->body['data']['id']
     && $category['source'] === 'Conteúdo da categoria no legado', 'A importação deve reaproveitar o ID da categoria vazia.');
+
+$addRelated = $db->prepare("INSERT INTO pages (legacy_identifier, identifier, slug, title, kind, is_searchable, access_level_id, legacy_checksum)
+    VALUES (?, ?, ?, ?, 'article', 1, ?, ?)");
+$relate = $db->prepare('INSERT INTO page_categories (page_id, category_id, position) VALUES (?, ?, ?)');
+$relate->execute([$articleId, $categoryIds[0], 1]);
+$relate->execute([$articleId, $categoryIds[1], 2]);
+$publicIds = [];
+for ($i = 1; $i <= 8; $i++) {
+    $name = 'related-' . $i;
+    $addRelated->execute([$name, $name, $name, $name, $i === 8 ? 5 : 1, str_repeat('0', 64)]);
+    $id = $db->lastInsertId();
+    $relate->execute([$id, $categoryIds[0], 1]);
+    $relate->execute([$id, $categoryIds[1], 2]);
+    if ($i < 8) $publicIds[] = $id;
+}
+$related = array_column($normalized->find('Especialidade-Teste')['related_pages'], 'id');
+check(count($related) === 5 && count(array_unique($related)) === 5
+    && array_diff($related, $publicIds) === [], 'A amostra deve ter cinco páginas relacionadas públicas e distintas.');
