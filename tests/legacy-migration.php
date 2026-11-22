@@ -38,6 +38,8 @@ $insertUser->execute([100, 'migrated@example.test', md5('legacy-password'), $a])
 $insertUser->execute([101, 'reset@example.test', 'unsupported', null]);
 $db->exec("INSERT INTO CONFIG (CHAVE, VALOR) VALUES ('test', 'first')");
 
+$db->exec("UPDATE PAGINAS SET USU_CADASTRO = 'migrated@example.test', DT_CADASTRO = '2020-01-01 00:00:00'");
+$db->exec("UPDATE PAGINAS_LOGS SET EMAIL = 'migrated@example.test'");
 $db->exec('USE migration_target');
 $root = sys_get_temp_dir() . '/mdawiki-migration-' . bin2hex(random_bytes(8));
 putenv("MEDIA_ROOT={$root}");
@@ -59,6 +61,13 @@ $run = static function (int $expected = 0): void {
 };
 
 $run();
+foreach (['pages', 'images', 'image_revisions'] as $table) {
+    check((int) $db->query("SELECT MIN(created_by) FROM $table")->fetchColumn() === 100,
+        "A migração deve localizar o autor por e-mail e gravar o ID em $table.");
+}
+check($db->query('SELECT created_at FROM images')->fetchColumn() === '2020-01-01 00:00:00',
+    'Data de criação da imagem deve vir do legado.');
+
 check((int) $db->query('SELECT COUNT(*) FROM page_categories')->fetchColumn() === 0, 'Categoria derivada foi importada.');
 check((int) $db->query("SELECT needs_rebuild FROM pages WHERE legacy_identifier = 'article'")->fetchColumn() === 0, 'O importador deve concluir a reconstrução.');
 check(array_column($db->query('SHOW COLUMNS FROM page_categories')->fetchAll(PDO::FETCH_ASSOC), 'Field')
