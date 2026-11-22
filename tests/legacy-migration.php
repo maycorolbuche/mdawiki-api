@@ -125,3 +125,8 @@ check($preview->handle('PUT', '/v1/pages/Especialidade-Teste', [])->status === 5
 
 $db->exec("UPDATE pages SET access_level_id = 5 WHERE legacy_identifier = 'article'");
 check($preview->handle('GET', '/v1/pages/Especialidade-Teste', [])->status === 404, 'Prévia expôs artigo privado.');
+
+$search = $preview->handle('GET', '/v1/search', ['q' => 'Imagem']);
+check($search->status === 200 && count($search->body['data']['items']) === 1, 'Busca da base importada falhou.');
+$home = $preview->handle('GET', '/v1/home', []);
+check($home->status === 200 && count($home->body['data']['recent']) === 1, 'Início da base importada não respeitou a visibilidade.');

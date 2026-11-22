@@ -88,4 +88,4 @@ Os avatares já cadastrados e a importação do acervo são preservados. Essa re
 
 ## Prévia da base migrada
 
-Em `dev`, configure `APP_ENV=local` e `DB_SCHEMA=normalized` no backend e aponte `DB_*` para a base de destino já importada. A prévia habilita leitura pública e exportação em `/v1/pages`, incluindo resolução de slug pelo identificador normalizado e imagens públicas migradas. Categorias e redirecionamentos consultam os vínculos por ID quando já preenchidos. A prévia ainda não oferece autenticação, edição, busca, home, histórico ou reconstrução de vínculos. O schema legado continua sendo o padrão.
+Em `dev`, aponte `DB_*` para a base importada. A API reconhece a estrutura pelo banco conectado. A base importada atende leitura pública, exportação, busca, início e contadores básicos. Autenticação, edição, histórico, catálogos e reconstrução dos vínculos da base migrada ainda estão em adaptação.

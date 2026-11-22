@@ -53,6 +53,55 @@ final class NormalizedPageRepository implements PageRepository
         return $page;
     }
 
+    private const CARD = 'p.id, p.slug, COALESCE(p.title, p.slug) AS title,
+        LEFT(p.plain_text, 240) AS description, COALESCE(p.updated_at, p.created_at) AS updated_at';
+
+    public function search(array $query): array
+    {
+        $term = $query['q'] ?? '';
+        $limit = filter_var($query['limit'] ?? 50, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 100]]);
+        $offset = filter_var($query['offset'] ?? 0, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0, 'max_range' => 1000000]]);
+        if (!is_string($term) || mb_strlen($term) > 100 || $limit === false || $offset === false) {
+            throw new HttpError(422, 'invalid_search', 'Busca ou paginação inválida.');
+        }
+        if (trim($term) === '') {
+            return ['items' => [], 'next_offset' => null];
+        }
+        $like = '%' . str_replace(['!', '%', '_'], ['!!', '!%', '!_'], trim($term)) . '%';
+        $rows = $this->db->rows('SELECT ' . self::CARD . ' FROM pages p WHERE ' . self::PUBLIC_PAGE
+            . " AND (p.title LIKE ? ESCAPE '!' OR p.plain_text LIKE ? ESCAPE '!') ORDER BY p.title, p.id LIMIT ? OFFSET ?",
+            [$this->maxLevel, $like, $like, $limit + 1, $offset]);
+        return ['items' => array_map($this->card(...), array_slice($rows, 0, $limit)),
+            'next_offset' => count($rows) > $limit ? $offset + $limit : null];
+    }
+
+    public function statistics(): array
+    {
+        $row = $this->db->one("SELECT SUM(p.kind <> 'image') AS pages, SUM(p.kind = 'image') AS images,
+            SUM(p.view_count) AS views FROM pages p WHERE " . self::PUBLIC_PAGE, [$this->maxLevel]);
+        return array_map('intval', $row);
+    }
+
+    public function home(): array
+    {
+        $sql = 'SELECT ' . self::CARD . ' FROM pages p WHERE ' . self::PUBLIC_PAGE;
+        return [
+            'statistics' => $this->statistics(),
+            'random' => array_map($this->card(...), $this->db->rows($sql . ' ORDER BY RAND() LIMIT 3', [$this->maxLevel])),
+            'recent' => array_map($this->card(...), $this->db->rows($sql . ' ORDER BY updated_at DESC, p.id LIMIT 10', [$this->maxLevel])),
+            'popular' => array_map($this->card(...), $this->db->rows($sql . ' ORDER BY p.view_count DESC, p.id LIMIT 10', [$this->maxLevel])),
+            'top_today' => [], 'top_week' => [], 'top_month' => [], 'missing' => [],
+        ];
+    }
+
+    private function card(array $row): array
+    {
+        $row['id'] = (string) $row['id'];
+        $row['description'] ??= '';
+        $row['image'] = null;
+        return $row;
+    }
+
     public function canServeArticleFile(string $key): bool
     {
         return $this->db->one('SELECT p.id FROM files f JOIN images i ON i.file_id = f.id
