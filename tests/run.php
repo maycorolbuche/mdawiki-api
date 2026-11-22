@@ -139,7 +139,10 @@ if (in_array('sqlite', PDO::getAvailableDrivers(), true)) {
     check(count($members) === 8 && count(array_filter($members, static fn ($row) => in_array($row['slug'], ['Restrito', 'Oculto'], true))) === 0, 'Category members respect publication rules');
     $export = $legacy->list(100, '');
     $exported = array_values(array_filter($export, static fn ($row) => $row['id'] === 'a'))[0];
-    check($exported['categories'] === $data['categories'] && $exported['mentions'] === $data['mentions'] && $exported['related_pages'] === $data['related_pages'], 'Static export and individual lookup return the same relations');
+    check($exported['categories'] === $data['categories'] && $exported['mentions'] === $data['mentions'], 'Static export and individual lookup return the same categories and mentions');
+    $exportedRelated = array_column($exported['related_pages'], 'slug');
+    check(count($exportedRelated) === 5 && count(array_unique($exportedRelated)) === 5
+        && array_diff($exportedRelated, $candidates) === [], 'Static export samples the same eligible set');
     $db->exec('DROP TABLE PAGINAS');
     $queryFailure = $diagnostic->handle('GET', '/v1/pages/Cães', []);
     check($queryFailure->status === 503 && $queryFailure->body['error']['details']['stage'] === 'page_lookup_query', 'Failed query identified separately from connection failure');
