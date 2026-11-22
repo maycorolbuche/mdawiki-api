@@ -162,4 +162,37 @@ check($saved->status === 200, 'Salvamento do artigo migrado falhou.');
 check($auth->handle('PUT', $slug, [], $origin, $change, $csrf)->status === 409, 'Versão desatualizada sobrescreveu artigo.');
 $history = $auth->handle('GET', $slug . '/history', [], $origin);
 check($history->status === 200 && $history->body['data']['revisions'][0]['source'] === 'Texto novo', 'Revisão salva não consta no histórico.');
+$db->exec("UPDATE users SET access_level_id = 5 WHERE id = 100");
+$targetId = $db->query("SELECT id FROM pages WHERE kind = 'image'")->fetchColumn();
+$articleId = $importedPage['id'];
+$change = [
+    'title' => 'EspéciAlidade Teste',
+    'source' => "{{Categoria:Imagem, IMAGEM, Ausente}}\n{{Imagem:Sample}}\n{{Video:https://example.test/video|Legenda}}\n==Seção==\n[[Imagem#Detalhes|Ver imagem]] [[https://example.test/|Site]]",
+    'base_version' => $history->body['data']['base_version'],
+];
+$saved = $auth->handle('PUT', $slug, [], $origin, $change, $csrf);
+check($saved->status === 200, 'Salvamento com vínculos falhou.');
+foreach (['page_categories' => 'category_id', 'page_media' => 'image_page_id', 'page_links' => 'target_page_id'] as $table => $column) {
+    check($db->query("SELECT $column FROM $table WHERE page_id = $articleId")->fetchAll(PDO::FETCH_COLUMN) === [$targetId],
+        "Vínculo por ID incorreto em $table.");
+}
+foreach (['page_templates', 'page_headings', 'page_external_links', 'page_videos'] as $table) {
+    check((int) $db->query("SELECT COUNT(*) FROM $table WHERE page_id = $articleId")->fetchColumn() > 0,
+        "Salvamento não preencheu $table.");
+}
+$db->exec("DELETE FROM page_categories WHERE page_id = $articleId");
+$db->exec("UPDATE pages SET rendered_html = 'desatualizado', needs_rebuild = 1 WHERE id = $articleId");
+$queue = $auth->handle('GET', '/v1/catalog', ['type' => 'atualizar'], $origin);
+check($queue->status === 200 && (int) $queue->body['data']['items'][0]['id'] === (int) $articleId, 'Página pendente ausente da fila.');
+$rebuilt = $auth->handle('POST', $slug . '/rebuild', [], $origin, [], $csrf);
+check($rebuilt->status === 200 && $rebuilt->body['data'] === $saved->body['data'], 'Atualizar alterou a revisão ou versão de edição.');
+check((int) $db->query("SELECT COUNT(*) FROM page_revisions WHERE page_id = $articleId")->fetchColumn() === 2, 'Atualizar criou histórico.');
+check((int) $db->query("SELECT category_id FROM page_categories WHERE page_id = $articleId")->fetchColumn() === (int) $targetId, 'Atualizar não refez categorias.');
+check($db->query("SELECT rendered_html FROM pages WHERE id = $articleId")->fetchColumn() !== 'desatualizado', 'Atualizar não refez HTML.');
+$change['source'] = 'Sem vínculos';
+$change['base_version'] = $rebuilt->body['data']['base_version'];
+check($auth->handle('PUT', $slug, [], $origin, $change, $csrf)->status === 200, 'Remoção dos vínculos falhou.');
+foreach (['page_categories', 'page_media', 'page_links', 'page_templates', 'page_headings', 'page_external_links', 'page_videos'] as $table) {
+    check((int) $db->query("SELECT COUNT(*) FROM $table WHERE page_id = $articleId")->fetchColumn() === 0, "Vínculos antigos em $table.");
+}
 check($auth->handle('POST', '/v1/auth/logout', [], $origin, [], $login->body['data']['csrf_token'])->status === 200, 'Logout migrado falhou.');
