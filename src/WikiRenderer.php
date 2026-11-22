@@ -18,11 +18,10 @@ final class WikiRenderer
             $file = (new NormalizedArticleHtml($this->db, (int) $this->config['public_max_level'],
                 $this->config['media_public_url'], $this->config['frontend_url']))
                 ->image('imagem@' . preg_replace('/!tmpl$/', '', $name));
-            if (!$file) return [];
-            $key = $file['storage_key'];
+            $key = $file['storage_key'] ?? Media::MISSING_IMAGE;
             $size = isset($this->config['media_root']) ? @getimagesize($this->config['media_root'] . '/' . $key) : false;
             return ['IMAGEM' => json_encode(array_fill_keys(['url', 'url_mini', 'url_cp'], $key)
-                + ['w' => $size[0] ?? 100, 'h' => $size[1] ?? 100], JSON_THROW_ON_ERROR), 'image_id' => $file['image_id']];
+                + ['w' => $size[0] ?? 100, 'h' => $size[1] ?? 100], JSON_THROW_ON_ERROR), 'image_id' => $file['image_id'] ?? null];
         }
         $row=$this->db->one("SELECT CONTEUDO FROM PAGINAS WHERE IDENT = ? AND COALESCE(NIVEL,1) <= ?",['imagem@'.Database::id(preg_replace('/!tmpl$/','',$name)),(int)$this->config['public_max_level']]);
         $file=json_decode($row['CONTEUDO'] ?? '',true);
