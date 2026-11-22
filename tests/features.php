@@ -176,6 +176,9 @@ foreach(['private'=>5,'hidden'=>1,'redirect'=>1] as $name=>$level) {
 $db->run("INSERT INTO PAGINAS_REDIRECIONAMENTOS (IDENT,NOME_URL,ID,PAGINA_URL) VALUES ('home_redirect','home_redirect',1,'home_today')");
 $db->run("INSERT INTO PAGINAS_IMAGENS (IDENT,NOME_URL,ID,IMAGEM_URL,IMAGEM_FILE_URL,IMAGEM_FILE_MINI_URL,IMAGEM_FILE_CP_URL,TEMPLATE) VALUES ('home_today','home_today',1,'photo','https://mda.wiki.br/site/@imgs_wiki/photo.png','https://mda.wiki.br/site/@imgs_wiki_mini/photo.png','','N')");
 foreach([['home_today',1,'home_missing','Falta este conteúdo'],['home_week',1,'home_missing','Falta este conteúdo'],['home_private',1,'home_secret_missing','Link privado']] as [$source,$id,$target,$title]) $db->run('INSERT INTO PAGINAS_LINKS (IDENT,ID,LINK,LINK_IDENT,LINK_URL) VALUES (?,?,?,?,?)',[$source,$id,$title,$target,$target]);
+verify(MDAWiki\PageSummary::shorten('Uma excursão longa', 9) === 'Uma excursão...', 'Summary completes the Unicode word');
+verify(MDAWiki\PageSummary::shorten('Uma excursão', 9) === 'Uma excursão', 'Summary adds no ellipsis when the final word completes the content');
+verify(MDAWiki\PageSummary::shorten('Uma excursão longa', 4) === 'Uma...', 'Summary ends at an existing word boundary');
 $homeResponse=request('/v1/home');verify($homeResponse->status===200,'Home request succeeds');$home=$homeResponse->body['data'];
 foreach(['random','recent','popular','top_today','top_week','top_month','missing'] as $key) {
     verify(is_array($home[$key]) && count($home[$key])<=($key==='random'?3:10),'Home block limits: '.$key);
