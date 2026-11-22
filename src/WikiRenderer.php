@@ -105,7 +105,7 @@ final class WikiRenderer
         }
         $html=$this->urls($html);
         if ($pageId !== null && ($this->config['normalized_editor'] ?? false)) {
-            $html = $this->refreshLinkedMedia($html, $pageId, $meta['image_refs'] ?? []);
+            $html = $this->refreshLinkedMedia($html, $pageId, $meta);
         }
 
         preg_match_all('~<img[^>]+src=[\'"]([^\'"<>]+)[\'"]~i',$html,$images); $meta['images']=$images[1];
@@ -113,12 +113,12 @@ final class WikiRenderer
         $html=(new PublicLists($this->db,$this->config))->render($html);
         return $meta+['html'=>$html,'text'=>trim(html_entity_decode(strip_tags($html),ENT_QUOTES|ENT_HTML5,'UTF-8'))];
     }
-    private function refreshLinkedMedia(string $html, int $pageId, array $references): string
+    private function refreshLinkedMedia(string $html, int $pageId, array &$meta): string
     {
         $base = rtrim($this->config['media_public_url'], '/') . '/';
-        $generated = array_fill_keys(array_column($references, 'url'), true);
+        $generated = array_fill_keys(array_column($meta['image_refs'] ?? [], 'url'), true);
         return preg_replace_callback('~(<img\b[^>]*?\s+src\s*=\s*)(["\x27])(.*?)\2~is',
-            function (array $image) use ($pageId, $base, $generated): string {
+            function (array $image) use ($pageId, $base, $generated, &$meta): string {
                 $url = html_entity_decode($image[3], ENT_QUOTES | ENT_HTML5, 'UTF-8');
                 [$urlWithoutQuery] = explode('?', $url, 2);
                 if (!str_starts_with($urlWithoutQuery, $base) || isset($generated[$urlWithoutQuery])) {
@@ -126,15 +126,17 @@ final class WikiRenderer
                 }
                 $key = substr($urlWithoutQuery, strlen($base));
                 if (!preg_match('~^articles/[a-f0-9]{64}\.[a-z0-9]+$~D', $key)) return $image[0];
-                $matches = $this->db->rows('SELECT DISTINCT current_file.storage_key
-                    FROM page_media m JOIN images i ON i.id = m.image_id JOIN files current_file ON current_file.id = i.file_id
+                $matches = $this->db->rows('SELECT DISTINCT i.id, current_file.storage_key
+                    FROM page_media m JOIN images i ON i.id = m.image_id LEFT JOIN files current_file ON current_file.id = i.file_id
                     JOIN files referenced ON referenced.storage_key = ?
                     WHERE m.page_id = ? AND i.access_level_id <= ? AND (i.file_id = referenced.id OR EXISTS
                         (SELECT 1 FROM image_revisions r WHERE r.image_id = i.id AND r.file_id = referenced.id
                             AND r.access_level_id <= ?)) LIMIT 2',
                     [$key, $pageId, $this->config['public_max_level'], $this->config['public_max_level']]);
-                if (count($matches) !== 1 || $matches[0]['storage_key'] === $key) return $image[0];
-                return $image[1] . '"' . self::e($base . $matches[0]['storage_key']) . '"';
+                if (count($matches) !== 1) return $image[0];
+                $url = $base . ($matches[0]['storage_key'] ?? Media::MISSING_IMAGE);
+                $meta['image_refs'][] = ['image_id' => $matches[0]['id'], 'url' => $url, 'template' => 'N'];
+                return $matches[0]['storage_key'] === $key ? $image[0] : $image[1] . '"' . self::e($url) . '"';
             }, $html) ?? $html;
     }
 
