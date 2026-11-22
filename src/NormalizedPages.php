@@ -75,6 +75,16 @@ final class NormalizedPages
         if ($rebuild && (int) $user['NIVEL'] < 5) {
             throw new HttpError(403, 'permission_denied', 'Acesso restrito a administradores.');
         }
+        return $this->write($slug, $body, $restore, $rebuild, $user);
+    }
+
+    public function rebuildCache(string $slug): array
+    {
+        return $this->write($slug, [], null, true, ['NIVEL' => PHP_INT_MAX]);
+    }
+
+    private function write(string $slug, array $body, ?int $restore, bool $rebuild, array $user): array
+    {
         $pdo = $this->db->pdo;
         $pdo->beginTransaction();
         try {
