@@ -46,6 +46,7 @@ final class Application
         }
         $normalized = $this->config['normalized_read_only'] ?? false;
         $previewAccountRoute = ($method === 'GET' && in_array($path, ['/v1/auth/session', '/v1/profile'], true))
+            || ($method === 'PUT' && $path === '/v1/profile')
             || ($method === 'POST' && in_array($path, ['/v1/auth/login', '/v1/auth/logout', '/v1/auth/register', '/v1/auth/activate', '/v1/auth/resend'], true))
             || ($method === 'GET' && preg_match('~^/v1/view/[^/]+$~D', $path))
             || ($method === 'GET' && $path === '/v1/catalog' && ($query['type'] ?? null) === 'atualizar'
