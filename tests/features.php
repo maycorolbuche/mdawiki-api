@@ -29,6 +29,13 @@ verify(request('/v1/profile','PUT',['NOME'=>'Nome atualizado','NIVEL'=>1,'ATIVO'
 verify(request('/v1/profile','PUT',['DATA_NASC'=>null,'CIDADE'=>null])->status===200,'Nullable legacy profile fields can be saved');
 verify((int)$db->one('SELECT NIVEL FROM USUARIOS WHERE ID=1')['NIVEL']===5,'Mass assignment cannot change privileges');
 $db->run("INSERT INTO PAGINAS (IDENT,NOME_URL,NOME,CONTEUDO_CODE,CONTEUDO,CONTEUDO_TXT,NIVEL) VALUES ('incluido','Incluído','Incluído','Texto incluído.','','',1)");
+$plain = (new MDAWiki\WikiRenderer($db, $config))->render(
+    "<style>.artigo { color: red; }</style>{{Especialidade:clube=DBV|area=HM|cod=024|nivel=1|ano=1964|origem=Associação Geral|icone=HM024}}\n# Primeiro requisito\n{{Externo:{{Interno:teste}}}}\n# [[Outra página|Segundo requisito]]",
+    'Teste_texto'
+);
+verify(str_contains($plain['html'], '<style>') && str_contains($plain['html'], '1964'), 'Styles and template stay in the rendered article');
+verify(preg_replace('/\s+/u', ' ', $plain['text']) === 'Primeiro requisito Segundo requisito',
+    'Plain text excludes CSS and template contents: ' . $plain['text']);
 $code="{{Especialidade:clube=DBV|area=HM|cod=024|nivel=1|ano=1964|origem=Associação Geral|icone=HM024}}\n== Requisitos ==\n# Primeiro requisito\n# [[Outra página|Outro artigo]]\n{{Categoria:Artes e Habilidades Manuais}}\n{{Incluir:Incluído}}";
 verify(request('/v1/pages/Sab%C3%A3o/editor')->body['data']['exists']===false,'New article source can be created by authenticated user');
 $preview=request('/v1/pages/Sab%C3%A3o/preview','POST',['source'=>$code]);
