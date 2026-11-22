@@ -115,10 +115,14 @@ final class Accounts
         $this->session->rotate(); $this->session->data['id'] = (int) $u['ID']; $this->session->data['fingerprint'] = hash('sha256', $u['SENHA']); $this->session->data['expires'] = time() + $lifetime;
         $this->session->data['normalized'] = $normalized;
         if ($lifetime>43200) $this->session->remember($lifetime);
-        $this->db->run($normalized
+        $update = $normalized
             ? 'UPDATE users SET has_logged_in = 1, last_seen_at = ? WHERE id = ?'
-            : "UPDATE USUARIOS SET FEZ_LOGIN = 'S', DT_ULT_ACESSO = ? WHERE ID = ?", [date('Y-m-d H:i:s'), (int) $u['ID']]);
-        return $this->session();
+            : "UPDATE USUARIOS SET FEZ_LOGIN = 'S', DT_ULT_ACESSO = ? WHERE ID = ?";
+        $neverLoggedIn = $normalized ? 'COALESCE(has_logged_in, 0) = 0' : "COALESCE(FEZ_LOGIN, 'N') <> 'S'";
+        $values = [date('Y-m-d H:i:s'), (int) $u['ID']];
+        $firstLogin = $this->db->run($update . ' AND ' . $neverLoggedIn, $values)->rowCount() === 1;
+        if (!$firstLogin) $this->db->run($update, $values);
+        return $this->session() + ['first_login' => $firstLogin];
     }
     public function logout(): array { $this->session->data = []; $this->session->rotate(); return $this->session(); }
     public function register(array $body): array {
@@ -296,6 +300,10 @@ final class Accounts
     }
     public function update(array $body): array {
         $u=$this->current(true); $allowed=['NOME'=>150,'APELIDO'=>50,'CIDADE'=>150,'ESTADO'=>2,'CLUBE'=>50,'ASSOCIACAO'=>50,'TIPO_CLUBE'=>50,'BIOGRAFIA'=>10000,'DATA_NASC'=>10,'ENVIA_EMAIL'=>1]; $sets=[]; $values=[];
+        $normalized = $this->config['normalized_read_only'] ?? false;
+        $columns = ['NOME'=>'name','APELIDO'=>'display_name','CIDADE'=>'city','ESTADO'=>'state_code','CLUBE'=>'club',
+            'ASSOCIACAO'=>'association','TIPO_CLUBE'=>'club_type','BIOGRAFIA'=>'biography','DATA_NASC'=>'birth_date',
+            'ENVIA_EMAIL'=>'receives_notifications'];
         foreach ($allowed as $key=>$maximum) if (array_key_exists($key,$body)) {
             $raw=$body[$key] ?? '';
             if (!is_string($raw) || mb_strlen($raw)>$maximum) throw new HttpError(422,'invalid_profile','Campo inválido: '.$key);
@@ -303,10 +311,22 @@ final class Accounts
             if ($key==='DATA_NASC' && $value!=='' && (!preg_match('/^(\d{4})-(\d{2})-(\d{2})$/',$value,$m) || !checkdate((int)$m[2],(int)$m[3],(int)$m[1]))) throw new HttpError(422,'invalid_date','Data de nascimento inválida.');
             if ($key==='NOME' && mb_strlen($value)<2) throw new HttpError(422,'invalid_name','Informe seu nome.');
             if ($key==='ENVIA_EMAIL' && !in_array($value,['S','N'],true)) throw new HttpError(422,'invalid_profile','Preferência inválida.');
-            $sets[]="$key = ?"; $values[]=$value==='' && $key==='DATA_NASC' ? null : $value;
+            $column = $normalized ? $columns[$key] : $key;
+            $sets[] = "$column = ?";
+            $values[] = match (true) {
+                $key === 'DATA_NASC' && $value === '' => null,
+                $normalized && $key === 'ENVIA_EMAIL' => (int) ($value === 'S'),
+                default => $value,
+            };
         }
-        if ($sets) { $values[]=date('Y-m-d H:i:s'); $values[]=(int)$u['ID']; $this->db->run('UPDATE USUARIOS SET '.implode(',',$sets).', DT_ALTERACAO = ? WHERE ID = ?',$values); }
-        if ($sets) $this->notifyProfile((int) $u['ID']);
+        if ($sets) {
+            $values[] = date('Y-m-d H:i:s');
+            $values[] = (int) $u['ID'];
+            $table = $normalized ? 'users' : 'USUARIOS';
+            $updatedAt = $normalized ? 'updated_at' : 'DT_ALTERACAO';
+            $this->db->run("UPDATE $table SET " . implode(',', $sets) . ", $updatedAt = ? WHERE id = ?", $values);
+            $this->notifyProfile((int) $u['ID']);
+        }
         return $this->profile($this->current(true));
     }
     public function changePassword(array $body): array {

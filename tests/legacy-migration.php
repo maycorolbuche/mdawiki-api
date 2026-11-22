@@ -421,4 +421,11 @@ check(preg_match('/code=([0-9]{6})/', $activationMail, $newCode) === 1 && $newCo
 check($auth->handle('POST', '/v1/auth/activate', [], $origin, ['code' => $firstCode[1], 'email' => $registration['email']], $csrf)->status === 422, 'Código substituído aceito.');
 check($auth->handle('POST', '/v1/auth/activate', [], $origin, ['code' => $newCode[1], 'email' => $registration['email']], $csrf)->status === 200, 'Ativação falhou.');
 check($auth->handle('POST', '/v1/auth/activate', [], $origin, ['code' => $newCode[1], 'email' => $registration['email']], $csrf)->status === 422, 'Código consumido foi aceito.');
-check($auth->handle('POST', '/v1/auth/login', [], $origin, $registration, $csrf)->status === 200, 'Login da conta nova falhou.');
+$firstLogin = $auth->handle('POST', '/v1/auth/login', [], $origin, $registration, $csrf);
+check($firstLogin->status === 200 && $firstLogin->body['data']['first_login'] === true, 'Primeiro login deve sinalizar acesso ao perfil.');
+$csrf = $firstLogin->body['data']['csrf_token'];
+$profileUpdate = $auth->handle('PUT', '/v1/profile', [], $origin, ['CIDADE' => 'Campinas', 'ENVIA_EMAIL' => 'N'], $csrf);
+check($profileUpdate->status === 200 && $profileUpdate->body['data']['CIDADE'] === 'Campinas'
+    && $profileUpdate->body['data']['ENVIA_EMAIL'] === 'N', 'Perfil migrado deve aceitar atualizações.');
+$secondLogin = $auth->handle('POST', '/v1/auth/login', [], $origin, $registration, $csrf);
+check($secondLogin->status === 200 && $secondLogin->body['data']['first_login'] === false, 'Segundo login não deve repetir a sinalização.');
