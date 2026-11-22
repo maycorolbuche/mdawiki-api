@@ -15,17 +15,14 @@ final class WikiRenderer
     }
     public function image(string $name): array {
         if ($this->config['normalized_editor'] ?? false) {
-            $page = NormalizedPageRepository::lookup($this->db, 'imagem@' . preg_replace('/!tmpl$/', '', $name));
-            if (!$page || $page['kind'] !== 'image' || !$page['is_searchable']
-                || (int) ($page['access_level_id'] ?? 1) > (int) $this->config['public_max_level']) {
-                return [];
-            }
-            $file = $this->db->one('SELECT f.storage_key FROM images i JOIN files f ON f.id = i.file_id WHERE i.page_id = ?', [$page['id']]);
+            $file = (new NormalizedArticleHtml($this->db, (int) $this->config['public_max_level'],
+                $this->config['media_public_url'], $this->config['frontend_url']))
+                ->image('imagem@' . preg_replace('/!tmpl$/', '', $name));
             if (!$file) return [];
             $key = $file['storage_key'];
             $size = isset($this->config['media_root']) ? @getimagesize($this->config['media_root'] . '/' . $key) : false;
             return ['IMAGEM' => json_encode(array_fill_keys(['url', 'url_mini', 'url_cp'], $key)
-                + ['w' => $size[0] ?? 100, 'h' => $size[1] ?? 100], JSON_THROW_ON_ERROR), 'page_id' => (int) $page['id']];
+                + ['w' => $size[0] ?? 100, 'h' => $size[1] ?? 100], JSON_THROW_ON_ERROR), 'page_id' => $file['page_id']];
         }
         $row=$this->db->one("SELECT CONTEUDO FROM PAGINAS WHERE IDENT = ? AND COALESCE(NIVEL,1) <= ?",['imagem@'.Database::id(preg_replace('/!tmpl$/','',$name)),(int)$this->config['public_max_level']]);
         $file=json_decode($row['CONTEUDO'] ?? '',true);

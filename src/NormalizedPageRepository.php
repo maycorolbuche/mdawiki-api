@@ -10,7 +10,7 @@ final class NormalizedPageRepository implements PageRepository
         p.plain_text AS text, COALESCE(p.rebuilt_at, p.updated_at) AS updated_at, f.storage_key
         FROM pages p LEFT JOIN images i ON i.page_id = p.id LEFT JOIN files f ON f.id = i.file_id';
 
-    public function __construct(private readonly Database $db, private readonly int $maxLevel, private readonly string $mediaUrl)
+    public function __construct(private readonly Database $db, private readonly int $maxLevel, private readonly string $mediaUrl, private readonly string $frontendUrl = 'https://mda.wiki.br')
     {
     }
 
@@ -22,7 +22,7 @@ final class NormalizedPageRepository implements PageRepository
         $rows = $this->db->rows(self::SELECT_PAGE . ' WHERE ' . self::PUBLIC_PAGE
             . ' AND p.id > CAST(? AS UNSIGNED) ORDER BY p.id LIMIT ?', [$this->maxLevel, $after ?: '0', $limit]);
 
-        return array_map($this->present(...), $rows);
+        return array_map($this->withRelations(...), $rows);
     }
 
     public static function lookup(Database $db, string $slug, bool $lock = false): ?array
@@ -50,7 +50,21 @@ final class NormalizedPageRepository implements PageRepository
         if ($row === null) {
             return null;
         }
+        return $this->withRelations($row);
+    }
+
+    private function withRelations(array $row): array
+    {
         $page = $this->present($row);
+        $page = array_replace($page, (new NormalizedArticleHtml($this->db, $this->maxLevel, $this->mediaUrl, $this->frontendUrl))
+            ->decorate($page['html'] ?? ''));
+        $page['mentions'] = $this->relationCards('page_links l JOIN pages p ON p.id = l.page_id',
+            'l.target_page_id = ? AND p.id <> ?', [$page['id'], $page['id']]);
+        $page['related_pages'] = $this->relationCards(
+            'page_categories own JOIN page_categories related ON related.category_id = own.category_id JOIN pages p ON p.id = related.page_id',
+            'own.page_id = ? AND p.id <> ?', [$page['id'], $page['id']]);
+        $page['image_usage'] = $row['kind'] === 'image' ? $this->relationCards('page_media m JOIN pages p ON p.id = m.page_id',
+            'm.image_page_id = ?', [$page['id']]) : [];
         $categories = $this->db->rows('SELECT p.id, p.slug, p.title FROM page_categories c
             JOIN pages p ON p.id = c.category_id WHERE c.page_id = ? AND ' . self::PUBLIC_PAGE
             . ' ORDER BY c.position, c.id', [$page['id'], $this->maxLevel]);
@@ -69,6 +83,13 @@ final class NormalizedPageRepository implements PageRepository
         $page['redirect_slug'] = $redirect['slug'] ?? null;
 
         return $page;
+    }
+
+    private function relationCards(string $joins, string $where, array $params): array
+    {
+        $rows = $this->db->rows("SELECT DISTINCT p.id, p.slug, COALESCE(p.title, p.slug) AS title FROM $joins
+            WHERE $where AND " . self::PUBLIC_PAGE . ' ORDER BY title, p.id', [...$params, $this->maxLevel]);
+        return array_map(static fn (array $row): array => ['id' => (string) $row['id']] + $row, $rows);
     }
 
     private const CARD = 'p.id, p.slug, COALESCE(p.title, p.slug) AS title,
@@ -122,8 +143,8 @@ final class NormalizedPageRepository implements PageRepository
 
     public function canServeArticleFile(string $key): bool
     {
-        return $this->db->one('SELECT p.id FROM files f JOIN images i ON i.file_id = f.id
-            JOIN pages p ON p.id = i.page_id WHERE f.storage_key = ? AND ' . self::PUBLIC_PAGE . ' LIMIT 1',
+        return $this->db->one("SELECT p.id FROM files f JOIN images i ON i.file_id = f.id
+            JOIN pages p ON p.id = i.page_id WHERE f.storage_key = ? AND p.kind = 'image' AND COALESCE(p.access_level_id, 1) <= ? LIMIT 1",
             [$key, $this->maxLevel]) !== null;
     }
 

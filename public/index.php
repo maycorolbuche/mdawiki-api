@@ -32,7 +32,7 @@ $config['normalized_editor'] = $normalized;
 $repository = static function () use ($config, $normalized, $connection) {
     $legacy = $connection ?? LegacyPageRepository::connect($config['db'], $config['public_max_level'], $config);
     return $normalized
-        ? new NormalizedPageRepository(new Database($legacy->connection()), $config['public_max_level'], $config['media_public_url'])
+        ? new NormalizedPageRepository(new Database($legacy->connection()), $config['public_max_level'], $config['media_public_url'], $config['frontend_url'])
         : $legacy;
 };
 $app = new Application($repository, $config, static function() use ($config, $connection) {

@@ -197,6 +197,25 @@ check($rebuilt->status === 200 && $rebuilt->body['data'] === $saved->body['data'
 check((int) $db->query("SELECT COUNT(*) FROM page_revisions WHERE page_id = $articleId")->fetchColumn() === 2, 'Atualizar criou histórico.');
 check($db->query("SELECT category_id FROM page_categories WHERE page_id = $articleId ORDER BY position")->fetchAll(PDO::FETCH_COLUMN) === $expectedCategories, 'Atualizar não refez categorias.');
 check($db->query("SELECT rendered_html FROM pages WHERE id = $articleId")->fetchColumn() !== 'desatualizado', 'Atualizar não refez HTML.');
+$imageKey = $db->query("SELECT f.storage_key FROM images i JOIN files f ON f.id = i.file_id WHERE i.page_id = $targetId")->fetchColumn();
+$db->exec("UPDATE pages SET is_searchable = 0 WHERE id = $targetId");
+check($normalized->canServeArticleFile($imageKey), 'Imagem pública fora da busca deve carregar nos artigos.');
+$db->exec("UPDATE pages SET access_level_id = 5 WHERE id = $targetId");
+check(!$normalized->canServeArticleFile($imageKey), 'Arquivo de imagem restrita ficou público.');
+$db->exec("UPDATE pages SET access_level_id = 1 WHERE id = $targetId");
+$db->prepare('UPDATE pages SET rendered_html = ? WHERE id = ?')->execute([
+    '<a href="https://mda.wiki.br/imagem@Sample"><img src="{{{url_diretorio}}}@imgs/img_nao_encontrada.png"></a>'
+    . '<a href="{{{url_site}}}Nao_Cadastrada#Topico" class="wiki">Link ausente</a>'
+    . '<a href="https://example.org/Fora/">Externo</a>', $articleId]);
+$relatedId = $categoryIds[0];
+$db->exec("INSERT INTO page_links (page_id, target_page_id, position) VALUES ($relatedId, $articleId, 1)");
+$db->exec("INSERT INTO page_categories (page_id, category_id, position) VALUES ($relatedId, $targetId, 1)");
+$shown = $auth->handle('GET', $slug, [], $origin)->body['data'];
+check(str_contains($shown['html'], $imageKey), 'HTML migrado continuou mostrando imagem quebrada.');
+check(str_contains($shown['html'], 'class="wiki text-danger"') && count($shown['missing_links']) === 1
+    && $shown['missing_links'][0]['slug'] === 'Nao_Cadastrada', 'Link ausente sem card ou destaque.');
+check((int) $shown['mentions'][0]['id'] === (int) $relatedId
+    && (int) $shown['related_pages'][0]['id'] === (int) $relatedId, 'Cards de menções e páginas relacionadas vazios.');
 $change['source'] = 'Sem vínculos';
 $change['base_version'] = $rebuilt->body['data']['base_version'];
 check($auth->handle('PUT', $slug, [], $origin, $change, $csrf)->status === 200, 'Remoção dos vínculos falhou.');

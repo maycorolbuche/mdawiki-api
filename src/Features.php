@@ -63,7 +63,7 @@ final class Features
     private function view(string $slug): array {
         $slug=$this->slug($slug);$user=$this->accounts->current(true);
         if ($this->config['normalized_read_only'] ?? false) {
-            $repo = new NormalizedPageRepository($this->db, (int) $this->config['public_max_level'], $this->config['media_public_url']);
+            $repo = new NormalizedPageRepository($this->db, (int) $this->config['public_max_level'], $this->config['media_public_url'], $this->config['frontend_url']);
             $row = $repo->find($slug);
             if ($row === null) throw new HttpError(404, 'not_found', 'Página não encontrada.');
             return (new Application(static fn () => $repo, $this->config))->present($row) + ['is_public' => true];
