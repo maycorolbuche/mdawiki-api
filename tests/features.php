@@ -121,6 +121,17 @@ $image=request('/v1/pages/imagem%40Teste','PUT',['title'=>'Imagem teste','source
 require __DIR__.'/images.inc.php';
 if (class_exists(DOMDocument::class)) { $svg=(new MDAWiki\Media($config))->restore('data:image/svg+xml;base64,'.base64_encode('<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"><script>alert(1)</script><path d="M0 0"/></svg>'));$bytes=file_get_contents($config['media_root'].'/wiki/'.$svg['filename']);verify(!str_contains($bytes,'script') && !str_contains($bytes,'onload'),'SVG history restoration strips active content'); }
 $renderer=new WikiRenderer($db,$config);$db->run("INSERT INTO PAGINAS (IDENT,NOME_URL,NOME,CONTEUDO_CODE) VALUES ('cycle','Cycle','Cycle','{{Incluir:Cycle}}')");
+set_error_handler(static function (int $severity, string $message): never {
+    throw new ErrorException($message, 0, $severity);
+}, E_DEPRECATED);
+try {
+    $biography = $renderer->render('{{Biografia:nome=Pessoa|cargo=Presidente,Secretário|mandato=2025}}', 'Pessoa')['html'];
+    verify(str_contains($biography, 'Presidente') && str_contains($biography, 'Secretário')
+        && str_contains($biography, '2025') && !str_contains($biography, 'Antecessor:')
+        && !str_contains($biography, 'Sucessor:'), 'Biography renders with optional fields omitted');
+} finally {
+    restore_error_handler();
+}
 try {$renderer->render('{{Incluir:Cycle}}','Other');throw new RuntimeException('Cycle accepted');}catch(MDAWiki\HttpError $e){verify($e->errorCode==='include_cycle','Detect recursive includes');}
 $badMail=new Accounts($db,new Session(),$config,static function(){throw new RuntimeException('SMTP unavailable');});
 try {$badMail->register(['name'=>'Failed','email'=>'failed@example.test','password'=>'valid-password','password_confirmation'=>'valid-password']);throw new RuntimeException('Mail should fail');}catch(RuntimeException $e){verify($db->one('SELECT ID FROM USUARIOS WHERE EMAIL = ?',['failed@example.test'])===null,'Mail failure rolls back registration');}
