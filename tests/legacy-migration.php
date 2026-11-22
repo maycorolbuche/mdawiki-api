@@ -458,3 +458,22 @@ foreach (['random', 'recent', 'popular', 'top_24h', 'top_week', 'top_month'] as 
     check(array_column($home[$section], 'id') === [(string) $articleId],
         "O bloco {$section} deve exibir apenas artigos buscáveis com conteúdo.");
 }
+
+$csrf = $secondLogin->body['data']['csrf_token'];
+$originPage = $auth->handle('PUT', '/v1/pages/Origem-Dos-Links', [], $origin, [
+    'title' => 'Origem dos links', 'source' => '[[Destino Ausente#Seção|Sugestão]] [[Déstino-ausente|Outro texto]]',
+    'base_version' => '',
+], $csrf);
+check($originPage->status === 200, 'Página de origem deveria ser salva.');
+check((int) $db->query("SELECT COUNT(*) FROM page_missing_links WHERE href = '/destino-ausente'")->fetchColumn() === 2,
+    'Cada ocorrência deve manter sua posição e o mesmo destino normalizado.');
+$home = $auth->handle('GET', '/v1/home', [], $origin)->body['data'];
+check(array_count_values(array_column($home['missing'], 'slug'))['destino-ausente'] === 1, 'A home deve deduplicar por destino.');
+$destination = $auth->handle('PUT', '/v1/pages/Destino-Ausente', [], $origin, [
+    'title' => 'Destino Ausente', 'source' => 'Conteúdo novo', 'base_version' => '',
+], $csrf);
+check($destination->status === 200, 'Destino deveria ser criado.');
+check((int) $db->query("SELECT COUNT(*) FROM page_missing_links WHERE href = '/destino-ausente'")->fetchColumn() === 0,
+    'A criação do destino deve remover os vínculos pendentes.');
+check((int) $db->query("SELECT COUNT(*) FROM page_links l JOIN pages p ON p.id = l.target_page_id WHERE p.identifier = 'destino-ausente'")->fetchColumn() === 2,
+    'Os vínculos pendentes devem migrar para page_links.');

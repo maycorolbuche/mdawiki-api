@@ -84,3 +84,5 @@ Em `dev`, aponte `DB_*` para a base importada. A API reconhece a estrutura pelo 
 
 
 A home da base migrada usa visitas com horário para calcular os rankings móveis de 24 horas, 7 e 30 dias. Em instalações existentes, execute `php bin/migrate-page-visits.php`. A coleta começa após a implantação, pois os contadores históricos não têm horário individual. O cron de manutenção remove registros com mais de 31 dias.
+
+O card **Nos ajude com esses conteúdos** sorteia até dez destinos internos inexistentes de páginas públicas buscáveis. Em instalações existentes, execute `php bin/migrate-page-missing-links.php` e, com o código novo publicado, `php bin/rebuild-normalized-pages.php` para preencher os vínculos dos artigos existentes. Novas gravações mantêm a tabela atualizada.

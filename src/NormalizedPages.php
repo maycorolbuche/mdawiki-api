@@ -181,7 +181,9 @@ final class NormalizedPages
             }
             $this->db->run('UPDATE pages SET rendered_html = ?, plain_text = ?, rebuilt_at = ?, needs_rebuild = 0 WHERE id = ?',
                 [$rendered['html'], $rendered['text'], $now, $page['id']]);
-            (new PageRelations($this->db))->replace((int) $page['id'], $source, $rendered);
+            $relations = new PageRelations($this->db);
+            if ($new) $relations->resolveMissing((int) $page['id'], $page['identifier']);
+            $relations->replace((int) $page['id'], $source, $rendered);
             if ($page['rendered_html'] !== $rendered['html']) {
                 $this->db->run('UPDATE pages SET needs_rebuild = 1 WHERE id IN
                     (SELECT page_id FROM page_includes WHERE target_page_id = ?)', [$page['id']]);

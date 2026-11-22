@@ -160,7 +160,12 @@ final class NormalizedPageRepository implements PageRepository
             'random' => array_map($this->homeCard(...), $this->db->rows($sql . $withContent . ' ORDER BY RAND() LIMIT 3', $levels)),
             'recent' => array_map($this->homeCard(...), $this->db->rows($sql . $withContent . ' ORDER BY updated_at DESC, p.id LIMIT 10', $levels)),
             'popular' => array_map($this->homeCard(...), $this->db->rows($sql . $withContent . ' ORDER BY p.view_count DESC, p.id LIMIT 10', $levels)),
-            'missing' => [],
+            'missing' => $this->db->rows("SELECT m.href AS id, SUBSTRING(m.href, 2) AS slug,
+                    COALESCE(MIN(NULLIF(m.link_text, '')), REPLACE(SUBSTRING(m.href, 2), '-', ' ')) AS title
+                FROM page_missing_links m JOIN pages p ON p.id = m.page_id
+                WHERE " . self::PUBLIC_PAGE . " AND NOT EXISTS (
+                    SELECT 1 FROM pages target WHERE target.identifier = SUBSTRING(m.href, 2)
+                ) GROUP BY m.href ORDER BY RAND() LIMIT 10", [$this->maxLevel]),
         ];
         $now = time();
         foreach (['top_24h' => 1, 'top_week' => 7, 'top_month' => 30] as $key => $days) {

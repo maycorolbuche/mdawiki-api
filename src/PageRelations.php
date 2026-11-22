@@ -11,7 +11,7 @@ final class PageRelations
 
     public function replace(int $pageId, string $source, array $rendered): void
     {
-        foreach (['page_categories', 'page_links', 'page_external_links', 'page_redirects', 'page_includes',
+        foreach (['page_categories', 'page_links', 'page_missing_links', 'page_external_links', 'page_redirects', 'page_includes',
             'page_templates', 'page_headings', 'page_media', 'page_videos'] as $table) {
             $this->db->run("DELETE FROM {$table} WHERE page_id = ?", [$pageId]);
         }
@@ -30,6 +30,9 @@ final class PageRelations
             if ($id !== null) {
                 $this->db->run('INSERT INTO page_links (page_id, target_page_id, position, fragment, link_text)
                     VALUES (?, ?, ?, ?, ?)', [$pageId, $id, $i + 1, self::field($link['hash']), self::field($link['title'])]);
+            } elseif (($href = self::missingHref($link['slug'])) !== null) {
+                $this->db->run('INSERT INTO page_missing_links (page_id, href, position, fragment, link_text)
+                    VALUES (?, ?, ?, ?, ?)', [$pageId, $href, $i + 1, self::field($link['hash']), self::field($link['title'])]);
             }
         }
         foreach ($rendered['external_links'] as $i => $link) {
@@ -65,6 +68,25 @@ final class PageRelations
             $this->db->run('INSERT INTO page_videos (page_id, position, url) VALUES (?, ?, ?)', [$pageId, $i + 1, self::field($video)]);
         }
         $this->replaceMedia($pageId, $rendered);
+    }
+
+    public function resolveMissing(int $targetId, string $identifier): void
+    {
+        $href = '/' . $identifier;
+        $this->db->run('INSERT INTO page_links (page_id, target_page_id, position, fragment, link_text)
+            SELECT page_id, ?, position, fragment, link_text FROM page_missing_links WHERE href = ?', [$targetId, $href]);
+        $this->db->run('DELETE FROM page_missing_links WHERE href = ?', [$href]);
+    }
+
+    private static function missingHref(string $slug): ?string
+    {
+        if (str_contains($slug, '\\') || preg_match('~[/\x00-\x1f\x7f?#]|^(?:page@|imagem@)~iu', $slug)) return null;
+        try {
+            [, $identifier] = PageSlugs::fromTitle($slug, '');
+        } catch (\RuntimeException) {
+            return null;
+        }
+        return mb_strlen($identifier) >= 2 && mb_strlen($identifier) <= 250 ? '/' . $identifier : null;
     }
 
     private function replaceMedia(int $pageId, array $rendered): void
@@ -115,7 +137,9 @@ final class PageRelations
             ON DUPLICATE KEY UPDATE id = id",
             ['@category:' . hash('sha256', $identifier), $identifier, $slug, $title, $now, $now, $now, str_repeat('0', 64)]);
         $page = $this->db->one('SELECT id FROM pages WHERE identifier = ? FOR UPDATE', [$identifier]);
-        return (int) $page['id'];
+        $id = (int) $page['id'];
+        $this->resolveMissing($id, $identifier);
+        return $id;
     }
 
     private function target(string $slug): ?int
