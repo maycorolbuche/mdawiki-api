@@ -73,9 +73,9 @@ final class PageRelations
         $urls = array_fill_keys(array_map(static fn (array $ref) => (string) parse_url($ref['url'], PHP_URL_PATH), $refs), true);
         $position = 0;
         foreach ($refs as $ref) {
-            $id = $ref['page_id'] ?? null;
+            $id = $ref['image_id'] ?? null;
             if ($id !== null) {
-                $this->db->run('INSERT INTO page_media (page_id, image_page_id, position, is_template) VALUES (?, ?, ?, ?)',
+                $this->db->run('INSERT INTO page_media (page_id, image_id, position, is_template) VALUES (?, ?, ?, ?)',
                     [$pageId, $id, ++$position, (int) ($ref['template'] === 'S')]);
             }
         }
@@ -84,10 +84,10 @@ final class PageRelations
             if (isset($urls[$path]) || !is_string($path) || !preg_match('~(?:^|/)(articles/[a-f0-9]{64}\\.[a-z0-9]+)$~D', $path, $match)) {
                 continue;
             }
-            foreach ($this->db->rows('SELECT i.page_id FROM images i JOIN files f ON f.id = i.file_id
-                WHERE f.storage_key = ? ORDER BY i.page_id', [$match[1]]) as $row) {
-                $this->db->run('INSERT INTO page_media (page_id, image_page_id, position, is_template) VALUES (?, ?, ?, 0)',
-                    [$pageId, $row['page_id'], ++$position]);
+            foreach ($this->db->rows('SELECT i.id FROM images i JOIN files f ON f.id = i.file_id
+                WHERE f.storage_key = ? ORDER BY i.id', [$match[1]]) as $row) {
+                $this->db->run('INSERT INTO page_media (page_id, image_id, position, is_template) VALUES (?, ?, ?, 0)',
+                    [$pageId, $row['id'], ++$position]);
             }
         }
     }
@@ -103,7 +103,7 @@ final class PageRelations
         } catch (\RuntimeException) {
             throw new HttpError(422, 'invalid_category', 'Informe um nome de categoria válido.');
         }
-        if (mb_strlen($title) > 250 || mb_strlen($identifier) > 250
+        if (mb_strlen($identifier) < 2 || mb_strlen($title) > 250 || mb_strlen($identifier) > 250
             || str_starts_with(mb_strtolower($title), 'page@')) {
             throw new HttpError(422, 'invalid_category', 'Informe um nome de categoria válido.');
         }

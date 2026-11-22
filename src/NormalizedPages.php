@@ -80,7 +80,7 @@ final class NormalizedPages
         } catch (\RuntimeException) {
             throw new HttpError(422, 'invalid_slug', 'Endereço de página inválido.');
         }
-        if (mb_strlen($canonical) > 250 || mb_strlen($identifier) > 250) {
+        if (mb_strlen($identifier) < 2 || mb_strlen($canonical) > 250 || mb_strlen($identifier) > 250) {
             throw new HttpError(422, 'invalid_slug', 'Endereço de página inválido.');
         }
         return [$canonical, $identifier];

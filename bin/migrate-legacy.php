@@ -185,12 +185,52 @@ function buildPageLookup(PDO $source, PDO $target): array
     return $lookup;
 }
 
+function migrateImage(PDO $source, PDO $target, string $root, array $row, array &$counts, array &$context): void
+{
+    $key = legacyText($row['IDENT']);
+    $name = preg_replace('/^imagem@/iu', '', legacyText($row['NOME_URL']));
+    $title = trim(preg_replace('/^imagem@/iu', '', legacyText($row['NOME']) ?? ''));
+    [$slug, $identifier] = pageSlugs(null, $name);
+    $image = query($target, 'SELECT id, legacy_identifier, file_id, meta FROM images WHERE identifier = ?', [$identifier])->fetch();
+    if ($image && $image['legacy_identifier'] !== $key) {
+        throw new RuntimeException('Identificador de imagem já utilizado.');
+    }
+    $context['field'] = 'CONTEUDO_CODE';
+    $file = fileId($target, $root, 'articles', $row['CONTEUDO_CODE']);
+    $storage = $file === null ? null : query($target, 'SELECT storage_key FROM files WHERE id = ?', [$file])->fetchColumn();
+    $meta = $storage ? MDAWiki\NormalizedImages::properties($root, $storage) : [];
+    // Reexecutar a importação não deve desfazer substituições feitas pelo editor.
+    $replaced = $image && query($target, 'SELECT 1 FROM image_revisions WHERE image_id = ? AND legacy_revision_number IS NULL LIMIT 1',
+        [$image['id']])->fetchColumn();
+    upsert($target, 'images', ['identifier' => $identifier, 'slug' => $slug, 'title' => $title ?: str_replace('_', ' ', $name),
+        'meta' => $replaced ? $image['meta'] : json_encode((object) $meta, JSON_THROW_ON_ERROR),
+        'file_id' => $replaced ? $image['file_id'] : $file, 'legacy_identifier' => $key,
+        'access_level_id' => $row['NIVEL'] ?? 1], ['identifier']);
+    $imageId = $image['id'] ?? $target->lastInsertId();
+    $counts[$image ? 'updated' : 'inserted']++;
+    foreach (query($source, 'SELECT * FROM PAGINAS_LOGS WHERE IDENT = ? ORDER BY NOME_URL_ID', [$row['IDENT']]) as $revision) {
+        $context = ['table' => 'PAGINAS_LOGS', 'key' => ['IDENT' => $key, 'NOME_URL_ID' => $revision['NOME_URL_ID']], 'field' => 'CONTEUDO_CODE'];
+        upsert($target, 'image_revisions', ['image_id' => $imageId,
+            'file_id' => fileId($target, $root, 'articles', $revision['CONTEUDO_CODE']),
+            'legacy_revision_number' => (int) $revision['NOME_URL_ID'], 'access_level_id' => $revision['NIVEL'] ?? $row['NIVEL'] ?? 1, 'created_at' => legacyDate($revision['DATAHORA'])],
+            ['image_id', 'legacy_revision_number']);
+        $counts['revisions']++;
+    }
+}
+
 function migratePage(PDO $source, PDO $target, string $root, array $row, array &$counts, array &$context): void
 {
     $key = legacyText($row['IDENT']);
     $legacySlug = legacyText($row['NOME_URL']);
     $isImage = str_starts_with(strtolower($legacySlug), 'imagem@') || str_starts_with(strtolower($key), 'imagem@');
+    if ($isImage) {
+        migrateImage($source, $target, $root, $row, $counts, $context);
+        return;
+    }
     [$slug, $identifier] = pageSlugs(legacyText($row['NOME']), $legacySlug);
+    if (mb_strlen($identifier) < 2) {
+        throw new RuntimeException('Endereço de um caractere reservado para o sistema.');
+    }
     $owner = query($target, 'SELECT id, legacy_identifier FROM pages WHERE identifier = ?', [$identifier])->fetch();
     if ($owner !== false && $owner['legacy_identifier'] !== $key) {
         if ($owner['legacy_identifier'] === '@category:' . hash('sha256', $identifier)
@@ -216,10 +256,10 @@ function migratePage(PDO $source, PDO $target, string $root, array $row, array &
             'slug' => $slug,
             'identifier' => $identifier,
             'title' => legacyText($row['NOME']),
-            'kind' => $isImage ? 'image' : 'article',
-            'source' => $isImage ? null : legacyText($row['CONTEUDO_CODE']),
-            'rendered_html' => $isImage ? null : legacyText($row['CONTEUDO']),
-            'plain_text' => $isImage ? null : legacyText($row['CONTEUDO_TXT']),
+            'kind' => 'article',
+            'source' => legacyText($row['CONTEUDO_CODE']),
+            'rendered_html' => legacyText($row['CONTEUDO']),
+            'plain_text' => legacyText($row['CONTEUDO_TXT']),
             'is_searchable' => legacyFlag($row['BUSCA']),
             'access_level_id' => $row['NIVEL'],
             'needs_rebuild' => 1,
@@ -239,18 +279,11 @@ function migratePage(PDO $source, PDO $target, string $root, array $row, array &
     }
 
     $pageId = $current === false ? (int) $target->lastInsertId() : (int) $current['id'];
-    $imageId = null;
-    if ($isImage) {
-        $context['field'] = 'CONTEUDO_CODE';
-        upsert($target, 'images', ['page_id' => $pageId, 'file_id' => fileId($target, $root, 'articles', $row['CONTEUDO_CODE'])], ['page_id']);
-        $imageId = (int) query($target, 'SELECT id FROM images WHERE page_id = ?', [$pageId])->fetchColumn();
-    }
-
     $existing = query($target, 'SELECT legacy_revision_number, id, slug, revision_number, legacy_checksum
         FROM page_revisions WHERE page_id = ?', [$pageId])->fetchAll(PDO::FETCH_UNIQUE | PDO::FETCH_ASSOC);
     $revisions = query($source, 'SELECT * FROM PAGINAS_LOGS WHERE IDENT = ? ORDER BY NOME_URL_ID', [$row['IDENT']]);
     foreach ($revisions as $revision) {
-        $context = ['table' => 'PAGINAS_LOGS', 'key' => ['IDENT' => $key, 'NOME_URL_ID' => $revision['NOME_URL_ID']], 'field' => $isImage ? 'CONTEUDO_CODE' : null];
+        $context = ['table' => 'PAGINAS_LOGS', 'key' => ['IDENT' => $key, 'NOME_URL_ID' => $revision['NOME_URL_ID']], 'field' => null];
         $legacyNumber = (int) $revision['NOME_URL_ID'];
         $prior = $existing[$legacyNumber] ?? null;
         $fingerprint = checksum($revision);
@@ -262,8 +295,8 @@ function migratePage(PDO $source, PDO $target, string $root, array $row, array &
                 'revision_number' => $prior['revision_number'] ?? 0,
                 'slug' => $revisionSlug,
                 'title' => legacyText($revision['NOME']),
-                'source' => $isImage ? null : legacyText($revision['CONTEUDO_CODE']),
-                'rendered_html' => $isImage ? null : legacyText($revision['CONTEUDO']),
+                'source' => legacyText($revision['CONTEUDO_CODE']),
+                'rendered_html' => legacyText($revision['CONTEUDO']),
                 'is_searchable' => legacyFlag($revision['BUSCA']),
                 'access_level_id' => $revision['NIVEL'],
                 'editor_email' => legacyText($revision['EMAIL']),
@@ -273,15 +306,6 @@ function migratePage(PDO $source, PDO $target, string $root, array $row, array &
                 'legacy_checksum' => $fingerprint,
             ], ['page_id', 'legacy_revision_number']);
             $counts['revisions']++;
-        }
-
-        if ($imageId !== null) {
-            $revisionId = $prior === null ? (int) $target->lastInsertId() : (int) $prior['id'];
-            upsert($target, 'image_revisions', [
-                'page_revision_id' => $revisionId,
-                'image_id' => $imageId,
-                'file_id' => fileId($target, $root, 'articles', $revision['CONTEUDO_CODE']),
-            ], ['page_revision_id']);
         }
     }
 

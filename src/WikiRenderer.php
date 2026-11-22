@@ -22,7 +22,7 @@ final class WikiRenderer
             $key = $file['storage_key'];
             $size = isset($this->config['media_root']) ? @getimagesize($this->config['media_root'] . '/' . $key) : false;
             return ['IMAGEM' => json_encode(array_fill_keys(['url', 'url_mini', 'url_cp'], $key)
-                + ['w' => $size[0] ?? 100, 'h' => $size[1] ?? 100], JSON_THROW_ON_ERROR), 'page_id' => $file['page_id']];
+                + ['w' => $size[0] ?? 100, 'h' => $size[1] ?? 100], JSON_THROW_ON_ERROR), 'image_id' => $file['image_id']];
         }
         $row=$this->db->one("SELECT CONTEUDO FROM PAGINAS WHERE IDENT = ? AND COALESCE(NIVEL,1) <= ?",['imagem@'.Database::id(preg_replace('/!tmpl$/','',$name)),(int)$this->config['public_max_level']]);
         $file=json_decode($row['CONTEUDO'] ?? '',true);
@@ -67,7 +67,7 @@ final class WikiRenderer
                     $result=$this->image($name);$file=json_decode($result['IMAGEM'] ?? '',true) ?: [];
                     $title=preg_replace('/!tmpl$/','',$name);$url=$file['url'] ?? '';
                     if ($url!=='' && !preg_match('~^https?://~',$url)) $url=rtrim($this->config['media_public_url'],'/').'/'.ltrim($url,'/');
-                    $meta['image_refs'][]=['name'=>$title,'id'=>Database::id($title),'url'=>$url,'template'=>str_ends_with($name,'!tmpl')?'S':'N','page_id'=>$result['page_id'] ?? null];
+                    $meta['image_refs'][]=['name'=>$title,'id'=>Database::id($title),'url'=>$url,'template'=>str_ends_with($name,'!tmpl')?'S':'N','image_id'=>$result['image_id'] ?? null];
                     return $result;
                 };
                 $html=\MDAWiki\Wiki\page_tabelas($html);
@@ -81,6 +81,10 @@ final class WikiRenderer
                     [$target,$title]=array_pad(explode('|',$m[1],2),2,'');$target=trim($target);$title=$title!==''?$title:$target;
                     if (preg_match('~^https?://~i',$target)) { $meta['external_links'][]=['url'=>$target,'title'=>strip_tags($title)]; return '<a href="'.self::e($target).'" target="_blank" rel="noopener noreferrer">'.$title.'</a>'; }
                     [$name,$hash]=array_pad(explode('#',$target,2),2,'');$name=str_replace(' ','_',$name);$name=$name===''?$slug:$name;
+                    if (($this->config['normalized_editor'] ?? false) && preg_match('~^(?:imagem@|/?i/)(.+)$~iu', $name, $image)) {
+                        $record = (new NormalizedImages($this->db, $this->config))->lookup($image[1]);
+                        return '<a href="'.self::e($this->config['frontend_url'].'/i/'.rawurlencode($record['slug'] ?? $image[1])).'">'.$title.'</a>';
+                    }
                     $meta['links'][]=['id'=>Database::id($name),'slug'=>$name,'title'=>strip_tags($title),'hash'=>$hash];
                     return '<a href="'.self::e($this->config['frontend_url'].'/'.rawurlencode($name).'/'.($hash!==''?'#'.rawurlencode(Database::id($hash)):'' )).'">'.$title.'</a>';
                 },$html);

@@ -78,12 +78,11 @@ check(is_file($removedMedia), 'Reexecução não recuperou arquivo removido.');
 check((int) $db->query('SELECT COUNT(*) FROM page_headings')->fetchColumn() === 1, 'Reexecução não recriou a tabela e seus subtítulos.');
 check($db->query('SELECT password_hash FROM users WHERE id = 101')->fetchColumn() === 'reset-in-destination', 'Reexecução sobrescreveu senha.');
 check($db->query("SELECT setting_value FROM settings WHERE setting_key = 'test'")->fetchColumn() === 'first', 'Configuração não importada.');
-check((int) $db->query('SELECT COUNT(*) FROM pages')->fetchColumn() === 2, 'Duplicação de páginas.');
+check((int) $db->query('SELECT COUNT(*) FROM pages')->fetchColumn() === 1, 'Duplicação de páginas.');
 check((int) $db->query('SELECT COUNT(*) FROM files')->fetchColumn() === 3, 'Deduplicação por pasta incorreta.');
-check($db->query('SELECT GROUP_CONCAT(revision_number ORDER BY legacy_revision_number) FROM page_revisions')->fetchColumn() === '1,2,3',
+check($db->query('SELECT GROUP_CONCAT(legacy_revision_number ORDER BY legacy_revision_number) FROM image_revisions')->fetchColumn() === '2,5,9',
     'Sequência inicial incorreta.');
-$links = $db->query('SELECT i.file_id FROM image_revisions i JOIN page_revisions r ON r.id = i.page_revision_id
-    ORDER BY r.revision_number')->fetchAll(PDO::FETCH_COLUMN);
+$links = $db->query('SELECT file_id FROM image_revisions ORDER BY legacy_revision_number')->fetchAll(PDO::FETCH_COLUMN);
 check(count($links) === 3 && $links[0] === $links[2] && $links[0] !== $links[1], 'Histórico A → B → A incorreto.');
 foreach ($db->query('SELECT sha256, storage_key FROM files') as $file) {
     check(preg_match('~^(articles|avatars)/[a-f0-9]{64}\.gif$~D', $file['storage_key']) === 1, 'A chave deve incluir a pasta de mídia.');
@@ -97,7 +96,7 @@ $db->exec('USE migration_target');
 $run();
 check($db->query("SELECT source FROM pages WHERE legacy_identifier = 'article'")->fetchColumn() === 'Editado',
     'Artigo alterado não atualizado.');
-check($db->query('SELECT GROUP_CONCAT(revision_number ORDER BY legacy_revision_number) FROM page_revisions')->fetchColumn() === '1,2,3,4',
+check($db->query('SELECT GROUP_CONCAT(legacy_revision_number ORDER BY legacy_revision_number) FROM image_revisions')->fetchColumn() === '2,3,5,9',
     'Inserção tardia deixou buracos.');
 
 $db->exec('USE migration_source');
@@ -106,7 +105,7 @@ $revision->execute([15, 'data:image/gif;base64,?']);
 $insertUser->execute([102, 'broken-avatar@example.test', 'unsupported', 'data:image/gif;base64,?']);
 $db->exec('USE migration_target');
 $run(1);
-check((int) $db->query('SELECT COUNT(*) FROM page_revisions')->fetchColumn() === 4, 'Falha parcial gravou revisão inválida.');
+check((int) $db->query('SELECT COUNT(*) FROM image_revisions')->fetchColumn() === 4, 'Falha parcial gravou revisão inválida.');
 echo "Migração testada com reexecução, atualização e deduplicação.\n";
 
 check((int) $db->query("SELECT COUNT(*) FROM files WHERE storage_key LIKE 'avatars/%'")->fetchColumn() === 1, 'Pasta de avatares incorreta.');
@@ -125,7 +124,7 @@ $preview = new MDAWiki\Application(static fn () => $normalized, [
 ]);
 $export = $preview->handle('GET', '/v1/pages', ['limit' => 1]);
 check($export->status === 200 && $export->body['data'][0]['read_only'] === true, 'Exportação da base migrada falhou.');
-check($preview->handle('GET', '/v1/pages', ['after' => $export->body['next_cursor']])->status === 200, 'Cursor da base migrada falhou.');
+check($export->body['next_cursor'] === null, 'Imagem não deve entrar na exportação de páginas.');
 $article = $preview->handle('GET', '/v1/pages/ESPECIALIDADE_Teste', []);
 check($article->status === 200 && $article->body['data']['slug'] === 'EspéciAlidade-Teste', 'Slug canônico da base migrada incorreto.');
 check($preview->handle('PUT', '/v1/pages/Especialidade-Teste', [])->status === 501, 'Prévia aceitou uma edição.');
@@ -134,16 +133,16 @@ $db->exec("UPDATE pages SET access_level_id = 5 WHERE legacy_identifier = 'artic
 check($preview->handle('GET', '/v1/pages/Especialidade-Teste', [])->status === 404, 'Prévia expôs artigo privado.');
 
 $search = $preview->handle('GET', '/v1/search', ['q' => 'Imagem']);
-check($search->status === 200 && count($search->body['data']['items']) === 1, 'Busca da base importada falhou.');
+check($search->status === 200 && count($search->body['data']['items']) === 0, 'Busca da base importada falhou.');
 $home = $preview->handle('GET', '/v1/home', []);
-check($home->status === 200 && count($home->body['data']['recent']) === 1, 'Início da base importada não respeitou a visibilidade.');
+check($home->status === 200 && count($home->body['data']['recent']) === 0, 'Início da base importada não respeitou a visibilidade.');
 
 
 $authConfig = [
     'normalized_editor' => true,
     'normalized_read_only' => true, 'origins' => ['http://localhost:5173'],
     'frontend_url' => 'https://example.test', 'media_public_url' => 'https://api.example.test/media',
-    'storage_dir' => $root, 'app_key' => str_repeat('a', 32), 'public_max_level' => 1,
+    'storage_dir' => $root, 'media_root' => $root, 'app_key' => str_repeat('a', 32), 'public_max_level' => 1,
 ];
 $session = new MDAWiki\Session(false);
 $features = new MDAWiki\Features(new MDAWiki\Database($db), $session, $authConfig, static fn () => null);
@@ -154,7 +153,7 @@ $credentials = ['email' => 'migrated@example.test', 'password' => 'legacy-passwo
 check($auth->handle('POST', '/v1/auth/login', [], $origin, $credentials, 'wrong')->status === 403, 'Login ignorou CSRF.');
 $login = $auth->handle('POST', '/v1/auth/login', [], $origin, $credentials, $initial->body['data']['csrf_token']);
 check($login->status === 200 && (int) $login->body['data']['user']['ID'] === 100, 'Login do usuário migrado falhou.');
-check($auth->handle('GET', '/v1/view/Imagem', [], $origin)->status === 200, 'Sessão migrada não conseguiu ler artigo público.');
+check($auth->handle('GET', '/v1/images/Sample', [], $origin)->status === 200, 'Imagem migrada indisponível.');
 $db->exec("UPDATE pages SET access_level_id = 1 WHERE legacy_identifier = 'article'");
 $slug = '/v1/pages/Especialidade_Teste';
 $public = $auth->handle('GET', $slug, [], $origin);
@@ -170,7 +169,7 @@ check($auth->handle('PUT', $slug, [], $origin, $change, $csrf)->status === 409, 
 $history = $auth->handle('GET', $slug . '/history', [], $origin);
 check($history->status === 200 && $history->body['data']['revisions'][0]['source'] === 'Texto novo', 'Revisão salva não consta no histórico.');
 $db->exec("UPDATE users SET access_level_id = 5 WHERE id = 100");
-$targetId = $db->query("SELECT id FROM pages WHERE kind = 'image'")->fetchColumn();
+$imageId = $db->query('SELECT id FROM images')->fetchColumn();
 $articleId = $importedPage['id'];
 $change = [
     'title' => 'EspéciAlidade Teste',
@@ -181,14 +180,15 @@ $saved = $auth->handle('PUT', $slug, [], $origin, $change, $csrf);
 check($saved->status === 200, 'Salvamento com vínculos falhou.');
 $categoryIds = $db->query("SELECT id FROM pages WHERE identifier IN ('estudos-da-natureza', 'abc') ORDER BY id")->fetchAll(PDO::FETCH_COLUMN);
 check(count($categoryIds) === 2, 'Categorias ausentes não foram criadas uma vez por identificador.');
+$targetId = $db->query("SELECT id FROM pages WHERE identifier = 'imagem'")->fetchColumn();
 $expectedCategories = [$targetId, ...$categoryIds];
 check($db->query("SELECT category_id FROM page_categories WHERE page_id = $articleId ORDER BY position")->fetchAll(PDO::FETCH_COLUMN)
     === $expectedCategories, 'Categorias sem vínculo por ID ou fora de ordem.');
 $abc = $auth->handle('GET', '/v1/pages/abc', [], $origin);
 check($abc->status === 200 && $abc->body['data']['html'] === ''
     && (int) $abc->body['data']['category_members'][0]['id'] === (int) $articleId, 'Página de categoria vazia ou lista de artigos incorreta.');
-foreach (['page_media' => 'image_page_id', 'page_links' => 'target_page_id'] as $table => $column) {
-    check($db->query("SELECT $column FROM $table WHERE page_id = $articleId")->fetchAll(PDO::FETCH_COLUMN) === [$targetId],
+foreach (['page_media' => 'image_id', 'page_links' => 'target_page_id'] as $table => $column) {
+    check($db->query("SELECT $column FROM $table WHERE page_id = $articleId")->fetchAll(PDO::FETCH_COLUMN) === [$table === 'page_media' ? $imageId : $targetId],
         "Vínculo por ID incorreto em $table.");
 }
 foreach (['page_templates', 'page_headings', 'page_external_links', 'page_videos'] as $table) {
@@ -204,12 +204,12 @@ check($rebuilt->status === 200 && $rebuilt->body['data'] === $saved->body['data'
 check((int) $db->query("SELECT COUNT(*) FROM page_revisions WHERE page_id = $articleId")->fetchColumn() === 2, 'Atualizar criou histórico.');
 check($db->query("SELECT category_id FROM page_categories WHERE page_id = $articleId ORDER BY position")->fetchAll(PDO::FETCH_COLUMN) === $expectedCategories, 'Atualizar não refez categorias.');
 check($db->query("SELECT rendered_html FROM pages WHERE id = $articleId")->fetchColumn() !== 'desatualizado', 'Atualizar não refez HTML.');
-$imageKey = $db->query("SELECT f.storage_key FROM images i JOIN files f ON f.id = i.file_id WHERE i.page_id = $targetId")->fetchColumn();
-$db->exec("UPDATE pages SET is_searchable = 0 WHERE id = $targetId");
+$imageKey = $db->query("SELECT f.storage_key FROM images i JOIN files f ON f.id = i.file_id WHERE i.id = $imageId")->fetchColumn();
+
 check($normalized->canServeArticleFile($imageKey), 'Imagem pública fora da busca deve carregar nos artigos.');
-$db->exec("UPDATE pages SET access_level_id = 5 WHERE id = $targetId");
+$db->exec("UPDATE images SET access_level_id = 5 WHERE id = $imageId");
 check(!$normalized->canServeArticleFile($imageKey), 'Arquivo de imagem restrita ficou público.');
-$db->exec("UPDATE pages SET access_level_id = 1 WHERE id = $targetId");
+$db->exec("UPDATE images SET access_level_id = 1 WHERE id = $imageId");
 $db->prepare('UPDATE pages SET rendered_html = ? WHERE id = ?')->execute([
     '<a href="https://mda.wiki.br/imagem@Sample"><img src="{{{url_diretorio}}}@imgs/img_nao_encontrada.png"></a>'
     . '<a href="{{{url_site}}}Nao_Cadastrada#Topico" class="wiki">Link ausente</a>'
@@ -218,11 +218,20 @@ $relatedId = $categoryIds[0];
 $db->exec("INSERT INTO page_links (page_id, target_page_id, position) VALUES ($relatedId, $articleId, 1)");
 $db->exec("INSERT INTO page_categories (page_id, category_id, position) VALUES ($relatedId, $targetId, 1)");
 $shown = $auth->handle('GET', $slug, [], $origin)->body['data'];
-check(str_contains($shown['html'], $imageKey), 'HTML migrado continuou mostrando imagem quebrada.');
+check(str_contains($shown['html'], $imageKey) && str_contains($shown['html'], '/i/Sample'), 'HTML migrado continuou mostrando imagem quebrada.');
 check(str_contains($shown['html'], 'class="wiki text-danger"') && count($shown['missing_links']) === 1
     && $shown['missing_links'][0]['slug'] === 'Nao_Cadastrada', 'Link ausente sem card ou destaque.');
 check((int) $shown['mentions'][0]['id'] === (int) $relatedId
     && (int) $shown['related_pages'][0]['id'] === (int) $relatedId, 'Cards de menções e páginas relacionadas vazios.');
+$shownImage = $auth->handle('GET', '/v1/images/Sample', [], $origin)->body['data'];
+check((int) $shownImage['pages'][0]['id'] === (int) $articleId && $shownImage['meta']['width'] === 1
+    && count($shownImage['history']) === 4, 'Imagem sem propriedades, vínculos ou histórico.');
+$upload = $auth->handle('PUT', '/v1/images/Esd', [], $origin, ['data' => $a, 'base_version' => ''], $csrf);
+check($upload->status === 200 && $upload->body['data']['slug'] === 'Esd', 'Envio inicial da imagem falhou.');
+$changedImage = $auth->handle('PUT', '/v1/images/Esd', [], $origin, ['data' => $b, 'base_version' => $upload->body['data']['version']], $csrf);
+check($changedImage->status === 200 && $changedImage->body['data']['history'][0]['url'] === $upload->body['data']['url'],
+    'Substituição deve preservar o arquivo anterior.');
+check($auth->handle('GET', '/v1/pages/I/editor', [], $origin)->status === 422, 'Endereço de um caractere deve ser reservado.');
 $change['source'] = 'Sem vínculos';
 $change['base_version'] = $rebuilt->body['data']['base_version'];
 check($auth->handle('PUT', $slug, [], $origin, $change, $csrf)->status === 200, 'Remoção dos vínculos falhou.');

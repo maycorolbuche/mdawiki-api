@@ -32,7 +32,7 @@ final class Media
     public function serve(string $path, ?callable $allowMigratedArticle = null): never {
         $root=realpath($this->config['media_root']);$decoded=rawurldecode(substr($path,7));
         $file=$root && !str_contains($decoded,"\0") ? realpath($root.'/'.$decoded):false;
-        $types=['svg'=>'image/svg+xml','png'=>'image/png','jpg'=>'image/jpeg','jpeg'=>'image/jpeg','gif'=>'image/gif','webp'=>'image/webp','avif'=>'image/avif'];
+        $types=['svg'=>'image/svg+xml','png'=>'image/png','jpg'=>'image/jpeg','jpeg'=>'image/jpeg','gif'=>'image/gif','webp'=>'image/webp','avif'=>'image/avif','bmp'=>'image/bmp'];
         $type=$file?$types[strtolower(pathinfo($file,PATHINFO_EXTENSION))] ?? null:null;
         if (!$file || !$root || !str_starts_with($file,$root.DIRECTORY_SEPARATOR) || !$type || !is_file($file)) { http_response_code(404);exit; }
         $key = str_replace(DIRECTORY_SEPARATOR, '/', substr($file, strlen($root) + 1));

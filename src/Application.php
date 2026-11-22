@@ -54,7 +54,8 @@ final class Application
             ($method === 'GET' && preg_match('~^/v1/pages/[^/]+/(editor|history)$~D', $path))
             || ($method === 'POST' && preg_match('~^/v1/pages/[^/]+/(preview|restore|rebuild)$~D', $path))
             || ($method === 'PUT' && preg_match('~^/v1/pages/[^/]+$~D', $path)));
-        $previewAccountRoute = $previewAccountRoute || $normalizedPageRoute;
+        $previewAccountRoute = $previewAccountRoute || $normalizedPageRoute
+            || ($normalized && in_array($method, ['GET', 'PUT'], true) && preg_match('~^/v1/images/[^/]+$~D', $path));
         if ($normalized && !$previewAccountRoute
             && ($method !== 'GET' || !preg_match('~^/(?:health|v1/(?:home|search|statistics)|v1/pages(?:/[^/]+)?|media/.*)?$~D', $path))) {
             return new Response(501, ['error' => ['code' => 'read_only_preview', 'message' => 'A base migrada está em prévia de leitura pública.']], $headers);

@@ -26,3 +26,7 @@ As mídias são geradas do Base64 original sob `articles/` e `avatars/`, no `MED
 O mesmo comando pode ser repetido. As tabelas removidas são recriadas e os arquivos de mídia ausentes são regenerados. Tabelas existentes não são apagadas. O importador atualiza os registros legados, reaproveita IDs e mídias já importados e preserva senhas já gravadas no destino. A atualização das páginas mantém a numeração de revisões. Páginas excluídas no legado não são apagadas automaticamente no destino.
 
 A rotina termina com código 1 se houver falhas de importação ou reprocessamento. Erros por registro da importação ficam em `migration_errors`; filtre pelo ID da execução exibido no terminal. Falhas do reprocessamento são exibidas com o slug. Após corrigir a causa, execute novamente.
+
+## Imagens e endereços reservados
+
+Em uma base de destino vazia, os registros legados `imagem@...` entram em `images`, as versões entram em `image_revisions` e os vínculos regenerados em `page_media` apontam para `images.id`. O endereço público da imagem é `/i/<slug>`. A importação registra como falha páginas comuns com identificador de um único caractere, reservado ao sistema.
