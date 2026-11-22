@@ -5,7 +5,7 @@ namespace MDAWiki;
 
 final class NormalizedPages
 {
-    public function __construct(private Database $db, private Accounts $accounts, private WikiRenderer $renderer)
+    public function __construct(private Database $db, private Accounts $accounts, private WikiRenderer $renderer, private ?WikiMail $notifications = null)
     {
     }
 
@@ -157,12 +157,14 @@ final class NormalizedPages
                 throw new HttpError(422, 'invalid_page', 'Título inválido.');
             }
             $now = date('Y-m-d H:i:s');
+            $new = $page === null;
             $page ??= $this->insertPage($slug, $user, $now);
             $last = $this->db->one('SELECT MAX(revision_number) AS revision, LEAST(COALESCE(MIN(legacy_revision_number), 0), 0) AS legacy
                 FROM page_revisions WHERE page_id = ?', [$page['id']]);
             $number = (int) $last['revision'];
             $rendered = $this->render($page, $source);
-            if (!$rebuild && ($title !== $page['title'] || $source !== ($page['source'] ?? ''))) {
+            $edited = !$rebuild && ($new || $title !== $page['title'] || $source !== ($page['source'] ?? ''));
+            if ($edited) {
                 $number++;
                 $this->db->run('INSERT INTO page_revisions
                     (page_id, legacy_revision_number, revision_number, slug, title, source, rendered_html,
@@ -185,6 +187,10 @@ final class NormalizedPages
                     (SELECT page_id FROM page_includes WHERE target_page_id = ?)', [$page['id']]);
             }
             if ($ownsTransaction) $pdo->commit();
+            if ($ownsTransaction && $edited) {
+                $this->notifications?->event('page', $new ? 'new' : 'update', $title, $user,
+                    ['Endereço' => $page['slug'], 'Conteúdo' => $source]);
+            }
             return ['slug' => $page['slug'], 'revision' => $number, 'base_version' => $this->version($page)];
         } catch (\Throwable $error) {
             if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();

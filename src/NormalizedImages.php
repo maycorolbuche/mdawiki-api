@@ -5,7 +5,7 @@ namespace MDAWiki;
 
 final class NormalizedImages
 {
-    public function __construct(private Database $db, private array $config, private ?NormalizedPages $pages = null)
+    public function __construct(private Database $db, private array $config, private ?NormalizedPages $pages = null, private ?WikiMail $notifications = null)
     {
     }
 
@@ -129,6 +129,10 @@ final class NormalizedImages
             }
             throw $error;
         }
+        if (!$image || (string) $image['file_id'] !== (string) $file) {
+            $this->notify($image && $image['file_id'] !== null ? 'update' : 'new', $user,
+                $image['title'] ?? str_replace(['-', '_'], ' ', $slug), $image['slug'] ?? $slug, $key, $meta);
+        }
         return $this->show($image['slug'] ?? $slug);
     }
     public function clear(string $name, array $body, array $user): array
@@ -151,6 +155,9 @@ final class NormalizedImages
         } catch (\Throwable $error) {
             if ($pdo->inTransaction()) $pdo->rollBack();
             throw $error;
+        }
+        if ($image['file_id'] !== null) {
+            $this->notify('delete', $user, $image['title'] ?? $image['slug'], $image['slug'], $image['storage_key'], $image['meta']);
         }
         return $this->show($image['slug']);
     }
@@ -184,7 +191,22 @@ final class NormalizedImages
             if ($pdo->inTransaction()) $pdo->rollBack();
             throw $error;
         }
+        if (isset($meta)) {
+            $this->notify($image['file_id'] === null ? 'new' : 'update', $user, $image['title'] ?? $image['slug'],
+                $image['slug'], $revision['storage_key'], $meta);
+        }
         return $this->show($image['slug']);
+    }
+
+    private function notify(string $action, array $user, string $title, string $slug, ?string $key, string $meta): void
+    {
+        $properties = json_decode($meta, true) ?? [];
+        $url = $this->url($key);
+        $this->notifications?->event('img', $action, $title, $user, [
+            'Endereço' => $slug, 'Arquivo' => $url, 'Formato' => $properties['extension'] ?? null,
+            'Largura' => $properties['width'] ?? null, 'Altura' => $properties['height'] ?? null,
+            'Tamanho em bytes' => $properties['size_bytes'] ?? null,
+        ], $url);
     }
 
     private function replace(array $image, int|string|null $file, string $meta, int $author): void

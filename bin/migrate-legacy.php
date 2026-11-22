@@ -340,7 +340,7 @@ function migratePage(PDO $source, PDO $target, string $root, array $row, array &
 
 function applyDestinationSchema(PDO $target): void
 {
-    foreach (['001_content_and_media.sql', '002_remaining_legacy_tables.sql', '003_migration_errors.sql'] as $migration) {
+    foreach (['001_content_and_media.sql', '002_remaining_legacy_tables.sql', '003_migration_errors.sql', '004_drop_mail_configuration.sql'] as $migration) {
         fwrite(STDOUT, "Aplicando {$migration}..." . PHP_EOL);
         $path = dirname(__DIR__) . '/migrations/' . $migration;
         $sql = is_readable($path) ? file_get_contents($path) : false;
@@ -348,7 +348,6 @@ function applyDestinationSchema(PDO $target): void
             throw new RuntimeException("Não foi possível carregar a migration {$migration}.");
         }
 
-        // These migrations contain only idempotent CREATE TABLE statements.
         foreach (explode(';', $sql) as $statement) {
             if (trim($statement) !== '') {
                 $target->exec($statement);
