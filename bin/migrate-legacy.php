@@ -207,10 +207,15 @@ function migratePage(PDO $source, PDO $target, string $root, array $row, array &
     $legacySlug = legacyText($row['NOME_URL']);
     $isImage = str_starts_with(strtolower($legacySlug), 'imagem@') || str_starts_with(strtolower($key), 'imagem@');
     [$slug, $identifier] = pageSlugs(legacyText($row['NOME']), $legacySlug);
-    $owner = query($target, 'SELECT legacy_identifier FROM pages WHERE identifier = ?', [$identifier])->fetchColumn();
-    if ($owner !== false && $owner !== $key) {
-        $context['field'] = 'NOME';
-        throw new RuntimeException("Identificador normalizado em conflito: {$identifier} (página legada {$owner}).");
+    $owner = query($target, 'SELECT id, legacy_identifier FROM pages WHERE identifier = ?', [$identifier])->fetch();
+    if ($owner !== false && $owner['legacy_identifier'] !== $key) {
+        if ($owner['legacy_identifier'] === '@category:' . hash('sha256', $identifier)
+            && !query($target, 'SELECT id FROM page_revisions WHERE page_id = ? LIMIT 1', [$owner['id']])->fetch()) {
+            query($target, 'UPDATE pages SET legacy_identifier = ? WHERE id = ?', [$key, $owner['id']]);
+        } else {
+            $context['field'] = 'NOME';
+            throw new RuntimeException("Identificador normalizado em conflito: {$identifier} (página legada {$owner['legacy_identifier']}).");
+        }
     }
     $updatedAt = legacyDate($row['DT_ALTERACAO']);
     $fingerprint = checksum($row);

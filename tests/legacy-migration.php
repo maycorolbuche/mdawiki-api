@@ -167,12 +167,20 @@ $targetId = $db->query("SELECT id FROM pages WHERE kind = 'image'")->fetchColumn
 $articleId = $importedPage['id'];
 $change = [
     'title' => 'EspéciAlidade Teste',
-    'source' => "{{Categoria:Imagem, IMAGEM, Ausente}}\n{{Imagem:Sample}}\n{{Video:https://example.test/video|Legenda}}\n==Seção==\n[[Imagem#Detalhes|Ver imagem]] [[https://example.test/|Site]]",
+    'source' => "{{Categorias:Imagem, IMAGEM}}{{Categorias:Estudos da Natureza, abc, ÁBC}}\n{{Imagem:Sample}}\n{{Video:https://example.test/video|Legenda}}\n==Seção==\n[[Imagem#Detalhes|Ver imagem]] [[https://example.test/|Site]]",
     'base_version' => $history->body['data']['base_version'],
 ];
 $saved = $auth->handle('PUT', $slug, [], $origin, $change, $csrf);
 check($saved->status === 200, 'Salvamento com vínculos falhou.');
-foreach (['page_categories' => 'category_id', 'page_media' => 'image_page_id', 'page_links' => 'target_page_id'] as $table => $column) {
+$categoryIds = $db->query("SELECT id FROM pages WHERE identifier IN ('estudos-da-natureza', 'abc') ORDER BY id")->fetchAll(PDO::FETCH_COLUMN);
+check(count($categoryIds) === 2, 'Categorias ausentes não foram criadas uma vez por identificador.');
+$expectedCategories = [$targetId, ...$categoryIds];
+check($db->query("SELECT category_id FROM page_categories WHERE page_id = $articleId ORDER BY position")->fetchAll(PDO::FETCH_COLUMN)
+    === $expectedCategories, 'Categorias sem vínculo por ID ou fora de ordem.');
+$abc = $auth->handle('GET', '/v1/pages/abc', [], $origin);
+check($abc->status === 200 && $abc->body['data']['html'] === ''
+    && (int) $abc->body['data']['category_members'][0]['id'] === (int) $articleId, 'Página de categoria vazia ou lista de artigos incorreta.');
+foreach (['page_media' => 'image_page_id', 'page_links' => 'target_page_id'] as $table => $column) {
     check($db->query("SELECT $column FROM $table WHERE page_id = $articleId")->fetchAll(PDO::FETCH_COLUMN) === [$targetId],
         "Vínculo por ID incorreto em $table.");
 }
@@ -187,7 +195,7 @@ check($queue->status === 200 && (int) $queue->body['data']['items'][0]['id'] ===
 $rebuilt = $auth->handle('POST', $slug . '/rebuild', [], $origin, [], $csrf);
 check($rebuilt->status === 200 && $rebuilt->body['data'] === $saved->body['data'], 'Atualizar alterou a revisão ou versão de edição.');
 check((int) $db->query("SELECT COUNT(*) FROM page_revisions WHERE page_id = $articleId")->fetchColumn() === 2, 'Atualizar criou histórico.');
-check((int) $db->query("SELECT category_id FROM page_categories WHERE page_id = $articleId")->fetchColumn() === (int) $targetId, 'Atualizar não refez categorias.');
+check($db->query("SELECT category_id FROM page_categories WHERE page_id = $articleId ORDER BY position")->fetchAll(PDO::FETCH_COLUMN) === $expectedCategories, 'Atualizar não refez categorias.');
 check($db->query("SELECT rendered_html FROM pages WHERE id = $articleId")->fetchColumn() !== 'desatualizado', 'Atualizar não refez HTML.');
 $change['source'] = 'Sem vínculos';
 $change['base_version'] = $rebuilt->body['data']['base_version'];
@@ -196,3 +204,11 @@ foreach (['page_categories', 'page_media', 'page_links', 'page_templates', 'page
     check((int) $db->query("SELECT COUNT(*) FROM $table WHERE page_id = $articleId")->fetchColumn() === 0, "Vínculos antigos em $table.");
 }
 check($auth->handle('POST', '/v1/auth/logout', [], $origin, [], $login->body['data']['csrf_token'])->status === 200, 'Logout migrado falhou.');
+
+$db->exec('USE migration_source');
+$page->execute(['abc', 'Abc', 'ABC', 'Conteúdo da categoria no legado', '2026-11-21 10:00:00']);
+$db->exec('USE migration_target');
+$run(1);
+$category = $db->query("SELECT id, source FROM pages WHERE identifier = 'abc'")->fetch(PDO::FETCH_ASSOC);
+check((int) $category['id'] === (int) $abc->body['data']['id']
+    && $category['source'] === 'Conteúdo da categoria no legado', 'A importação deve reaproveitar o ID da categoria vazia.');

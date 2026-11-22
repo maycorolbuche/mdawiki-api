@@ -57,6 +57,12 @@ final class NormalizedPageRepository implements PageRepository
         $page['categories'] = array_map(static fn (array $category): array => [
             'id' => (string) $category['id'], 'slug' => $category['slug'], 'title' => $category['title'] ?? $category['slug'],
         ], $categories);
+        $members = $this->db->rows('SELECT p.id, p.slug, COALESCE(p.title, p.slug) AS title
+            FROM page_categories c JOIN pages p ON p.id = c.page_id WHERE c.category_id = ? AND ' . self::PUBLIC_PAGE
+            . ' ORDER BY p.title, p.id', [$page['id'], $this->maxLevel]);
+        $page['category_members'] = array_map(static fn (array $member): array => [
+            'id' => (string) $member['id'], 'slug' => $member['slug'], 'title' => $member['title'],
+        ], $members);
         $redirect = $this->db->one('SELECT p.slug FROM page_redirects r JOIN pages p ON p.id = r.target_page_id
             WHERE r.page_id = ? AND ' . self::PUBLIC_PAGE . ' ORDER BY r.position, r.id LIMIT 1',
             [$page['id'], $this->maxLevel]);
