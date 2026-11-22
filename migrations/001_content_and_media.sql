@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS files (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS users (
-    `id` INT NOT NULL,
+    `id` INT NOT NULL AUTO_INCREMENT,
     `email` VARCHAR(150),
     `name` VARCHAR(150),
     `password_hash` VARCHAR(255) NOT NULL,

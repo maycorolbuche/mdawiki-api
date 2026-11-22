@@ -409,8 +409,11 @@ check(str_contains($article['html'], '/assets/img_nao_encontrada.svg') && !str_c
 $csrf = $auth->handle('GET', '/v1/auth/session', [], $origin)->body['data']['csrf_token'];
 $registration = ['name' => 'Conta Nova', 'email' => 'new-normalized@example.test',
     'password' => 'abc123', 'password_confirmation' => 'abc123'];
+$lastUserId = (int) $db->query('SELECT MAX(id) FROM users')->fetchColumn();
 $register = $auth->handle('POST', '/v1/auth/register', [], $origin, $registration, $csrf);
 check($register->status === 200, 'Cadastro na base migrada falhou: ' . json_encode($register->body));
+$newUserId = (int) $db->query("SELECT id FROM users WHERE email = 'new-normalized@example.test'")->fetchColumn();
+check($newUserId === $lastUserId + 1, 'Cadastro deve continuar a sequência de IDs importados.');
 check(preg_match('/code=([0-9]{6})/', $activationMail, $firstCode) === 1, 'Código inicial ausente.');
 check($auth->handle('POST', '/v1/auth/register', [], $origin, $registration, $csrf)->status === 409, 'Cadastro duplicado aceito.');
 check($auth->handle('POST', '/v1/auth/resend', [], $origin, ['email' => $registration['email']], $csrf)->status === 200, 'Reenvio falhou.');

@@ -156,13 +156,13 @@ final class Accounts
                 throw new HttpError(409, 'email_exists', 'Este e-mail já possui cadastro.');
             }
             $pdo->beginTransaction();
-            $this->db->run('INSERT INTO user_registration_ids () VALUES ()');
-            $id = (int) $pdo->lastInsertId();
-            $this->db->run('INSERT INTO users (id, email, name, password_hash, display_name, public_id,
+            $this->db->run('INSERT INTO users (email, name, password_hash, display_name, public_id,
                 is_active, receives_notifications, access_level_id, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, 0, 1, 1, ?)',
-                [$id, $email, $name, $this->hash($password, $id), mb_substr(strstr($email, '@', true), 0, 50),
+                VALUES (?, ?, ?, ?, ?, 0, 1, 1, ?)',
+                [$email, $name, '', mb_substr(strstr($email, '@', true), 0, 50),
                     bin2hex(random_bytes(16)), date('Y-m-d H:i:s')]);
+            $id = (int) $pdo->lastInsertId();
+            $this->db->run('UPDATE users SET password_hash = ? WHERE id = ?', [$this->hash($password, $id), $id]);
             $this->sendNormalizedActivation($id, $email, 'Ative sua conta MDAWiki');
             $pdo->commit();
         } finally {

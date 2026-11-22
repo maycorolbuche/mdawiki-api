@@ -58,7 +58,7 @@ A migração `004_drop_mail_configuration.sql` remove as três tabelas de config
 
 ### Cadastro na base migrada
 
-Em uma instalação existente, execute `php bin/migrate-normalized-registration.php` no banco migrado para habilitar cadastro, ativação e reenvio de código. O importador cria as tabelas em novas migrações. As contas novas usam uma faixa de IDs a partir de 1.000.000.000 para separar os registros criados na API dos IDs importados do legado.
+Em uma instalação existente, execute `php bin/migrate-normalized-registration.php` no banco migrado para habilitar cadastro, ativação e reenvio de código. O importador cria as tabelas em novas migrações. As contas novas usam o AUTO_INCREMENT de `users.id`. O importador preserva os IDs do legado e deve ser executado em uma base vazia para evitar conflitos com contas criadas na API. IDs existentes são preservados ao atualizar a instalação.
 
 ### Logs de erros
 
