@@ -39,13 +39,15 @@ final class NormalizedImages
             FROM page_media m JOIN pages p ON p.id = m.page_id
             WHERE m.image_id = ? AND p.is_searchable = 1 AND COALESCE(p.access_level_id, 1) <= ?
             AND p.legacy_identifier NOT LIKE 'page@%' ORDER BY title, p.id", [$image['id'], $this->config['public_max_level']]);
-        $history = $this->db->rows('SELECT r.id, r.created_at, f.storage_key FROM image_revisions r
+        $history = $this->db->rows('SELECT r.id, r.created_at, f.storage_key,
+            (SELECT COALESCE(NULLIF(u.display_name, \'\'), NULLIF(u.name, \'\')) FROM users u
+                WHERE u.email = r.author_email ORDER BY u.id LIMIT 1) AS author FROM image_revisions r
             JOIN files f ON f.id = r.file_id WHERE r.image_id = ? AND r.access_level_id <= ?
             ORDER BY r.created_at DESC, r.id DESC', [$image['id'], $this->config['public_max_level']]);
         return ['slug' => $image['slug'], 'title' => $image['title'],
             'url' => $this->url($image['storage_key']), 'meta' => json_decode($image['meta'], true, 512, JSON_THROW_ON_ERROR),
             'version' => (string) ($image['file_id'] ?? ''), 'pages' => $members,
-            'history' => array_map(fn (array $row): array => ['id' => $row['id'], 'created_at' => $row['created_at'],
+            'history' => array_map(fn (array $row): array => ['id' => $row['id'], 'author' => $row['author'], 'created_at' => $row['created_at'],
                 'url' => $this->url($row['storage_key'])], $history)];
     }
 
@@ -114,15 +116,10 @@ final class NormalizedImages
             $file = $this->db->one('SELECT id FROM files WHERE storage_key = ? FOR UPDATE', [$key])['id'];
             $meta = json_encode(self::properties($this->config['media_root'], $key), JSON_THROW_ON_ERROR);
             if (!$image) {
-                $this->db->run('INSERT INTO images (identifier, slug, title, meta, file_id, access_level_id) VALUES (?, ?, ?, ?, ?, ?)',
-                    [$identifier, $slug, str_replace(['-', '_'], ' ', $slug), $meta, $file, $level]);
+                $this->db->run('INSERT INTO images (identifier, slug, title, meta, file_id, access_level_id, author_email, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())',
+                    [$identifier, $slug, str_replace(['-', '_'], ' ', $slug), $meta, $file, $level, $user['EMAIL']]);
             } elseif ((string) $image['file_id'] !== (string) $file) {
-                if ($image['file_id'] !== null) {
-                    $this->db->run('INSERT INTO image_revisions (image_id, file_id, created_at, access_level_id) VALUES (?, ?, NOW(), ?)',
-                        [$image['id'], $image['file_id'], $level]);
-                }
-                $this->db->run('UPDATE images SET file_id = ?, meta = ? WHERE id = ?', [$file, $meta, $image['id']]);
-                $this->db->run('UPDATE pages SET needs_rebuild = 1 WHERE id IN (SELECT page_id FROM page_media WHERE image_id = ?)', [$image['id']]);
+                $this->replace($image, $file, $meta, $user['EMAIL']);
             }
             $pdo->commit();
         } catch (\Throwable $error) {
@@ -134,4 +131,47 @@ final class NormalizedImages
         }
         return $this->show($image['slug'] ?? $slug);
     }
+    public function restore(string $name, array $body, array $user): array
+    {
+        $revisionId = filter_var($body['revision_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        if ($revisionId === false) throw new HttpError(422, 'invalid_revision', 'Informe uma revisão válida.');
+        $pdo = $this->db->pdo;
+        $pdo->beginTransaction();
+        try {
+            $image = $this->lookup($name, true);
+            $level = min((int) $user['NIVEL'], (int) $this->config['public_max_level']);
+            if (!$image || (int) $image['access_level_id'] > $level) {
+                throw new HttpError(404, 'image_not_found', 'Imagem não encontrada.');
+            }
+            if (($body['base_version'] ?? null) !== (string) ($image['file_id'] ?? '')) {
+                throw new HttpError(409, 'edit_conflict', 'A imagem mudou. Atualize a página antes de restaurar.');
+            }
+            $revision = $this->db->one('SELECT r.file_id, f.storage_key FROM image_revisions r JOIN files f ON r.file_id = f.id
+                WHERE r.image_id = ? AND r.id = ? AND r.access_level_id <= ?', [$image['id'], $revisionId, $level]);
+            if (!$revision || !is_file($this->config['media_root'] . '/' . $revision['storage_key'])) {
+                throw new HttpError(404, 'revision_not_found', 'O arquivo desta revisão não está disponível.');
+            }
+            if ((string) $image['file_id'] !== (string) $revision['file_id']) {
+                $meta = json_encode(self::properties($this->config['media_root'], $revision['storage_key']), JSON_THROW_ON_ERROR);
+                $this->replace($image, $revision['file_id'], $meta, $user['EMAIL']);
+            }
+            $pdo->commit();
+        } catch (\Throwable $error) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $error;
+        }
+        return $this->show($image['slug']);
+    }
+
+    private function replace(array $image, int|string $file, string $meta, string $author): void
+    {
+        if ($image['file_id'] !== null) {
+            $this->db->run('INSERT INTO image_revisions (image_id, file_id, created_at, access_level_id, author_email)
+                VALUES (?, ?, ?, ?, ?)', [$image['id'], $image['file_id'], $image['updated_at'], $image['access_level_id'], $image['author_email']]);
+        }
+        $this->db->run('UPDATE images SET file_id = ?, meta = ?, author_email = ?, updated_at = NOW() WHERE id = ?',
+            [$file, $meta, $author, $image['id']]);
+        $this->db->run('UPDATE pages SET needs_rebuild = 1 WHERE id IN (SELECT page_id FROM page_media WHERE image_id = ?)', [$image['id']]);
+    }
+
 }
