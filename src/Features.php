@@ -204,6 +204,7 @@ final class Features
         $user = $this->accounts->current(true);
         if ((int) $user['NIVEL'] < 1) throw new HttpError(403, 'permission_denied', 'Você não pode enviar imagens.');
         $this->rate->check('media-user:' . $user['ID'], 20, 3600);
+        if (($body['clear'] ?? false) === true) return $images->clear($slug, $body, $user);
         return array_key_exists('revision_id', $body)
             ? $images->restore($slug, $body, $user)
             : $images->save($slug, $body, $user);

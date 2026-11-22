@@ -342,3 +342,23 @@ foreach ($linkedArticles as $name => $source) {
     $history = $auth->handle('GET', '/v1/pages/' . $name . '/history', [], $origin);
     check(count($history->body['data']['revisions']) === 1, 'Atualização de imagem criou revisão da página.');
 }
+
+$clear = $auth->handle('PUT', $imageRoute, [], $origin,
+    ['clear' => true, 'base_version' => $restoredImage->body['data']['version']], $csrf);
+check($clear->status === 200 && $clear->body['data']['url'] === null && count($clear->body['data']['pages']) === 2,
+    'Excluir deve deixar a imagem sem arquivo e preservar seus vínculos.');
+$cleared = $clear->body['data'];
+foreach ($linkedArticles as $name => $source) {
+    $stored = $db->query("SELECT rendered_html FROM pages WHERE slug = '$name'")->fetchColumn();
+    check(str_contains($stored, '/assets/img_nao_encontrada.svg') && !str_contains($stored, $firstImage['url']),
+        'O artigo vinculado deve mostrar o marcador de imagem vazia.');
+}
+$undo = $auth->handle('PUT', $imageRoute, [], $origin,
+    ['revision_id' => $cleared['history'][0]['id'], 'base_version' => $cleared['version']], $csrf);
+check($undo->status === 200 && $undo->body['data']['url'] === $firstImage['url'],
+    'O arquivo excluído deve permanecer disponível para restauração.');
+foreach ($linkedArticles as $name => $source) {
+    $stored = $db->query("SELECT rendered_html FROM pages WHERE slug = '$name'")->fetchColumn();
+    check(str_contains($stored, $firstImage['url']) && !str_contains($stored, 'img_nao_encontrada'),
+        'A restauração após a exclusão deve atualizar novamente os artigos.');
+}

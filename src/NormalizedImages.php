@@ -131,6 +131,30 @@ final class NormalizedImages
         }
         return $this->show($image['slug'] ?? $slug);
     }
+    public function clear(string $name, array $body, array $user): array
+    {
+        $pdo = $this->db->pdo;
+        $pdo->beginTransaction();
+        try {
+            $image = $this->lookup($name, true);
+            $level = min((int) $user['NIVEL'], (int) $this->config['public_max_level']);
+            if (!$image || (int) $image['access_level_id'] > $level) {
+                throw new HttpError(404, 'image_not_found', 'Imagem não encontrada.');
+            }
+            if (($body['base_version'] ?? null) !== (string) ($image['file_id'] ?? '')) {
+                throw new HttpError(409, 'edit_conflict', 'A imagem mudou. Atualize a página antes de excluir.');
+            }
+            if ($image['file_id'] !== null) {
+                $this->replace($image, null, '{}', (int) $user['ID']);
+            }
+            $pdo->commit();
+        } catch (\Throwable $error) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $error;
+        }
+        return $this->show($image['slug']);
+    }
+
     public function restore(string $name, array $body, array $user): array
     {
         $revisionId = filter_var($body['revision_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
@@ -163,7 +187,7 @@ final class NormalizedImages
         return $this->show($image['slug']);
     }
 
-    private function replace(array $image, int|string $file, string $meta, int $author): void
+    private function replace(array $image, int|string|null $file, string $meta, int $author): void
     {
         if ($image['file_id'] !== null) {
             $this->db->run('INSERT INTO image_revisions (image_id, file_id, created_at, access_level_id, created_by)

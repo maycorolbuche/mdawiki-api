@@ -3,6 +3,8 @@ declare(strict_types=1);
 namespace MDAWiki;
 final class Media
 {
+    public const MISSING_IMAGE = 'assets/img_nao_encontrada.svg';
+
     public static function rewrite(string $value,array $config): string {
         $base=rtrim($config['media_public_url'],'/');
         $prefixes=['https://mda.wiki.br/site/','http://mda.wiki.br/site/','https://www.mda.wiki.br/site/','http://www.mda.wiki.br/site/','https://mda.wiki.br/','http://mda.wiki.br/',$config['frontend_url'].'/site/',$config['frontend_url'].'/','{{{url_diretorio}}}','{{{url_site}}}','/site/'];
@@ -30,6 +32,12 @@ final class Media
         return ['url'=>$this->config['media_public_url'].'/'.$group.'/'.$name,'filename'=>$name,'width'=>$info[0],'height'=>$info[1]];
     }
     public function serve(string $path, ?callable $allowMigratedArticle = null): never {
+        if ($path === '/media/' . self::MISSING_IMAGE) {
+            header('Content-Type: image/svg+xml');
+            header('X-Content-Type-Options: nosniff');
+            echo '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="90" viewBox="0 0 120 90"><title>Sem imagem</title><rect width="120" height="90" rx="6" fill="#edf0f4"/><g stroke="#64748b" stroke-width="3" fill="none"><rect x="36" y="14" width="48" height="36" rx="3"/><path d="m37 44 13-12 9 8 8-11 16 15"/><circle cx="72" cy="23" r="3"/></g><text x="60" y="72" fill="#334155" font-size="13" font-family="sans-serif" text-anchor="middle">Sem imagem</text></svg>';
+            exit;
+        }
         $root=realpath($this->config['media_root']);$decoded=rawurldecode(substr($path,7));
         $file=$root && !str_contains($decoded,"\0") ? realpath($root.'/'.$decoded):false;
         $types=['svg'=>'image/svg+xml','png'=>'image/png','jpg'=>'image/jpeg','jpeg'=>'image/jpeg','gif'=>'image/gif','webp'=>'image/webp','avif'=>'image/avif','bmp'=>'image/bmp'];

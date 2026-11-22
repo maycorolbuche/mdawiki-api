@@ -14,10 +14,10 @@ final class NormalizedArticleHtml
     public function image(string $legacyName): ?array
     {
         $image = (new NormalizedImages($this->db, []))->lookup($legacyName);
-        if (!$image || !$image['storage_key'] || (int) $image['access_level_id'] > $this->level) {
+        if (!$image || (int) $image['access_level_id'] > $this->level) {
             return null;
         }
-        return ['image_id' => (int) $image['id'], 'slug' => $image['slug'], 'storage_key' => $image['storage_key']];
+        return ['image_id' => (int) $image['id'], 'slug' => $image['slug'], 'storage_key' => $image['storage_key'] ?? Media::MISSING_IMAGE];
     }
 
     private function target(string $slug): ?array
