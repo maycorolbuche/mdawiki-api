@@ -85,3 +85,7 @@ Confira `EMAIL_LOGS.ENVIADO`, `RETORNO` e `TENTATIVAS_ENVIO` para diagnosticar f
 `POST /v1/profile/photo` exige uma imagem raster quadrada (PNG, JPEG, GIF ou WebP). O front abre o modal Cropper.js e converte o recorte para PNG de 512×512 antes do envio, inclusive quando a origem escolhida é SVG. A API verifica as dimensões reais antes de gravar o arquivo ou alterar o perfil; uma imagem não quadrada ou SVG sem recorte retorna `422 invalid_profile_photo`.
 
 Os avatares já cadastrados e a importação do acervo são preservados. Essa restrição pertence ao upload de foto de perfil e não se aplica às imagens de artigos. Não há novas variáveis de ambiente ou mudanças de esquema.
+
+## Prévia da base migrada
+
+Em `dev`, configure `APP_ENV=local` e `DB_SCHEMA=normalized` no backend e aponte `DB_*` para a base de destino já importada. A prévia habilita leitura pública e exportação em `/v1/pages`, incluindo resolução de slug pelo identificador normalizado e imagens públicas migradas. Categorias e redirecionamentos consultam os vínculos por ID quando já preenchidos. A prévia ainda não oferece autenticação, edição, busca, home, histórico ou reconstrução de vínculos. O schema legado continua sendo o padrão.
