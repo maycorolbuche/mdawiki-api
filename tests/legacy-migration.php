@@ -21,7 +21,7 @@ $a = 'data:image/gif;base64,R0lGODlhAQABAIAAAP///////yH5BAEKAAEALAAAAAABAAEAAAIC
 $b = 'data:image/gif;base64,' . base64_encode(base64_decode(explode(',', $a, 2)[1], true) . "\0");
 $page = $db->prepare('INSERT INTO PAGINAS (IDENT, NOME_URL, NOME, CONTEUDO_CODE, DT_ALTERACAO)
     VALUES (?, ?, ?, ?, ?)');
-$page->execute(['article', 'Artigo_Exemplo', 'EspéciAlidade Teste', 'Primeira versão', '2026-11-20 09:00:00']);
+$page->execute(['article', 'Artigo_Exemplo', 'EspéciAlidade Teste', "Primeira versão\n==Introdução==", '2026-11-20 09:00:00']);
 $page->execute(['imagem@sample', 'Imagem@Sample', 'Imagem', $a, '2026-11-20 09:00:00']);
 $revision = $db->prepare("INSERT INTO PAGINAS_LOGS (NOME_URL_ID, IDENT, NOME_URL, CONTEUDO_CODE)
     VALUES (?, 'imagem@sample', 'Imagem@Sample', ?)");
@@ -41,13 +41,14 @@ $root = sys_get_temp_dir() . '/mdawiki-migration-' . bin2hex(random_bytes(8));
 putenv("MEDIA_ROOT={$root}");
 putenv('DB_HOST=127.0.0.1');
 putenv('DB_PORT=3306');
-putenv('DB_DATABASE=migration_source');
+putenv('DB_DATABASE=migration_target');
 putenv('DB_USERNAME=root');
 putenv('DB_PASSWORD=test');
 putenv('DB_CHARSET=utf8mb4');
 putenv('MIGRATION_DB_HOST=127.0.0.1');
 putenv('MIGRATION_DB_PORT=3306');
-putenv('MIGRATION_DB_DATABASE=migration_target');
+putenv('MIGRATION_DB_DATABASE=migration_source');
+putenv('MIGRATION_DB_CHARSET=utf8mb4');
 putenv('MIGRATION_DB_USERNAME=root');
 putenv('MIGRATION_DB_PASSWORD=test');
 $run = static function (int $expected = 0): void {
@@ -57,7 +58,7 @@ $run = static function (int $expected = 0): void {
 
 $run();
 check((int) $db->query('SELECT COUNT(*) FROM page_categories')->fetchColumn() === 0, 'Categoria derivada foi importada.');
-check((int) $db->query("SELECT needs_rebuild FROM pages WHERE legacy_identifier = 'article'")->fetchColumn() === 1, 'Página não marcada para reconstrução.');
+check((int) $db->query("SELECT needs_rebuild FROM pages WHERE legacy_identifier = 'article'")->fetchColumn() === 0, 'O importador deve concluir a reconstrução.');
 check(array_column($db->query('SHOW COLUMNS FROM page_categories')->fetchAll(PDO::FETCH_ASSOC), 'Field')
     === ['id', 'page_id', 'category_id', 'position'], 'Estrutura de categorias incorreta.');
 $importedPage = $db->query("SELECT id, slug, identifier FROM pages WHERE legacy_identifier = 'article'")->fetch(PDO::FETCH_ASSOC);
@@ -68,7 +69,13 @@ check($db->query('SELECT password_hash FROM users WHERE id = 101')->fetchColumn(
 check($db->query('SELECT password_hash FROM users WHERE id = 100')->fetchColumn() === md5('legacy-password'), 'Hash compatível perdido.');
 check((int) $db->query('SELECT avatar_file_id FROM users WHERE id = 100')->fetchColumn() > 0, 'Avatar não vinculado.');
 $db->exec("UPDATE users SET password_hash = 'reset-in-destination' WHERE id = 101");
+check((int) $db->query('SELECT COUNT(*) FROM page_headings')->fetchColumn() === 1, 'Reprocessamento não reconstruiu subtítulos.');
+$db->exec('DROP TABLE page_headings');
+$removedMedia = $root . '/' . $db->query("SELECT storage_key FROM files WHERE storage_key LIKE 'articles/%' LIMIT 1")->fetchColumn();
+check(unlink($removedMedia), 'A simulação de limpeza de mídia falhou.');
 $run();
+check(is_file($removedMedia), 'Reexecução não recuperou arquivo removido.');
+check((int) $db->query('SELECT COUNT(*) FROM page_headings')->fetchColumn() === 1, 'Reexecução não recriou a tabela e seus subtítulos.');
 check($db->query('SELECT password_hash FROM users WHERE id = 101')->fetchColumn() === 'reset-in-destination', 'Reexecução sobrescreveu senha.');
 check($db->query("SELECT setting_value FROM settings WHERE setting_key = 'test'")->fetchColumn() === 'first', 'Configuração não importada.');
 check((int) $db->query('SELECT COUNT(*) FROM pages')->fetchColumn() === 2, 'Duplicação de páginas.');
