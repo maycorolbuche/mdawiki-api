@@ -57,7 +57,7 @@ final class Application
             || ($method === 'PUT' && preg_match('~^/v1/pages/[^/]+$~D', $path)));
         $previewAccountRoute = $previewAccountRoute || $normalizedPageRoute
             || ($normalized && $method === 'GET' && preg_match('~^/v1/public-users/[a-f0-9]{32}$~D', $path))
-            || ($normalized && $method === 'POST' && $path === '/v1/profile/photo')
+            || ($normalized && $method === 'POST' && in_array($path, ['/v1/profile/photo', '/v1/visits'], true))
             || ($normalized && in_array($method, ['GET', 'PUT'], true) && preg_match('~^/v1/images/[^/]+$~D', $path));
         if ($normalized && !$previewAccountRoute
             && ($method !== 'GET' || !preg_match('~^/(?:health|v1/(?:home|search|statistics)|v1/pages(?:/[^/]+)?|media/.*)?$~D', $path))) {
