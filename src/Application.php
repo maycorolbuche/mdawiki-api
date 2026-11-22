@@ -13,11 +13,29 @@ final class Application
     {
     }
 
+    private function allowsOrigin(string $origin): bool
+    {
+        if (in_array($origin, $this->config['origins'], true)) {
+            return true;
+        }
+        if (($this->config['app_env'] ?? 'production') !== 'local'
+            || !preg_match('~\Ahttps?://(?<host>localhost|\[::1\]|[0-9.]+)(?::[0-9]{1,5})?\z~i', $origin, $parts)) {
+            return false;
+        }
+        $host = strtolower($parts['host']);
+        if ($host === 'localhost' || $host === '[::1]') {
+            return true;
+        }
+
+        return filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false
+            && preg_match('~\A(?:127\.|10\.|192\.168\.|172\.(?:1[6-9]|2[0-9]|3[01])\.)~', $host) === 1;
+    }
+
     public function handle(string $method, string $path, array $query, string $origin = '', array $body = [], string $csrf = '', string $ip = ''): Response
     {
         $headers = $origin !== '' ? ['Vary' => 'Origin'] : [];
         if ($origin !== '') {
-            if (!in_array($origin, $this->config['origins'], true)) {
+            if (!$this->allowsOrigin($origin)) {
                 return new Response(403, ['error' => ['code' => 'origin_not_allowed', 'message' => 'Origem não autorizada.']], $headers);
             }
             $headers['Access-Control-Allow-Origin'] = $origin;
