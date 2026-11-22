@@ -5,6 +5,10 @@ use MDAWiki\Application;
 use MDAWiki\LegacyPageRepository;
 use MDAWiki\{Database,Features,Session,Mailer,Media};
 
+// PHP diagnostics belong in the server log, so the HTTP body stays JSON.
+ini_set('display_errors', '0');
+ini_set('log_errors', '1');
+
 $config = require dirname(__DIR__) . '/config/bootstrap.php';
 $app = new Application(static fn () => LegacyPageRepository::connect($config['db'], $config['public_max_level'],$config), $config, static function() use ($config) {
     $db=new Database(LegacyPageRepository::connect($config['db'],$config['public_max_level'])->connection());

@@ -58,7 +58,7 @@ with tempfile.TemporaryDirectory(prefix="mdawiki-http-") as storage:
                SESSION_SECURE="false", STORAGE_DIR=storage, MEDIA_ROOT=storage + "/media", MEDIA_PUBLIC_URL=base + "/media",
                SMTP_HOST="127.0.0.1", SMTP_PORT=str(smtp.server_address[1]), SMTP_SECURE="none", SMTP_USERNAME="", SMTP_PASSWORD="", SMTP_FROM="ci@example.test")
     with open(storage + "/server.log", "wb") as log:
-        server = subprocess.Popen(["php", "-S", "127.0.0.1:8089", "-t", "public", "public/router.php"], env=env, stdout=log, stderr=log)
+        server = subprocess.Popen(["php", "-d", "display_errors=1", "-S", "127.0.0.1:8089", "-t", "public", "public/router.php"], env=env, stdout=log, stderr=log)
         try:
             for _ in range(50):
                 try:
@@ -82,6 +82,20 @@ with tempfile.TemporaryDirectory(prefix="mdawiki-http-") as storage:
             assert request("/v1/profile", request_origin="https://evil.test")[0] == 403
             assert request("/v1/view/Privada")[2]["data"]["is_public"] is False
             assert request("/v1/pages/Privada")[0] == 404
+            editor_path = "/v1/pages/Teste-Resposta-Json"
+            assert request(editor_path)[0] == 404
+            status, _, editor = request(editor_path + "/editor")
+            assert status == 200, editor
+            # Block the lock directory to force an fopen warning on save.
+            lock_directory = Path(storage) / "locks"
+            lock_directory.write_text("cannot use this as a directory")
+            status, _, result = request(editor_path, "PUT", {
+                "title": "Teste Resposta Json",
+                "source": "Conteúdo de teste",
+                "base_version": editor["data"]["base_version"],
+            }, csrf)
+            assert status == 503 and result["error"]["code"] == "service_unavailable", result
+            lock_directory.unlink()
             assert request("/v1/auth/logout", "POST", {}, csrf)[0] == 200
             assert request("/v1/profile")[0] == 401
             csrf = request("/v1/auth/session")[2]["data"]["csrf_token"]
