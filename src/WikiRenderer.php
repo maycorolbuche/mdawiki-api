@@ -48,7 +48,26 @@ final class WikiRenderer
             return $this->includes($text,[...$stack,$id]);
         },$source);
     }
-    public function render(string $source, string $slug, bool $rawHtml=false, ?int $pageId = null): array {
+    public function render(string $source, string $slug, bool $rawHtml=false, ?int $pageId = null): array
+    {
+        $rendered = $this->renderDocument($source, $slug, $rawHtml, $pageId);
+        $textSource = self::withoutStyles($source);
+        // Remove macros before rendering so their generated tables and included pages stay out of the index.
+        do {
+            $textSource = preg_replace('~{{{[^{}]*}}}|{{[^{}]*}}~u', '', $textSource, -1, $removed) ?? $textSource;
+        } while ($removed > 0);
+        if ($textSource !== $source) {
+            $rendered['text'] = $this->renderDocument($textSource, $slug, $rawHtml)['text'];
+        }
+        return $rendered;
+    }
+
+    private static function withoutStyles(string $html): string
+    {
+        return preg_replace('~<style\b[^>]*>.*?(?:</style\s*>|$)~is', '', $html) ?? $html;
+    }
+
+    private function renderDocument(string $source, string $slug, bool $rawHtml=false, ?int $pageId = null): array {
         $source=str_replace(["\r\n","\r"],"\n",$source);
         $source=$this->includes($source,[Database::id($slug)]);
         $meta=['categories'=>[],'links'=>[],'external_links'=>[],'includes'=>[],'templates'=>[],'images'=>[],'videos'=>[],'headings'=>[],'redirect'=>null];
@@ -110,7 +129,8 @@ final class WikiRenderer
         preg_match_all('~<img[^>]+src=[\'"]([^\'"<>]+)[\'"]~i',$html,$images); $meta['images']=$images[1];
         // Dynamic list macros are links to the new live catalog, never old PHP.
         $html=(new PublicLists($this->db,$this->config))->render($html);
-        return $meta+['html'=>$html,'text'=>trim(html_entity_decode(strip_tags($html),ENT_QUOTES|ENT_HTML5,'UTF-8'))];
+        $text = html_entity_decode(strip_tags(self::withoutStyles($html)), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        return $meta + ['html' => $html, 'text' => trim(str_replace("\u{00a0}", ' ', $text))];
     }
     private function refreshLinkedMedia(string $html, int $pageId, array &$meta): string
     {
