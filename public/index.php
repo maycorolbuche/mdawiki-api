@@ -11,9 +11,25 @@ ini_set('display_errors', '0');
 ini_set('log_errors', '1');
 
 $config = require dirname(__DIR__) . '/config/bootstrap.php';
-$normalized = $config['normalized_read_only'];
-$repository = static function () use ($config, $normalized) {
-    $legacy = LegacyPageRepository::connect($config['db'], $config['public_max_level'], $config);
+$path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+$normalized = false;
+$connection = null;
+if ($path !== '/' && rtrim($path, '/') !== '/health' && ($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'OPTIONS') {
+    try {
+        $connection = LegacyPageRepository::connect($config['db'], $config['public_max_level'], $config);
+        $normalized = (int) $connection->connection()->query("SELECT COUNT(*) FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pages' AND COLUMN_NAME = 'identifier'")->fetchColumn() === 1;
+        if ($normalized) {
+            $connection->connection()->exec('SET NAMES utf8mb4');
+        }
+    } catch (Throwable $error) {
+        // Let Application produce its regular structured connection error.
+        $connection = null;
+    }
+}
+$config['normalized_read_only'] = $normalized;
+$repository = static function () use ($config, $normalized, $connection) {
+    $legacy = $connection ?? LegacyPageRepository::connect($config['db'], $config['public_max_level'], $config);
     return $normalized
         ? new NormalizedPageRepository(new Database($legacy->connection()), $config['public_max_level'], $config['media_public_url'])
         : $legacy;
@@ -22,7 +38,6 @@ $app = new Application($repository, $config, $normalized ? null : static functio
     $db=new Database(LegacyPageRepository::connect($config['db'],$config['public_max_level'])->connection());
     return new Features($db,new Session(true,$config['storage_dir'].'/sessions'),$config,Closure::fromCallable(new Mailer($config['mail'],$db)));
 });
-$path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 if (str_starts_with($path, '/media/')) {
     (new Media($config))->serve($path, $normalized
         ? static fn (string $key): bool => $repository()->canServeArticleFile($key)

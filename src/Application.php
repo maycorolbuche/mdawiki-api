@@ -45,7 +45,7 @@ final class Application
             return new Response(204, [], $headers + ['Access-Control-Allow-Methods' => 'GET, POST, PUT, OPTIONS', 'Access-Control-Allow-Headers' => 'Accept, Content-Type, X-CSRF-Token']);
         }
         if (($this->config['normalized_read_only'] ?? false)
-            && ($method !== 'GET' || !preg_match('~^/(?:health|v1/pages(?:/[^/]+)?|media/.*)?$~D', $path))) {
+            && ($method !== 'GET' || !preg_match('~^/(?:health|v1/(?:home|search|statistics)|v1/pages(?:/[^/]+)?|media/.*)?$~D', $path))) {
             return new Response(501, ['error' => ['code' => 'read_only_preview', 'message' => 'A base migrada está em prévia de leitura pública.']], $headers);
         }
         if ($this->features !== null && (preg_match('~^/v1/(auth/|profile(?:/|$)|media$|search$|catalog$|statistics$|home$|visits$|view/|users(?:/|$))~', $path) || preg_match('~^/v1/pages/[^/]+/(editor|history|preview|restore|rebuild)$~D', $path) || ($method === 'PUT' && str_starts_with($path, '/v1/pages/')))) {
@@ -70,6 +70,19 @@ final class Application
         $stage = 'routing';
         $debug = (bool) ($this->config['debug'] ?? false);
         try {
+            if (($this->config['normalized_read_only'] ?? false) && in_array($path, ['/v1/home', '/v1/search', '/v1/statistics'], true)) {
+                $repository = ($this->repository)();
+                try {
+                    $data = match ($path) {
+                        '/v1/home' => $repository->home(),
+                        '/v1/search' => $repository->search($query),
+                        '/v1/statistics' => $repository->statistics(),
+                    };
+                    return new Response(200, ['data' => $data], $headers);
+                } catch (HttpError $error) {
+                    return new Response($error->status, ['error' => ['code' => $error->errorCode, 'message' => $error->getMessage()]], $headers);
+                }
+            }
             if ($path === '/v1/pages') {
                 $limit = filter_var($query['limit'] ?? 100, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 500]]);
                 if ($limit === false || !is_string($query['after'] ?? '')) {
