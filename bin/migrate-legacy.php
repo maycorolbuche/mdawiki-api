@@ -238,7 +238,7 @@ function migratePage(PDO $source, PDO $target, string $root, array $row, array &
             query($target, 'UPDATE pages SET legacy_identifier = ? WHERE id = ?', [$key, $owner['id']]);
         } else {
             $context['field'] = 'NOME';
-            throw new RuntimeException("Identificador normalizado em conflito: {$identifier} (página legada {$owner['legacy_identifier']}).");
+            throw new RuntimeException("Identificador normalizado em conflito: {$identifier} (origem {$key}, destino já associado a {$owner['legacy_identifier']}).");
         }
     }
     $updatedAt = legacyDate($row['DT_ALTERACAO']);
@@ -502,15 +502,16 @@ try {
     }
     $counts = ['inserted' => 0, 'updated' => 0, 'unchanged' => 0, 'revisions' => 0, 'errors' => 0];
 
-    $total = (int) $source->query('SELECT COUNT(*) FROM PAGINAS')->fetchColumn();
+    $eligiblePages = "LOWER(IDENT) NOT LIKE 'doc@%' AND (NOME_URL IS NULL OR LOWER(NOME_URL) NOT LIKE 'doc@%')";
+    $total = (int) $source->query("SELECT COUNT(*) FROM PAGINAS WHERE $eligiblePages")->fetchColumn();
     fwrite(STDOUT, "Importando {$total} páginas, revisões e mídias..." . PHP_EOL);
     $attempted = 0;
     $after = null;
     while (true) {
         // Select only keys for batching to avoid loading multiple images at once.
         $keys = $after === null
-            ? query($source, 'SELECT IDENT FROM PAGINAS ORDER BY IDENT LIMIT 100')->fetchAll(PDO::FETCH_COLUMN)
-            : query($source, 'SELECT IDENT FROM PAGINAS WHERE IDENT > ? ORDER BY IDENT LIMIT 100', [$after])->fetchAll(PDO::FETCH_COLUMN);
+            ? query($source, "SELECT IDENT FROM PAGINAS WHERE $eligiblePages ORDER BY IDENT LIMIT 100")->fetchAll(PDO::FETCH_COLUMN)
+            : query($source, "SELECT IDENT FROM PAGINAS WHERE $eligiblePages AND IDENT > ? ORDER BY IDENT LIMIT 100", [$after])->fetchAll(PDO::FETCH_COLUMN);
         if ($keys === []) {
             break;
         }

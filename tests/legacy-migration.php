@@ -23,6 +23,8 @@ $page = $db->prepare('INSERT INTO PAGINAS (IDENT, NOME_URL, NOME, CONTEUDO_CODE,
     VALUES (?, ?, ?, ?, ?)');
 $page->execute(['article', 'Artigo_Exemplo', 'EspéciAlidade Teste', "Primeira versão\n==Introdução==", '2026-11-20 09:00:00']);
 $page->execute(['imagem@sample', 'Imagem@Sample', 'Imagem', $a, '2026-11-20 09:00:00']);
+$page->execute(['doc@manual', 'Manual', 'ESPEcialidade Teste', 'Documento obsoleto', '2026-11-20 09:00:00']);
+$page->execute(['documentacao', 'DOC@Manual', 'Outro documento', 'Documento obsoleto', '2026-11-20 09:00:00']);
 $revision = $db->prepare("INSERT INTO PAGINAS_LOGS (NOME_URL_ID, IDENT, NOME_URL, CONTEUDO_CODE)
     VALUES (?, 'imagem@sample', 'Imagem@Sample', ?)");
 $revision->execute([2, $a]);
