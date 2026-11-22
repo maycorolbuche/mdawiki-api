@@ -136,7 +136,7 @@ final class Accounts
             $this->db->run("INSERT INTO USUARIOS (EMAIL,NOME,SENHA,APELIDO,CODIGO_CONTA,DATA_CODIGO_CONTA,DT_CADASTRO,ATIVO,NIVEL) VALUES (?,?,?,?,?,?,?,'N',1)", [$email,$name,bin2hex(random_bytes(16)),mb_substr(strstr($email, '@', true),0,50),$code,$now,$now]);
             $id = (int) $this->db->pdo->lastInsertId(); $this->db->run('UPDATE USUARIOS SET SENHA = ? WHERE ID = ?', [$this->hash($password,$id),$id]);
             $this->notifications->security($email, 'Ative sua conta MDAWiki', 'Use este código para ativar sua conta.', $code,
-                $this->config['frontend_url'] . '/page@AtivaConta?code=' . $code . '&email=' . rawurlencode($email));
+                $this->config['frontend_url'] . '/p/ativar-conta?code=' . $code . '&email=' . rawurlencode($email));
             $this->db->pdo->commit();
         } catch (\Throwable $e) { if ($this->db->pdo->inTransaction()) $this->db->pdo->rollBack(); throw $e; }
         $this->notifyProfile($id, 'new');
@@ -207,7 +207,7 @@ final class Accounts
         }
         if ($attempt === 10) throw new HttpError(503, 'activation_code_unavailable', 'Tente solicitar um código novamente.');
         $this->notifications->security($email, $subject, 'Use este código para ativar sua conta.', $code,
-            $this->config['frontend_url'] . '/page@AtivaConta?code=' . $code . '&email=' . rawurlencode($email));
+            $this->config['frontend_url'] . '/p/ativar-conta?code=' . $code . '&email=' . rawurlencode($email));
     }
 
     private function activateNormalized(string $code, ?string $email): array
@@ -271,7 +271,7 @@ final class Accounts
             $token = $reset ? bin2hex(random_bytes(32)) : $this->legacyActivationCode(); $now = date('Y-m-d H:i:s');
             $column = $reset ? 'SENHA_PROV' : 'CODIGO_CONTA';
             $stored = $reset ? substr(hash('sha256', $token),0,32) : $token;
-            $link = $this->config['frontend_url'] . ($reset ? '/page@RedefinirSenha?email=' . rawurlencode($email) . '&token=' : '/page@AtivaConta?code=') . $token . ($reset ? '' : '&email=' . rawurlencode($email));
+            $link = $this->config['frontend_url'] . ($reset ? '/p/redefinir-senha?email=' . rawurlencode($email) . '&token=' : '/p/ativar-conta?code=') . $token . ($reset ? '' : '&email=' . rawurlencode($email));
             $this->db->pdo->beginTransaction();
             try {
                 $this->db->run("UPDATE USUARIOS SET $column = ?, DATA_CODIGO_CONTA = ? WHERE ID = ?", [$stored,$now,(int) $u['ID']]);
