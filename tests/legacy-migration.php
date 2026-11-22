@@ -165,12 +165,14 @@ $authConfig = [
 ];
 $authConfig['mail'] = ['admin_to' => 'admin@example.test'];
 $subjects = [];
+$activationMail = '';
 $mailBody = '';
 $session = new MDAWiki\Session(false);
 $features = new MDAWiki\Features(new MDAWiki\Database($db), $session, $authConfig,
-    static function (string $to, string $subject, string $body) use (&$subjects, &$mailBody): void {
+    static function (string $to, string $subject, string $body) use (&$subjects, &$mailBody, &$activationMail): void {
         $subjects[] = $subject;
         $mailBody = $body;
+        if (str_contains($body, 'page@AtivaConta?code=')) $activationMail = $body;
     });
 $auth = new MDAWiki\Application(static fn () => $normalized, $authConfig, static fn () => $features);
 $origin = 'http://localhost:5173';
@@ -403,3 +405,17 @@ $db->prepare('UPDATE pages SET rendered_html = ? WHERE slug = ?')->execute([
 $article = $auth->handle('GET', $missingArticle, [], $origin)->body['data'];
 check(str_contains($article['html'], '/assets/img_nao_encontrada.svg') && !str_contains($article['html'], 'img_nao_encontrada.png'),
     'O artigo processado anteriormente deve trocar o marcador antigo na leitura.');
+
+$csrf = $auth->handle('GET', '/v1/auth/session', [], $origin)->body['data']['csrf_token'];
+$registration = ['name' => 'Conta Nova', 'email' => 'new-normalized@example.test',
+    'password' => 'test-password-123', 'password_confirmation' => 'test-password-123'];
+$register = $auth->handle('POST', '/v1/auth/register', [], $origin, $registration, $csrf);
+check($register->status === 200, 'Cadastro na base migrada falhou: ' . json_encode($register->body));
+check(preg_match('/code=([a-f0-9]{20})/', $activationMail, $firstCode) === 1, 'Código inicial ausente.');
+check($auth->handle('POST', '/v1/auth/register', [], $origin, $registration, $csrf)->status === 409, 'Cadastro duplicado aceito.');
+check($auth->handle('POST', '/v1/auth/resend', [], $origin, ['email' => $registration['email']], $csrf)->status === 200, 'Reenvio falhou.');
+check(preg_match('/code=([a-f0-9]{20})/', $activationMail, $newCode) === 1 && $newCode[1] !== $firstCode[1], 'Reenvio não gerou outro código.');
+check($auth->handle('POST', '/v1/auth/activate', [], $origin, ['code' => $firstCode[1]], $csrf)->status === 422, 'Código substituído aceito.');
+check($auth->handle('POST', '/v1/auth/activate', [], $origin, ['code' => $newCode[1]], $csrf)->status === 200, 'Ativação falhou.');
+check($auth->handle('POST', '/v1/auth/activate', [], $origin, ['code' => $newCode[1]], $csrf)->status === 422, 'Código consumido foi aceito.');
+check($auth->handle('POST', '/v1/auth/login', [], $origin, $registration, $csrf)->status === 200, 'Login da conta nova falhou.');
