@@ -408,14 +408,14 @@ check(str_contains($article['html'], '/assets/img_nao_encontrada.svg') && !str_c
 
 $csrf = $auth->handle('GET', '/v1/auth/session', [], $origin)->body['data']['csrf_token'];
 $registration = ['name' => 'Conta Nova', 'email' => 'new-normalized@example.test',
-    'password' => 'test-password-123', 'password_confirmation' => 'test-password-123'];
+    'password' => 'abc123', 'password_confirmation' => 'abc123'];
 $register = $auth->handle('POST', '/v1/auth/register', [], $origin, $registration, $csrf);
 check($register->status === 200, 'Cadastro na base migrada falhou: ' . json_encode($register->body));
-check(preg_match('/code=([a-f0-9]{20})/', $activationMail, $firstCode) === 1, 'Código inicial ausente.');
+check(preg_match('/code=([0-9]{6})/', $activationMail, $firstCode) === 1, 'Código inicial ausente.');
 check($auth->handle('POST', '/v1/auth/register', [], $origin, $registration, $csrf)->status === 409, 'Cadastro duplicado aceito.');
 check($auth->handle('POST', '/v1/auth/resend', [], $origin, ['email' => $registration['email']], $csrf)->status === 200, 'Reenvio falhou.');
-check(preg_match('/code=([a-f0-9]{20})/', $activationMail, $newCode) === 1 && $newCode[1] !== $firstCode[1], 'Reenvio não gerou outro código.');
-check($auth->handle('POST', '/v1/auth/activate', [], $origin, ['code' => $firstCode[1]], $csrf)->status === 422, 'Código substituído aceito.');
-check($auth->handle('POST', '/v1/auth/activate', [], $origin, ['code' => $newCode[1]], $csrf)->status === 200, 'Ativação falhou.');
-check($auth->handle('POST', '/v1/auth/activate', [], $origin, ['code' => $newCode[1]], $csrf)->status === 422, 'Código consumido foi aceito.');
+check(preg_match('/code=([0-9]{6})/', $activationMail, $newCode) === 1 && $newCode[1] !== $firstCode[1], 'Reenvio não gerou outro código.');
+check($auth->handle('POST', '/v1/auth/activate', [], $origin, ['code' => $firstCode[1], 'email' => $registration['email']], $csrf)->status === 422, 'Código substituído aceito.');
+check($auth->handle('POST', '/v1/auth/activate', [], $origin, ['code' => $newCode[1], 'email' => $registration['email']], $csrf)->status === 200, 'Ativação falhou.');
+check($auth->handle('POST', '/v1/auth/activate', [], $origin, ['code' => $newCode[1], 'email' => $registration['email']], $csrf)->status === 422, 'Código consumido foi aceito.');
 check($auth->handle('POST', '/v1/auth/login', [], $origin, $registration, $csrf)->status === 200, 'Login da conta nova falhou.');
