@@ -309,3 +309,36 @@ check($created->status === 200 && $created->body['data']['slug'] === 'Novo-artig
 check($auth->handle('PUT', $createSlug, [], $origin, $create, $csrf)->status === 409, 'Segundo rascunho não deve sobrescrever a página.');
 $createdPage = $auth->handle('GET', $createSlug, [], $origin);
 check($createdPage->status === 200 && str_contains($createdPage->body['data']['html'], 'Primeiro conteúdo'), 'Artigo salvo deve aparecer na leitura.');
+
+$imageRoute = '/v1/images/RefreshImage';
+$gif = base64_decode(explode(',', $a, 2)[1], true);
+$originalData = 'data:image/gif;base64,' . base64_encode($gif . 'original');
+$newData = 'data:image/gif;base64,' . base64_encode($gif . 'replacement');
+$firstImage = $auth->handle('PUT', $imageRoute, [], $origin, ['data' => $originalData, 'base_version' => ''], $csrf);
+check($firstImage->status === 200, 'Imagem inicial do teste não foi criada.');
+$firstImage = $firstImage->body['data'];
+$linkedArticles = ['Imagem-Vinculada-Wiki' => '{{Imagem:RefreshImage}}',
+    'Imagem-Vinculada-Html' => '<img src="' . $firstImage['url'] . '">'];
+foreach ($linkedArticles as $name => $source) {
+    $createdArticle = $auth->handle('PUT', '/v1/pages/' . $name, [], $origin,
+        ['title' => $name, 'source' => $source, 'base_version' => ''], $csrf);
+    check($createdArticle->status === 200, 'Página vinculada não foi criada.');
+}
+$swap = $auth->handle('PUT', $imageRoute, [], $origin, ['data' => $newData, 'base_version' => $firstImage['version']], $csrf);
+check($swap->status === 200, 'Não foi possível substituir a imagem vinculada.');
+$swap = $swap->body['data'];
+foreach ($linkedArticles as $name => $source) {
+    $stored = $db->query("SELECT rendered_html FROM pages WHERE slug = '$name'")->fetchColumn();
+    check(str_contains($stored, $swap['url']) && !str_contains($stored, $firstImage['url']),
+        'O HTML salvo da página vinculada ainda aponta para o arquivo antigo.');
+}
+check(count($swap['pages']) === 2, 'O reprocessamento perdeu vínculos.');
+$restoredImage = $auth->handle('PUT', $imageRoute, [], $origin,
+    ['revision_id' => $swap['history'][0]['id'], 'base_version' => $swap['version']], $csrf);
+check($restoredImage->status === 200, 'Restauração da imagem vinculada falhou.');
+foreach ($linkedArticles as $name => $source) {
+    $stored = $db->query("SELECT rendered_html FROM pages WHERE slug = '$name'")->fetchColumn();
+    check(str_contains($stored, $firstImage['url']), 'A restauração não propagou o arquivo anterior.');
+    $history = $auth->handle('GET', '/v1/pages/' . $name . '/history', [], $origin);
+    check(count($history->body['data']['revisions']) === 1, 'Atualização de imagem criou revisão da página.');
+}

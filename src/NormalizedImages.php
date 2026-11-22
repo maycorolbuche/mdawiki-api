@@ -5,7 +5,7 @@ namespace MDAWiki;
 
 final class NormalizedImages
 {
-    public function __construct(private Database $db, private array $config)
+    public function __construct(private Database $db, private array $config, private ?NormalizedPages $pages = null)
     {
     }
 
@@ -171,7 +171,16 @@ final class NormalizedImages
         }
         $this->db->run('UPDATE images SET file_id = ?, meta = ?, updated_by = ?, updated_at = NOW() WHERE id = ?',
             [$file, $meta, $author, $image['id']]);
-        $this->db->run('UPDATE pages SET needs_rebuild = 1 WHERE id IN (SELECT page_id FROM page_media WHERE image_id = ?)', [$image['id']]);
+        if ($this->pages === null) {
+            throw new \LogicException('O reprocessador de páginas é obrigatório para substituir imagens.');
+        }
+        $linked = $this->db->rows("SELECT p.slug FROM pages p
+            WHERE p.legacy_identifier NOT LIKE 'page@%' AND p.kind <> 'image'
+            AND EXISTS (SELECT 1 FROM page_media m WHERE m.page_id = p.id AND m.image_id = ?)
+            ORDER BY p.id", [$image['id']]);
+        foreach ($linked as $page) {
+            $this->pages->rebuildCache($page['slug']);
+        }
     }
 
 }

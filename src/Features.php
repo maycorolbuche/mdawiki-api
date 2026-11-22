@@ -199,7 +199,7 @@ final class Features
     }
     private function image(string $method, string $slug, array $body): array
     {
-        $images = new NormalizedImages($this->db, $this->config);
+        $images = new NormalizedImages($this->db, $this->config, $method === 'GET' ? null : $this->normalizedPages());
         if ($method === 'GET') return $images->show($slug);
         $user = $this->accounts->current(true);
         if ((int) $user['NIVEL'] < 1) throw new HttpError(403, 'permission_denied', 'Você não pode enviar imagens.');
