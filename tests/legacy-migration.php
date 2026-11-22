@@ -172,7 +172,7 @@ $features = new MDAWiki\Features(new MDAWiki\Database($db), $session, $authConfi
     static function (string $to, string $subject, string $body) use (&$subjects, &$mailBody, &$activationMail): void {
         $subjects[] = $subject;
         $mailBody = $body;
-        if (str_contains($body, 'page@AtivaConta?code=')) $activationMail = $body;
+        if (str_contains($body, 'p/ativar-conta?code=')) $activationMail = $body;
     });
 $auth = new MDAWiki\Application(static fn () => $normalized, $authConfig, static fn () => $features);
 $origin = 'http://localhost:5173';
