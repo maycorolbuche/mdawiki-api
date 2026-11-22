@@ -35,6 +35,16 @@ $repo = new class implements PageRepository {
 };
 $config = ['origins' => ['https://mda.wiki.br'], 'frontend_url' => 'https://mda.wiki.br', 'media_url' => 'https://legacy.mda.wiki.br/site'];
 $app = new Application(static fn () => $repo, $config);
+$lanOrigin = 'http://192.168.56.1:5173';
+$local = new Application(static fn () => $repo, ['app_env' => 'local'] + $config);
+foreach (['GET', 'OPTIONS'] as $method) {
+    $response = $local->handle($method, '/v1/pages', [], $lanOrigin);
+    check($response->status === ($method === 'OPTIONS' ? 204 : 200), 'Local LAN origin accepted');
+    check($response->headers['Access-Control-Allow-Origin'] === $lanOrigin, 'Local origin echoed');
+    check($response->headers['Access-Control-Allow-Credentials'] === 'true', 'Local credentials supported');
+}
+check($local->handle('GET', '/v1/pages', [], 'https://evil.test')->status === 403, 'Local public origin still requires allowlist');
+check($app->handle('OPTIONS', '/v1/pages', [], $lanOrigin)->status === 403, 'Production LAN preflight requires allowlist');
 check($app->handle('GET', '/health', [])->status === 200, 'Health must work without database');
 $page = $app->handle('GET', '/v1/pages/Especialidade_de_C%C3%A3es', []);
 check($page->status === 200 && $page->body['data']['title'] === 'Cães', 'Legacy accented slug');

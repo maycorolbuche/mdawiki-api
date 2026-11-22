@@ -35,6 +35,7 @@ return [
     'media_public_url' => rtrim(getenv('MEDIA_PUBLIC_URL') ?: 'https://api.mda.wiki.br/media','/'),
     'mail' => ['host'=>getenv('SMTP_HOST') ?: '', 'port'=>(int)(getenv('SMTP_PORT') ?: 587), 'secure'=>getenv('SMTP_SECURE') ?: 'tls', 'username'=>getenv('SMTP_USERNAME') ?: '', 'password'=>getenv('SMTP_PASSWORD') ?: '', 'from'=>getenv('SMTP_FROM') ?: ''],
     'debug' => filter_var(getenv('APP_DEBUG') ?: 'false', FILTER_VALIDATE_BOOLEAN),
+    'app_env' => getenv('APP_ENV') ?: 'production',
     'origins' => array_values(array_filter(array_map('trim', explode(',', getenv('ALLOWED_ORIGINS') ?: '')))),
     'frontend_url' => rtrim(getenv('FRONTEND_URL') ?: 'https://mda.wiki.br', '/'),
     'media_url' => rtrim(getenv('MEDIA_PUBLIC_URL') ?: 'https://api.mda.wiki.br/media', '/'),
