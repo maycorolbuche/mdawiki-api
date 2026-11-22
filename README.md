@@ -56,6 +56,18 @@ Os assuntos usam `[page][new|update]`, `[img][new|update|delete]` e `[user][new|
 
 A migração `004_drop_mail_configuration.sql` remove as três tabelas de configuração de e-mail na base normalizada. A API deixou de consultar o SMTP e os modelos legados. O cron existente (`bin/maintenance.php` ou `bin/send-mail.php`) processa as novas falhas após cinco minutos, com até dez tentativas por mensagem. A fila antiga no banco fica fora desse processamento.
 
+### Logs de erros
+
+Em uma instalação existente, execute `php bin/migrate-system-error-logs.php` uma vez para criar `system_error_logs` no banco da API. O importador também cria a tabela automaticamente. Falhas de e-mail, inclusive nas retentativas do cron, registram data, etapa, código do erro e metadados de diagnóstico. A tabela não armazena credenciais, destinatários nem o conteúdo da mensagem.
+
+```sql
+SELECT id, created_at, error_code, message, context
+FROM system_error_logs
+WHERE component = 'mail'
+ORDER BY id DESC
+LIMIT 30;
+```
+
 ### Foto de perfil quadrada
 
 `POST /v1/profile/photo` exige uma imagem raster quadrada (PNG, JPEG, GIF ou WebP). O front abre o modal Cropper.js e converte o recorte para PNG de 512×512 antes do envio, inclusive quando a origem escolhida é SVG. A API verifica as dimensões reais antes de gravar o arquivo ou alterar o perfil; uma imagem não quadrada ou SVG sem recorte retorna `422 invalid_profile_photo`.

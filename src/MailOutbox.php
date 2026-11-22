@@ -43,7 +43,7 @@ final class MailOutbox
                 if ($data['attempts'] >= 10) continue;
                 $result['checked']++;
                 try {
-                    ($this->send)($data['to'], $data['subject'], $data['body'], $data['options']);
+                    ($this->send)($data['to'], $data['subject'], $data['body'], $data['options'] + ['attempt' => $data['attempts'] + 1]);
                 } catch (Throwable) {
                     $data['attempts']++;
                     file_put_contents($file, json_encode($data, JSON_THROW_ON_ERROR), LOCK_EX);

@@ -27,3 +27,36 @@ checkTransport(count($captured->getBccAddresses()) === 2 && !$captured->getToAdd
     && str_contains($mime, 'X-Original-To: person@example.test')
     && str_contains($mime, 'Content-ID: <mdawiki-logo>'), 'Blind recipients stay out of MIME while the logo is embedded');
 echo "PHPMailer SMTP identity, HTML, recipients and fallback checks passed without network.\n";
+
+$logDb = new MDAWiki\Database(new PDO('sqlite::memory:'));
+$logDb->pdo->exec('CREATE TABLE system_error_logs (component TEXT, operation TEXT, error_code TEXT, message TEXT, context TEXT)');
+$logger = new MDAWiki\SystemErrorLog(static fn () => $logDb);
+$missing = new MDAWiki\Mailer(['port' => 587], errors: $logger);
+try {
+    $missing('private@example.test', 'Assunto', 'Corpo');
+    throw new RuntimeException('Expected missing SMTP configuration');
+} catch (MDAWiki\HttpError $error) {
+    checkTransport($error->errorCode === 'mail_not_configured', 'Preserves the transport error for callers');
+}
+
+$failure = static fn () => new class(true) extends PHPMailer\PHPMailer\PHPMailer {
+    public function send(): bool
+    {
+        throw new RuntimeException('SMTP Error: Could not authenticate. user=private@example.test password=private-secret');
+    }
+};
+$offline = new MDAWiki\Mailer([
+    'host' => 'smtp.example.test', 'port' => 465, 'secure' => 'ssl', 'username' => 'private@example.test',
+    'password' => 'private-secret', 'from' => 'sender@example.test',
+], $failure, $logger);
+try {
+    $offline('', 'Assunto', 'Conteúdo privado', ['bcc' => 'hidden@example.test', 'original_to' => 'private@example.test', 'attempt' => 2]);
+    throw new LogicException('Expected SMTP failure');
+} catch (RuntimeException $error) {
+    checkTransport(str_contains($error->getMessage(), 'Could not authenticate'), 'Preserves the original SMTP error');
+}
+$errors = $logDb->rows('SELECT * FROM system_error_logs');
+checkTransport(array_column($errors, 'error_code') === ['mail_not_configured', 'smtp_authentication_failed'], 'Logs configuration and SMTP errors');
+$context = json_decode($errors[1]['context'], true);
+checkTransport($context['user_copy'] === true && $context['attempt'] === 2 && $context['port'] === 465, 'Logs safe retry and transport metadata');
+checkTransport(!str_contains(json_encode($errors), 'private') && !str_contains(json_encode($errors), 'hidden@example.test'), 'Keeps SMTP secrets and recipients out of logs');

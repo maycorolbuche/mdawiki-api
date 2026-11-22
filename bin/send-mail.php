@@ -5,6 +5,6 @@ use MDAWiki\{Mailer, MailOutbox};
 
 if (PHP_SAPI !== 'cli') exit(1);
 $config = require dirname(__DIR__) . '/config/bootstrap.php';
-$outbox = new MailOutbox($config['storage_dir'] . '/mail-outbox', Closure::fromCallable(new Mailer($config['mail'])));
+$outbox = new MailOutbox($config['storage_dir'] . '/mail-outbox', Closure::fromCallable(new Mailer($config['mail'], errors: \MDAWiki\SystemErrorLog::fromConfig($config))));
 $result = $outbox->dispatch();
 echo 'E-mails: ' . $result['sent'] . ' enviados de ' . $result['checked'] . " tentativas.\n";

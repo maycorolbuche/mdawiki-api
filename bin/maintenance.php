@@ -5,7 +5,7 @@ $config=require dirname(__DIR__).'/config/bootstrap.php';if (PHP_SAPI!=='cli') e
 $storage=$config['storage_dir'];if (!is_dir($storage)) mkdir($storage,0700,true);
 $lock=fopen($storage.'/maintenance.lock','c');if (!$lock || !flock($lock,LOCK_EX|LOCK_NB)) exit(0);
 try {
-    $outbox = new MDAWiki\MailOutbox($storage . '/mail-outbox', Closure::fromCallable(new MDAWiki\Mailer($config['mail'])));
+    $outbox = new MDAWiki\MailOutbox($storage . '/mail-outbox', Closure::fromCallable(new MDAWiki\Mailer($config['mail'], errors: \MDAWiki\SystemErrorLog::fromConfig($config))));
     $delivery = $outbox->dispatch();
     echo 'E-mails: ' . $delivery['sent'] . ' enviados de ' . $delivery['checked'] . " tentativas.\n";
     $db=new Database(LegacyPageRepository::connect($config['db'],$config['public_max_level'])->connection());
