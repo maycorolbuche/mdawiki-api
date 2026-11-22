@@ -228,11 +228,18 @@ check((int) $shown['mentions'][0]['id'] === (int) $relatedId
 $shownImage = $auth->handle('GET', '/v1/images/Sample', [], $origin)->body['data'];
 check((int) $shownImage['pages'][0]['id'] === (int) $articleId && $shownImage['meta']['width'] === 1
     && count($shownImage['history']) === 4, 'Imagem sem propriedades, vínculos ou histórico.');
+$db->exec("UPDATE users SET display_name = 'Editor de teste' WHERE id = 100");
 $upload = $auth->handle('PUT', '/v1/images/Esd', [], $origin, ['data' => $a, 'base_version' => ''], $csrf);
 check($upload->status === 200 && $upload->body['data']['slug'] === 'Esd', 'Envio inicial da imagem falhou.');
 $changedImage = $auth->handle('PUT', '/v1/images/Esd', [], $origin, ['data' => $b, 'base_version' => $upload->body['data']['version']], $csrf);
 check($changedImage->status === 200 && $changedImage->body['data']['history'][0]['url'] === $upload->body['data']['url'],
     'Substituição deve preservar o arquivo anterior.');
+$oldImage = $changedImage->body['data']['history'][0];
+check($oldImage['author'] === 'Editor de teste', 'Histórico deve mostrar o autor do arquivo anterior.');
+$restore = $auth->handle('PUT', '/v1/images/Esd', [], $origin,
+    ['revision_id' => $oldImage['id'], 'base_version' => $changedImage->body['data']['version']], $csrf);
+check($restore->status === 200 && $restore->body['data']['url'] === $upload->body['data']['url']
+    && count($restore->body['data']['history']) === 2, 'Restaurar deve preservar a versão substituída.');
 check($auth->handle('GET', '/v1/pages/I/editor', [], $origin)->status === 422, 'Endereço de um caractere deve ser reservado.');
 $change['source'] = 'Sem vínculos';
 $change['base_version'] = $rebuilt->body['data']['base_version'];

@@ -191,7 +191,7 @@ function migrateImage(PDO $source, PDO $target, string $root, array $row, array 
     $name = preg_replace('/^imagem@/iu', '', legacyText($row['NOME_URL']));
     $title = trim(preg_replace('/^imagem@/iu', '', legacyText($row['NOME']) ?? ''));
     [$slug, $identifier] = pageSlugs(null, $name);
-    $image = query($target, 'SELECT id, legacy_identifier, file_id, meta FROM images WHERE identifier = ?', [$identifier])->fetch();
+    $image = query($target, 'SELECT id, legacy_identifier, file_id, meta, author_email, updated_at FROM images WHERE identifier = ?', [$identifier])->fetch();
     if ($image && $image['legacy_identifier'] !== $key) {
         throw new RuntimeException('Identificador de imagem já utilizado.');
     }
@@ -205,13 +205,16 @@ function migrateImage(PDO $source, PDO $target, string $root, array $row, array 
     upsert($target, 'images', ['identifier' => $identifier, 'slug' => $slug, 'title' => $title ?: str_replace('_', ' ', $name),
         'meta' => $replaced ? $image['meta'] : json_encode((object) $meta, JSON_THROW_ON_ERROR),
         'file_id' => $replaced ? $image['file_id'] : $file, 'legacy_identifier' => $key,
-        'access_level_id' => $row['NIVEL'] ?? 1], ['identifier']);
+        'access_level_id' => $row['NIVEL'] ?? 1,
+        'author_email' => $replaced ? $image['author_email'] : legacyText($row['USU_ALTERACAO'] ?: $row['USU_CADASTRO']),
+        'updated_at' => $replaced ? $image['updated_at'] : legacyDate($row['DT_ALTERACAO']) ?? legacyDate($row['DT_CADASTRO'])], ['identifier']);
     $imageId = $image['id'] ?? $target->lastInsertId();
     $counts[$image ? 'updated' : 'inserted']++;
     foreach (query($source, 'SELECT * FROM PAGINAS_LOGS WHERE IDENT = ? ORDER BY NOME_URL_ID', [$row['IDENT']]) as $revision) {
         $context = ['table' => 'PAGINAS_LOGS', 'key' => ['IDENT' => $key, 'NOME_URL_ID' => $revision['NOME_URL_ID']], 'field' => 'CONTEUDO_CODE'];
         upsert($target, 'image_revisions', ['image_id' => $imageId,
             'file_id' => fileId($target, $root, 'articles', $revision['CONTEUDO_CODE']),
+            'author_email' => legacyText($revision['EMAIL']),
             'legacy_revision_number' => (int) $revision['NOME_URL_ID'], 'access_level_id' => $revision['NIVEL'] ?? $row['NIVEL'] ?? 1, 'created_at' => legacyDate($revision['DATAHORA'])],
             ['image_id', 'legacy_revision_number']);
         $counts['revisions']++;
@@ -334,6 +337,14 @@ function applyDestinationSchema(PDO $target): void
         foreach (explode(';', $sql) as $statement) {
             if (trim($statement) !== '') {
                 $target->exec($statement);
+            }
+        }
+    }
+    foreach (['images' => ['author_email' => 'VARCHAR(200)', 'updated_at' => 'DATETIME'],
+        'image_revisions' => ['author_email' => 'VARCHAR(200)']] as $table => $columns) {
+        foreach ($columns as $column => $type) {
+            if (!query($target, "SHOW COLUMNS FROM `{$table}` WHERE Field = ?", [$column])->fetch()) {
+                $target->exec("ALTER TABLE `{$table}` ADD COLUMN `{$column}` {$type} NULL");
             }
         }
     }

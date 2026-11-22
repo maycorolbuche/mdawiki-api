@@ -202,7 +202,9 @@ final class Features
         $user = $this->accounts->current(true);
         if ((int) $user['NIVEL'] < 1) throw new HttpError(403, 'permission_denied', 'Você não pode enviar imagens.');
         $this->rate->check('media-user:' . $user['ID'], 20, 3600);
-        return $images->save($slug, $body, $user);
+        return array_key_exists('revision_id', $body)
+            ? $images->restore($slug, $body, $user)
+            : $images->save($slug, $body, $user);
     }
 
     private function upload(array $body): array { $u=$this->accounts->current(true);if ((int)$u['NIVEL']<1) throw new HttpError(403,'permission_denied','Você não tem permissão para enviar imagens da wiki.');$this->rate->check('media-user:'.$u['ID'],20,3600);return (new Media($this->config))->upload($body); }
