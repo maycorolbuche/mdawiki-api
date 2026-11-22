@@ -29,6 +29,7 @@ if (is_file($envFile)) {
 
 date_default_timezone_set(getenv('APP_TIMEZONE') ?: 'America/Sao_Paulo');
 return [
+    'normalized_read_only' => getenv('APP_ENV') === 'local' && getenv('DB_SCHEMA') === 'normalized',
     'app_key' => getenv('APP_KEY') ?: '',
     'storage_dir' => getenv('STORAGE_DIR') ?: dirname(__DIR__).'/var',
     'media_root' => getenv('MEDIA_ROOT') ?: dirname(__DIR__).'/var/media',
@@ -45,7 +46,7 @@ return [
         'database' => getenv('DB_DATABASE') ?: '',
         'username' => getenv('DB_USERNAME') ?: '',
         'password' => getenv('DB_PASSWORD') ?: '',
-        'charset' => getenv('DB_CHARSET') ?: 'latin1',
+        'charset' => getenv('DB_CHARSET') ?: ((getenv('APP_ENV') === 'local' && getenv('DB_SCHEMA') === 'normalized') ? 'utf8mb4' : 'latin1'),
     ],
     'public_max_level' => (int) (getenv('PUBLIC_MAX_LEVEL') ?: 1),
 ];

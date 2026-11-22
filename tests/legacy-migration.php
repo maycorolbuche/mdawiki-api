@@ -108,3 +108,20 @@ check((int) $db->query("SELECT COUNT(*) FROM migration_errors WHERE source_table
 
 check((int) $db->query("SELECT COUNT(*) FROM pages WHERE legacy_identifier = 'collision'")->fetchColumn() === 0, 'Colisão sobrescreveu uma página.');
 check((int) $db->query("SELECT COUNT(*) FROM migration_errors WHERE source_table = 'PAGINAS' AND source_field = 'NOME'")->fetchColumn() === 1, 'Colisão não registrada.');
+
+
+$config = require dirname(__DIR__) . '/config/bootstrap.php';
+$normalized = new MDAWiki\NormalizedPageRepository(new MDAWiki\Database($db), 1, 'https://api.example.test/media');
+$preview = new MDAWiki\Application(static fn () => $normalized, [
+    'normalized_read_only' => true, 'origins' => [], 'frontend_url' => 'https://example.test',
+    'media_url' => 'https://api.example.test/media',
+]);
+$export = $preview->handle('GET', '/v1/pages', ['limit' => 1]);
+check($export->status === 200 && $export->body['data'][0]['read_only'] === true, 'Exportação da base migrada falhou.');
+check($preview->handle('GET', '/v1/pages', ['after' => $export->body['next_cursor']])->status === 200, 'Cursor da base migrada falhou.');
+$article = $preview->handle('GET', '/v1/pages/ESPECIALIDADE_Teste', []);
+check($article->status === 200 && $article->body['data']['slug'] === 'EspéciAlidade-Teste', 'Slug canônico da base migrada incorreto.');
+check($preview->handle('PUT', '/v1/pages/Especialidade-Teste', [])->status === 501, 'Prévia aceitou uma edição.');
+
+$db->exec("UPDATE pages SET access_level_id = 5 WHERE legacy_identifier = 'article'");
+check($preview->handle('GET', '/v1/pages/Especialidade-Teste', [])->status === 404, 'Prévia expôs artigo privado.');

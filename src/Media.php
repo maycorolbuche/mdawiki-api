@@ -29,12 +29,25 @@ final class Media
         $name=bin2hex(random_bytes(16)).'.'.$formats[$info['mime']];if (file_put_contents($directory.'/'.$name,$bytes,LOCK_EX)===false) throw new \RuntimeException('Cannot save image');
         return ['url'=>$this->config['media_public_url'].'/'.$group.'/'.$name,'filename'=>$name,'width'=>$info[0],'height'=>$info[1]];
     }
-    public function serve(string $path): never {
+    public function serve(string $path, ?callable $allowMigratedArticle = null): never {
         $root=realpath($this->config['media_root']);$decoded=rawurldecode(substr($path,7));
         $file=$root && !str_contains($decoded,"\0") ? realpath($root.'/'.$decoded):false;
         $types=['svg'=>'image/svg+xml','png'=>'image/png','jpg'=>'image/jpeg','jpeg'=>'image/jpeg','gif'=>'image/gif','webp'=>'image/webp','avif'=>'image/avif'];
         $type=$file?$types[strtolower(pathinfo($file,PATHINFO_EXTENSION))] ?? null:null;
         if (!$file || !$root || !str_starts_with($file,$root.DIRECTORY_SEPARATOR) || !$type || !is_file($file)) { http_response_code(404);exit; }
+        $key = str_replace(DIRECTORY_SEPARATOR, '/', substr($file, strlen($root) + 1));
+        if (str_starts_with(strtolower($key), 'articles/')) {
+            try {
+                if ($allowMigratedArticle === null || !$allowMigratedArticle($key)) {
+                    http_response_code(404);
+                    exit;
+                }
+            } catch (\Throwable $error) {
+                error_log((string) $error);
+                http_response_code(503);
+                exit;
+            }
+        }
         header('Content-Type: '.$type);header('X-Content-Type-Options: nosniff');header("Content-Security-Policy: sandbox; default-src 'none'; style-src 'unsafe-inline'");header('Cache-Control: public, max-age=0, must-revalidate');readfile($file);exit;
     }
     /** Sanitizes SVG snapshots; active markup is also rejected on new uploads. */

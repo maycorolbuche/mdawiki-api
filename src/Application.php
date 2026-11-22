@@ -44,6 +44,10 @@ final class Application
         if ($method === 'OPTIONS') {
             return new Response(204, [], $headers + ['Access-Control-Allow-Methods' => 'GET, POST, PUT, OPTIONS', 'Access-Control-Allow-Headers' => 'Accept, Content-Type, X-CSRF-Token']);
         }
+        if (($this->config['normalized_read_only'] ?? false)
+            && ($method !== 'GET' || !preg_match('~^/(?:health|v1/pages(?:/[^/]+)?|media/.*)?$~D', $path))) {
+            return new Response(501, ['error' => ['code' => 'read_only_preview', 'message' => 'A base migrada está em prévia de leitura pública.']], $headers);
+        }
         if ($this->features !== null && (preg_match('~^/v1/(auth/|profile(?:/|$)|media$|search$|catalog$|statistics$|home$|visits$|view/|users(?:/|$))~', $path) || preg_match('~^/v1/pages/[^/]+/(editor|history|preview|restore|rebuild)$~D', $path) || ($method === 'PUT' && str_starts_with($path, '/v1/pages/')))) {
             if ($method !== 'GET' && $origin === '') return new Response(403, ['error'=>['code'=>'origin_required','message'=>'Origem da solicitação ausente.']], $headers);
             try {
@@ -95,7 +99,7 @@ final class Application
                 if ($row !== null) {
                     return new Response(200, ['data' => $this->present($row)], $headers);
                 }
-                $details = ['layer' => 'article', 'stage' => $stage, 'database' => 'query_succeeded', 'lookup_field' => 'NOME_URL', 'reason' => 'not_found_or_not_public'];
+                $details = ['layer' => 'article', 'stage' => $stage, 'database' => 'query_succeeded', 'lookup_field' => ($this->config['normalized_read_only'] ?? false) ? 'identifier' : 'NOME_URL', 'reason' => 'not_found_or_not_public'];
                 if ($debug) {
                     $details['slug'] = $slug;
                     if ($repository instanceof DiagnosablePageRepository) {
@@ -148,6 +152,7 @@ final class Application
             'missing_links' => $row['missing_links'] ?? [],
             'redirect_slug' => $row['redirect_slug'] ?? null,
             'image_usage' => $row['image_usage'] ?? [],
+            ...(($this->config['normalized_read_only'] ?? false) ? ['read_only' => true] : []),
         ];
     }
 }
