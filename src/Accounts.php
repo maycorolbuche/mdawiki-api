@@ -28,8 +28,27 @@ final class Accounts
         if (!is_string($email) || strlen($email) > 150 || !filter_var($email, FILTER_VALIDATE_EMAIL)) throw new HttpError(422, 'invalid_email', 'Informe um e-mail válido.');
         return mb_strtolower(trim($email));
     }
+    private function readAccount(string $field, int|string $value): ?array
+    {
+        if (!($this->config['normalized_read_only'] ?? false)) {
+            return $this->db->one('SELECT * FROM USUARIOS WHERE ' . $field . ' = ?', [$value]);
+        }
+        $column = $field === 'ID' ? 'id' : 'email';
+        $rows = $this->db->rows("SELECT id AS ID, email AS EMAIL, password_hash AS SENHA,
+            name AS NOME, display_name AS APELIDO, access_level_id AS NIVEL,
+            birth_date AS DATA_NASC, city AS CIDADE, state_code AS ESTADO, club AS CLUBE,
+            association AS ASSOCIACAO, club_type AS TIPO_CLUBE, biography AS BIOGRAFIA,
+            created_at AS DT_CADASTRO, updated_at AS DT_ALTERACAO,
+            CASE WHEN is_active = 1 THEN 'S' ELSE 'N' END AS ATIVO,
+            CASE WHEN receives_notifications = 1 THEN 'S' ELSE 'N' END AS ENVIA_EMAIL
+            FROM users WHERE {$column} = ? LIMIT 2", [$value]);
+        return count($rows) === 1 ? $rows[0] : null;
+    }
+
     public function current(bool $required = false): ?array {
-        $user = isset($this->session->data['id']) ? $this->db->one('SELECT * FROM USUARIOS WHERE ID = ?', [(int) $this->session->data['id']]) : null;
+        $normalized = $this->config['normalized_read_only'] ?? false;
+        $user = isset($this->session->data['id']) && ($this->session->data['normalized'] ?? false) === $normalized
+            ? $this->readAccount('ID', (int) $this->session->data['id']) : null;
         if ($user && ($user['ATIVO'] !== 'S' || ($user['SENHA'] ?? '') === '' || !hash_equals($this->session->data['fingerprint'] ?? '', hash('sha256', $user['SENHA'])) || ($this->session->data['expires'] ?? 0) < time())) $user = null;
         if (!$user) { unset($this->session->data['id'], $this->session->data['fingerprint']); if ($required) throw new HttpError(401, 'login_required', 'Entre na sua conta para continuar.'); }
         return $user;
@@ -49,14 +68,27 @@ final class Accounts
         $email = $this->email($body['email'] ?? null);
         $password = $body['password'] ?? '';
         if (!is_string($password) || strlen($password) > 1024) throw new HttpError(422, 'invalid_password', 'Senha inválida.');
-        $u = $this->db->one('SELECT * FROM USUARIOS WHERE EMAIL = ?', [$email]);
+        $u = $this->readAccount('EMAIL', $email);
         if (!$u || !$this->verify($password, $u)) throw new HttpError(401, 'invalid_credentials', 'E-mail ou senha inválidos. Se você ainda precisa cadastrar uma senha, use a opção de redefinição.');
         if ($u['ATIVO'] !== 'S') throw new HttpError(403, 'inactive_account', 'Ative sua conta pelo código enviado por e-mail.');
-        if (!str_starts_with($u['SENHA'], 'p2$')) { $u['SENHA'] = $this->hash($password, (int) $u['ID']); $this->db->run('UPDATE USUARIOS SET SENHA = ?, SENHA_PROV = NULL WHERE ID = ?', [$u['SENHA'], (int) $u['ID']]); }
+        $normalized = $this->config['normalized_read_only'] ?? false;
+        if (!str_starts_with($u['SENHA'], 'p2$')) {
+            $hash = $this->hash($password, (int) $u['ID']);
+            if ($normalized) {
+                $saved = $this->db->run('UPDATE users SET password_hash = ? WHERE id = ? AND password_hash = ?', [$hash, (int) $u['ID'], $u['SENHA']]);
+                if ($saved->rowCount() !== 1) throw new HttpError(409, 'login_retry', 'Tente entrar novamente.');
+            } else {
+                $this->db->run('UPDATE USUARIOS SET SENHA = ?, SENHA_PROV = NULL WHERE ID = ?', [$hash, (int) $u['ID']]);
+            }
+            $u['SENHA'] = $hash;
+        }
         $lifetime=($body['remember'] ?? false)===true?2592000:43200;
         $this->session->rotate(); $this->session->data['id'] = (int) $u['ID']; $this->session->data['fingerprint'] = hash('sha256', $u['SENHA']); $this->session->data['expires'] = time() + $lifetime;
+        $this->session->data['normalized'] = $normalized;
         if ($lifetime>43200) $this->session->remember($lifetime);
-        $this->db->run("UPDATE USUARIOS SET FEZ_LOGIN = 'S', DT_ULT_ACESSO = ? WHERE ID = ?", [date('Y-m-d H:i:s'), (int) $u['ID']]);
+        $this->db->run($normalized
+            ? 'UPDATE users SET has_logged_in = 1, last_seen_at = ? WHERE id = ?'
+            : "UPDATE USUARIOS SET FEZ_LOGIN = 'S', DT_ULT_ACESSO = ? WHERE ID = ?", [date('Y-m-d H:i:s'), (int) $u['ID']]);
         return $this->session();
     }
     public function logout(): array { $this->session->data = []; $this->session->rotate(); return $this->session(); }

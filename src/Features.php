@@ -54,7 +54,14 @@ final class Features
         if ($slug==='' || mb_strlen($slug)>250 || preg_match('~[/\\\\\x00-\x1f\x7f?#]~',$slug)) throw new HttpError(422,'invalid_slug','Endereço inválido.'); return $slug;
     }
     private function view(string $slug): array {
-        $slug=$this->slug($slug);$user=$this->accounts->current(true);$p=$this->pages->source($slug);
+        $slug=$this->slug($slug);$user=$this->accounts->current(true);
+        if ($this->config['normalized_read_only'] ?? false) {
+            $repo = new NormalizedPageRepository($this->db, (int) $this->config['public_max_level'], $this->config['media_public_url']);
+            $row = $repo->find($slug);
+            if ($row === null) throw new HttpError(404, 'not_found', 'Página não encontrada.');
+            return (new Application(static fn () => $repo, $this->config))->present($row) + ['is_public' => true];
+        }
+        $p=$this->pages->source($slug);
         if (!$p) throw new HttpError(404,'not_found','Página não encontrada.');
         $level=max((int)$user['NIVEL'],(int)$this->config['public_max_level']);
         if ((int)($p['NIVEL'] ?? 1)>$level || str_starts_with(strtolower($p['IDENT']),'page@')) throw new HttpError(403,'permission_denied','Você não tem permissão para esta página.');

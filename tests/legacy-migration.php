@@ -130,3 +130,21 @@ $search = $preview->handle('GET', '/v1/search', ['q' => 'Imagem']);
 check($search->status === 200 && count($search->body['data']['items']) === 1, 'Busca da base importada falhou.');
 $home = $preview->handle('GET', '/v1/home', []);
 check($home->status === 200 && count($home->body['data']['recent']) === 1, 'Início da base importada não respeitou a visibilidade.');
+
+
+$authConfig = [
+    'normalized_read_only' => true, 'origins' => ['http://localhost:5173'],
+    'frontend_url' => 'https://example.test', 'media_public_url' => 'https://api.example.test/media',
+    'storage_dir' => $root, 'app_key' => str_repeat('a', 32), 'public_max_level' => 1,
+];
+$session = new MDAWiki\Session(false);
+$features = new MDAWiki\Features(new MDAWiki\Database($db), $session, $authConfig, static fn () => null);
+$auth = new MDAWiki\Application(static fn () => $normalized, $authConfig, static fn () => $features);
+$origin = 'http://localhost:5173';
+$initial = $auth->handle('GET', '/v1/auth/session', [], $origin);
+$credentials = ['email' => 'migrated@example.test', 'password' => 'legacy-password'];
+check($auth->handle('POST', '/v1/auth/login', [], $origin, $credentials, 'wrong')->status === 403, 'Login ignorou CSRF.');
+$login = $auth->handle('POST', '/v1/auth/login', [], $origin, $credentials, $initial->body['data']['csrf_token']);
+check($login->status === 200 && (int) $login->body['data']['user']['ID'] === 100, 'Login do usuário migrado falhou.');
+check($auth->handle('GET', '/v1/view/Imagem', [], $origin)->status === 200, 'Sessão migrada não conseguiu ler artigo público.');
+check($auth->handle('POST', '/v1/auth/logout', [], $origin, [], $login->body['data']['csrf_token'])->status === 200, 'Logout migrado falhou.');

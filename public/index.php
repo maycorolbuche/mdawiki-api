@@ -34,8 +34,8 @@ $repository = static function () use ($config, $normalized, $connection) {
         ? new NormalizedPageRepository(new Database($legacy->connection()), $config['public_max_level'], $config['media_public_url'])
         : $legacy;
 };
-$app = new Application($repository, $config, $normalized ? null : static function() use ($config) {
-    $db=new Database(LegacyPageRepository::connect($config['db'],$config['public_max_level'])->connection());
+$app = new Application($repository, $config, static function() use ($config, $connection) {
+    $db=new Database(($connection ?? LegacyPageRepository::connect($config['db'],$config['public_max_level']))->connection());
     return new Features($db,new Session(true,$config['storage_dir'].'/sessions'),$config,Closure::fromCallable(new Mailer($config['mail'],$db)));
 });
 if (str_starts_with($path, '/media/')) {
