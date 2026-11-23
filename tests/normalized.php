@@ -13,10 +13,8 @@ $server = 'mysql:host=127.0.0.1;port=3306;charset=utf8mb4';
 $db = new PDO($server, 'root', 'test', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
 $db->exec('CREATE DATABASE normalized_test CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');
 $db->exec('USE normalized_test');
-foreach (['001_content_and_media.sql', '002_remaining_legacy_tables.sql', '005_system_error_logs.sql',
-    '006_normalized_registration.sql', '008_page_visits.sql', '009_page_missing_links.sql'] as $migration) {
-    $db->exec(file_get_contents(__DIR__ . '/../migrations/' . $migration));
-}
+$schema = file_get_contents(__DIR__ . '/../migrations/001_database.sql');
+$db->exec($schema);
 
 $a = 'data:image/gif;base64,R0lGODlhAQABAIAAAP///////yH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
 $gif = base64_decode(explode(',', $a, 2)[1], true);
@@ -30,28 +28,22 @@ $avatar = $hash . '.gif';
 file_put_contents($root . '/' . $key, $gif);
 file_put_contents($root . '/users/' . $avatar, $gif);
 $publicId = str_repeat('a', 32);
-$db->prepare("INSERT INTO users (id, email, name, password_hash, is_active, public_id, avatar_filename, access_level_id)
-    VALUES (100, 'migrated@example.test', 'Editor', ?, 1, ?, ?, 1)")->execute([md5('legacy-password'), $publicId, $avatar]);
+$db->prepare("INSERT INTO users (id, email, name, password_hash, is_active, public_id, avatar_filename)
+    VALUES (100, 'migrated@example.test', 'Editor', ?, 1, ?, ?)")->execute([md5('legacy-password'), $publicId, $avatar]);
 $db->prepare("INSERT INTO files (id, sha256, storage_key, mime_type, size_bytes) VALUES (1, ?, ?, 'image/gif', ?)")
     ->execute([$hash, $key, strlen($gif)]);
 $db->exec("INSERT INTO images (identifier, slug, title, meta, file_id, legacy_identifier, access_level_id, created_by, created_at)
     VALUES ('sample', 'Sample', 'Imagem', '{\"width\":1}', 1, 'imagem@sample', 1, 100, '2020-01-01')");
 $db->exec("INSERT INTO image_revisions (image_id, file_id, created_by, created_at)
     VALUES (1, 1, 100, '2020-01-01'), (1, 1, 100, '2020-01-02'), (1, 1, 100, '2020-01-03'), (1, 1, 100, '2020-01-04')");
-$db->exec("INSERT INTO pages (id, legacy_identifier, identifier, slug, title, source, rendered_html, is_searchable, access_level_id, kind)
-    VALUES (1, 'article', 'especialidade-teste', 'EspéciAlidade-Teste', 'EspéciAlidade Teste', 'Editado', '<p>Editado</p>', 1, 1, 'article')");
+$db->exec("INSERT INTO pages (id, legacy_identifier, identifier, slug, title, source, rendered_html, is_searchable, kind)
+    VALUES (1, 'article', 'especialidade-teste', 'EspéciAlidade-Teste', 'EspéciAlidade Teste', 'Editado', '<p>Editado</p>', 1, 'article')");
 $importedPage = ['id' => 1];
-$db->exec("INSERT INTO users (id, password_hash, public_id, access_level_id) VALUES
-    (96, '', REPEAT('b', 32), 0), (97, '', REPEAT('c', 32), 5), (98, '', REPEAT('d', 32), 2)");
-$db->exec('UPDATE pages SET needs_rebuild = 1 WHERE id = 1');
-foreach (['011_roles_and_page_rebuild_queue.sql', '012_drop_unused_content_fields.sql',
-    '013_drop_replaced_account_and_page_fields.sql'] as $migration) {
-    $db->exec(file_get_contents(__DIR__ . '/../migrations/' . $migration));
-}
-check($db->query('SELECT role FROM users ORDER BY id')->fetchAll(PDO::FETCH_COLUMN)
-    === ['reader', 'admin', 'user', 'user'], 'Migração de papéis incorreta.');
-check((int) $db->query('SELECT page_id FROM page_rebuild_queue')->fetchColumn() === 1, 'Migração perdeu pendência.');
-$db->exec('DELETE FROM users WHERE id IN (96, 97, 98)');
+$db->exec($schema);
+check($db->query('SELECT role FROM users WHERE id = 100')->fetchColumn() === 'user',
+    'O schema deve preservar a conta existente e usar o papel user por padrão.');
+check($db->query('SELECT source FROM pages WHERE id = 1')->fetchColumn() === 'Editado',
+    'Reaplicar o schema não deve apagar páginas.');
 require dirname(__DIR__) . '/config/bootstrap.php';
 $normalized = new MDAWiki\NormalizedPageRepository(new MDAWiki\Database($db), 1, 'https://api.example.test/media');
 $preview = new MDAWiki\Application(static fn () => $normalized, [
