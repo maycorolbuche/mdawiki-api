@@ -9,7 +9,7 @@ final class NormalizedPages
     {
     }
 
-    private function page(string $slug, array $user, bool $lock = false, bool $allowMissing = false): ?array
+    private function page(string $slug, bool $lock = false, bool $allowMissing = false): ?array
     {
         $page = NormalizedPageRepository::lookup($this->db, $slug, $lock);
         if (!$page && $allowMissing) {
@@ -17,9 +17,6 @@ final class NormalizedPages
         }
         if (!$page || str_starts_with($page['legacy_identifier'], 'page@')) {
             throw new HttpError(404, 'not_found', 'Página não encontrada.');
-        }
-        if ((int) ($page['access_level_id'] ?? 1) > (int) $user['NIVEL']) {
-            throw new HttpError(403, 'permission_denied', 'Você não tem permissão para esta página.');
         }
         if ($page['kind'] === 'image') {
             throw new HttpError(501, 'image_editor_unavailable', 'O editor de imagens ainda está em migração.');
@@ -32,9 +29,19 @@ final class NormalizedPages
         return $page === null ? '' : hash('sha256', serialize([$page['id'], $page['title'], $page['source'], $page['updated_at'], $page['updated_by']]));
     }
 
+    private function editorAccount(): array
+    {
+        $user = $this->accounts->current(true);
+        if (!in_array($user['role'] ?? null, ['user', 'admin'], true)) {
+            throw new HttpError(403, 'permission_denied', 'Você não tem permissão para alterar páginas.');
+        }
+        return $user;
+    }
+
     public function editor(string $slug): array
     {
-        $page = $this->page($slug, $this->accounts->current(true), allowMissing: true);
+        $this->editorAccount();
+        $page = $this->page($slug, allowMissing: true);
         if ($page === null) {
             [$canonical] = $this->newPageAddress($slug);
             return ['slug' => $canonical, 'title' => str_replace(['-', '_'], ' ', $canonical), 'source' => '',
@@ -42,7 +49,7 @@ final class NormalizedPages
         }
         return [
             'slug' => $page['slug'], 'title' => $page['title'], 'source' => $page['source'] ?? '',
-            'base_version' => $this->version($page), 'format' => $page['is_html'] ? 'html' : 'wiki',
+            'base_version' => $this->version($page), 'format' => 'wiki',
             'exists' => true, 'media' => false,
         ];
     }
@@ -50,13 +57,13 @@ final class NormalizedPages
     public function history(string $slug, int $before): array
     {
         $user = $this->accounts->current(true);
-        $page = $this->page($slug, $user);
+        $page = $this->page($slug);
         $rows = $this->db->rows('SELECT r.revision_number AS id, r.title, COALESCE(r.source, \'\') AS source,
             r.created_at, COALESCE(NULLIF(u.display_name, \'\'), u.name) AS author, u.avatar_filename AS FOTO, CASE WHEN u.is_active = 1 THEN u.public_id END AS author_profile_id
             FROM page_revisions r LEFT JOIN users u ON u.id = r.created_by
             WHERE r.page_id = ? AND r.revision_number < ? AND COALESCE(r.access_level_id, 1) <= ?
             AND COALESCE(r.is_expired, 0) = 0 ORDER BY r.revision_number DESC LIMIT 51',
-            [$page['id'], $before, (int) $user['NIVEL']]);
+            [$page['id'], $before, max(1, (int) $user['NIVEL'])]);
         $revisions = array_map(function (array $row): array {
             $row['author_photo'] = $this->accounts->profile($row)['photo'];
             unset($row['FOTO']);
@@ -69,8 +76,9 @@ final class NormalizedPages
 
     public function preview(string $slug, array $body): array
     {
-        $page = $this->page($slug, $this->accounts->current(true), allowMissing: true);
-        $page ??= ['slug' => $this->newPageAddress($slug)[0], 'is_html' => false];
+        $this->editorAccount();
+        $page = $this->page($slug, allowMissing: true);
+        $page ??= ['slug' => $this->newPageAddress($slug)[0]];
         return ['html' => $this->render($page, $body['source'] ?? null)['html']];
     }
 
@@ -95,9 +103,8 @@ final class NormalizedPages
         [$canonical, $identifier] = $this->newPageAddress($slug);
         try {
             $this->db->run("INSERT INTO pages
-                (legacy_identifier, identifier, slug, kind, is_searchable, access_level_id, needs_rebuild, view_count,
-                 is_html, created_by, created_at)
-                VALUES (?, ?, ?, 'article', 1, 1, 0, 0, 0, ?, ?)",
+                (legacy_identifier, identifier, slug, kind, is_searchable, view_count, created_by, created_at)
+                VALUES (?, ?, ?, 'article', 1, 0, ?, ?)",
                 ['@article:' . hash('sha256', $identifier), $identifier, $canonical, $user['ID'], $now]);
         } catch (\PDOException $error) {
             if ((int) ($error->errorInfo[1] ?? 0) !== 1062) {
@@ -105,7 +112,7 @@ final class NormalizedPages
             }
             throw new HttpError(409, 'edit_conflict', 'Este endereço já foi criado. Recarregue a página antes de salvar.');
         }
-        return $this->page($canonical, $user, true);
+        return $this->page($canonical, true);
     }
 
     private function render(array $page, mixed $source): array
@@ -113,13 +120,13 @@ final class NormalizedPages
         if (!is_string($source) || strlen($source) > 500000) {
             throw new HttpError(422, 'invalid_page', 'Conteúdo inválido (limite de 500 KB).');
         }
-        return $this->renderer->render($source, $page['slug'], (bool) $page['is_html'], isset($page['id']) ? (int) $page['id'] : null);
+        return $this->renderer->render($source, $page['slug'], false, isset($page['id']) ? (int) $page['id'] : null);
     }
 
     public function save(string $slug, array $body, ?int $restore = null, bool $rebuild = false): array
     {
-        $user = $this->accounts->current(true);
-        if ($rebuild && (int) $user['NIVEL'] < 5) {
+        $user = $this->editorAccount();
+        if ($rebuild && ($user['role'] ?? null) !== 'admin') {
             throw new HttpError(403, 'permission_denied', 'Acesso restrito a administradores.');
         }
         return $this->write($slug, $body, $restore, $rebuild, $user);
@@ -137,7 +144,7 @@ final class NormalizedPages
         if ($ownsTransaction) $pdo->beginTransaction();
         try {
             $creating = !$rebuild && $restore === null && ($body['base_version'] ?? null) === '';
-            $page = $this->page($slug, $user, !$creating, $creating);
+            $page = $this->page($slug, !$creating, $creating);
             if (!$rebuild && (!is_string($body['base_version'] ?? null)
                 || !hash_equals($this->version($page), $body['base_version']))) {
                 throw new HttpError(409, 'edit_conflict', 'Outra edição foi salva. Recarregue a página antes de salvar.');
@@ -162,6 +169,7 @@ final class NormalizedPages
             $last = $this->db->one('SELECT MAX(revision_number) AS revision
                 FROM page_revisions WHERE page_id = ?', [$page['id']]);
             $number = (int) $last['revision'];
+            $this->db->run('DELETE FROM page_rebuild_queue WHERE page_id = ?', [$page['id']]);
             $rendered = $this->render($page, $source);
             $edited = !$rebuild && ($new || $title !== $page['title'] || $source !== ($page['source'] ?? ''));
             if ($edited) {
@@ -171,7 +179,7 @@ final class NormalizedPages
                      is_searchable, access_level_id, created_by, is_expired, created_at)
                      VALUES (?,?,?,?,?,?,?,?,?,0,?)',
                     [$page['id'], $number, $page['slug'], $title, $source, $rendered['html'],
-                     $page['is_searchable'], $page['access_level_id'], $user['ID'], $now]);
+                     $page['is_searchable'], 1, $user['ID'], $now]);
                 $this->db->run('UPDATE pages SET title = ?, source = ?, updated_at = ?, updated_by = ? WHERE id = ?',
                     [$title, $source, $now, $user['ID'], $page['id']]);
                 $page['title'] = $title;
@@ -179,14 +187,15 @@ final class NormalizedPages
                 $page['updated_at'] = $now;
                 $page['updated_by'] = $user['ID'];
             }
-            $this->db->run('UPDATE pages SET rendered_html = ?, plain_text = ?, rebuilt_at = ?, needs_rebuild = 0 WHERE id = ?',
+            $this->db->run('UPDATE pages SET rendered_html = ?, plain_text = ?, rebuilt_at = ? WHERE id = ?',
                 [$rendered['html'], $rendered['text'], $now, $page['id']]);
             $relations = new PageRelations($this->db);
             if ($new) $relations->resolveMissing((int) $page['id'], $page['identifier']);
             $relations->replace((int) $page['id'], $source, $rendered);
             if ($page['rendered_html'] !== $rendered['html']) {
-                $this->db->run('UPDATE pages SET needs_rebuild = 1 WHERE id IN
-                    (SELECT page_id FROM page_includes WHERE target_page_id = ?)', [$page['id']]);
+                $this->db->run('INSERT INTO page_rebuild_queue (page_id)
+                    SELECT DISTINCT page_id FROM page_includes WHERE target_page_id = ? AND page_id <> ?
+                    ON DUPLICATE KEY UPDATE queued_at = CURRENT_TIMESTAMP', [$page['id'], $page['id']]);
             }
             if ($ownsTransaction) $pdo->commit();
             if ($ownsTransaction && $edited) {

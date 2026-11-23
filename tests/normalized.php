@@ -41,6 +41,17 @@ $db->exec("INSERT INTO image_revisions (image_id, file_id, created_by, created_a
 $db->exec("INSERT INTO pages (id, legacy_identifier, identifier, slug, title, source, rendered_html, is_searchable, access_level_id, kind)
     VALUES (1, 'article', 'especialidade-teste', 'EspéciAlidade-Teste', 'EspéciAlidade Teste', 'Editado', '<p>Editado</p>', 1, 1, 'article')");
 $importedPage = ['id' => 1];
+$db->exec("INSERT INTO users (id, password_hash, public_id, access_level_id) VALUES
+    (96, '', REPEAT('b', 32), 0), (97, '', REPEAT('c', 32), 5), (98, '', REPEAT('d', 32), 2)");
+$db->exec('UPDATE pages SET needs_rebuild = 1 WHERE id = 1');
+foreach (['011_roles_and_page_rebuild_queue.sql', '012_drop_unused_content_fields.sql',
+    '013_drop_replaced_account_and_page_fields.sql'] as $migration) {
+    $db->exec(file_get_contents(__DIR__ . '/../migrations/' . $migration));
+}
+check($db->query('SELECT role FROM users ORDER BY id')->fetchAll(PDO::FETCH_COLUMN)
+    === ['reader', 'admin', 'user', 'user'], 'Migração de papéis incorreta.');
+check((int) $db->query('SELECT page_id FROM page_rebuild_queue')->fetchColumn() === 1, 'Migração perdeu pendência.');
+$db->exec('DELETE FROM users WHERE id IN (96, 97, 98)');
 require dirname(__DIR__) . '/config/bootstrap.php';
 $normalized = new MDAWiki\NormalizedPageRepository(new MDAWiki\Database($db), 1, 'https://api.example.test/media');
 $preview = new MDAWiki\Application(static fn () => $normalized, [
@@ -54,8 +65,8 @@ $article = $preview->handle('GET', '/v1/pages/ESPECIALIDADE_Teste', []);
 check($article->status === 200 && $article->body['data']['slug'] === 'EspéciAlidade-Teste', 'Slug canônico da base migrada incorreto.');
 check($preview->handle('PUT', '/v1/pages/Especialidade-Teste', [])->status === 501, 'Prévia aceitou uma edição.');
 
-$db->exec("UPDATE pages SET access_level_id = 5 WHERE legacy_identifier = 'article'");
-check($preview->handle('GET', '/v1/pages/Especialidade-Teste', [])->status === 404, 'Prévia expôs artigo privado.');
+$db->exec("UPDATE pages SET is_searchable = 0 WHERE legacy_identifier = 'article'");
+check($preview->handle('GET', '/v1/pages/Especialidade-Teste', [])->status === 404, 'Prévia expôs artigo fora da busca.');
 
 $search = $preview->handle('GET', '/v1/search', ['q' => 'Imagem']);
 check($search->status === 200 && count($search->body['data']['items']) === 0, 'Busca da base importada falhou.');
@@ -93,7 +104,7 @@ $login = $auth->handle('POST', '/v1/auth/login', [], $origin, $credentials, $ini
 check($login->status === 200 && (int) $login->body['data']['user']['ID'] === 100, 'Login do usuário migrado falhou.');
 check($login->body['data']['user']['photo'] === $publicUser->body['data']['photo'], 'Avatar migrado não apareceu na sessão.');
 check($auth->handle('GET', '/v1/images/Sample', [], $origin)->status === 200, 'Imagem migrada indisponível.');
-$db->exec("UPDATE pages SET access_level_id = 1 WHERE legacy_identifier = 'article'");
+$db->exec("UPDATE pages SET is_searchable = 1 WHERE legacy_identifier = 'article'");
 $slug = '/v1/pages/Especialidade_Teste';
 $public = $auth->handle('GET', $slug, [], $origin);
 check($public->status === 200 && $public->body['data']['read_only'] === false, 'Botões do artigo ficaram ocultos.');
@@ -102,6 +113,12 @@ check($editor->status === 200 && $editor->body['data']['source'] === 'Editado', 
 $csrf = $login->body['data']['csrf_token'];
 $change = ['title' => 'EspéciAlidade Teste', 'source' => 'Texto novo', 'base_version' => $editor->body['data']['base_version']];
 check($auth->handle('POST', $slug . '/preview', [], $origin, $change, $csrf)->status === 200, 'Prévia do artigo falhou.');
+$db->exec("UPDATE users SET role = 'reader' WHERE id = 100");
+check($auth->handle('GET', $slug, [], $origin)->status === 200, 'Leitor deve poder acessar o artigo.');
+check($auth->handle('GET', $slug . '/editor', [], $origin)->status === 403, 'Leitor abriu o editor.');
+check($auth->handle('PUT', $slug, [], $origin, $change, $csrf)->status === 403, 'Leitor alterou o artigo.');
+check($auth->handle('POST', $slug . '/restore', [], $origin, ['revision' => 1], $csrf)->status === 403, 'Leitor restaurou uma revisão.');
+$db->exec("UPDATE users SET role = 'user' WHERE id = 100");
 $saved = $auth->handle('PUT', $slug, [], $origin, $change, $csrf);
 check($saved->status === 200, 'Salvamento do artigo migrado falhou.');
 check(end($subjects) === '[page][update] EspéciAlidade Teste', 'Alteração do artigo deve notificar o admin.');
@@ -109,7 +126,7 @@ check($auth->handle('PUT', $slug, [], $origin, $change, $csrf)->status === 409, 
 check(str_contains($mailBody, 'href="https://example.test/Esp%C3%A9ciAlidade-Teste"'), 'E-mail deve usar o endereço canônico do artigo.');
 $history = $auth->handle('GET', $slug . '/history', [], $origin);
 check($history->status === 200 && $history->body['data']['revisions'][0]['source'] === 'Texto novo', 'Revisão salva não consta no histórico.');
-$db->exec("UPDATE users SET access_level_id = 5 WHERE id = 100");
+$db->exec("UPDATE users SET role = 'admin' WHERE id = 100");
 $imageId = $db->query('SELECT id FROM images')->fetchColumn();
 $articleId = $importedPage['id'];
 $change = [
@@ -137,15 +154,21 @@ foreach (['page_templates', 'page_headings', 'page_external_links', 'page_videos
         "Salvamento não preencheu $table.");
 }
 $db->exec("DELETE FROM page_categories WHERE page_id = $articleId");
-$db->exec("UPDATE pages SET rendered_html = 'desatualizado', needs_rebuild = 1 WHERE id = $articleId");
+$db->exec("UPDATE pages SET rendered_html = 'desatualizado' WHERE id = $articleId");
+$db->exec("INSERT INTO page_rebuild_queue (page_id) VALUES ($articleId)");
 $queue = $auth->handle('GET', '/v1/catalog', ['type' => 'atualizar'], $origin);
 check($queue->status === 200 && (int) $queue->body['data']['items'][0]['id'] === (int) $articleId, 'Página pendente ausente da fila.');
+$db->prepare('INSERT INTO page_includes (page_id, target_page_id, position) VALUES (?, ?, 0), (?, ?, 1)')
+    ->execute([$targetId, $articleId, $targetId, $articleId]);
 $beforeRebuild = count($subjects);
 $rebuilt = $auth->handle('POST', $slug . '/rebuild', [], $origin, [], $csrf);
 check($rebuilt->status === 200 && $rebuilt->body['data'] === $saved->body['data'], 'Atualizar alterou a revisão ou versão de edição.');
 check((int) $db->query("SELECT COUNT(*) FROM page_revisions WHERE page_id = $articleId")->fetchColumn() === 2, 'Atualizar criou histórico.');
 check($db->query("SELECT category_id FROM page_categories WHERE page_id = $articleId ORDER BY position")->fetchAll(PDO::FETCH_COLUMN) === $expectedCategories, 'Atualizar não refez categorias.');
 check($db->query("SELECT rendered_html FROM pages WHERE id = $articleId")->fetchColumn() !== 'desatualizado', 'Atualizar não refez HTML.');
+check((int) $db->query("SELECT COUNT(*) FROM page_rebuild_queue WHERE page_id = $articleId")->fetchColumn() === 0, 'Reprocessamento não removeu a pendência.');
+check($db->query("SELECT page_id FROM page_rebuild_queue")->fetchAll(PDO::FETCH_COLUMN) === [$targetId],
+    'Páginas dependentes devem entrar na fila uma única vez.');
 check(count($subjects) === $beforeRebuild, 'Reprocessamento não deve enviar e-mail.');
 $imageKey = $db->query("SELECT f.storage_key FROM images i JOIN files f ON f.id = i.file_id WHERE i.id = $imageId")->fetchColumn();
 
@@ -199,15 +222,15 @@ $accountService->notifyProfile(100);
 check(str_contains($mailBody, 'href="https://example.test/u/' . $publicId . '"'), 'E-mail deve apontar para o perfil público do usuário.');
 check($auth->handle('POST', '/v1/auth/logout', [], $origin, [], $login->body['data']['csrf_token'])->status === 200, 'Logout migrado falhou.');
 
-$addRelated = $db->prepare("INSERT INTO pages (legacy_identifier, identifier, slug, title, kind, is_searchable, access_level_id)
-    VALUES (?, ?, ?, ?, 'article', 1, ?)");
+$addRelated = $db->prepare("INSERT INTO pages (legacy_identifier, identifier, slug, title, kind, is_searchable)
+    VALUES (?, ?, ?, ?, 'article', ?)");
 $relate = $db->prepare('INSERT INTO page_categories (page_id, category_id, position) VALUES (?, ?, ?)');
 $relate->execute([$articleId, $categoryIds[0], 1]);
 $relate->execute([$articleId, $categoryIds[1], 2]);
 $publicIds = [];
 for ($i = 1; $i <= 8; $i++) {
     $name = 'related-' . $i;
-    $addRelated->execute([$name, $name, $name, $name, $i === 8 ? 5 : 1]);
+    $addRelated->execute([$name, $name, $name, $name, $i === 8 ? 0 : 1]);
     $id = $db->lastInsertId();
     $relate->execute([$id, $categoryIds[0], 1]);
     $relate->execute([$id, $categoryIds[1], 2]);
@@ -322,9 +345,11 @@ check($auth->handle('POST', '/v1/auth/activate', [], $origin, ['code' => $newCod
 $firstLogin = $auth->handle('POST', '/v1/auth/login', [], $origin, $registration, $csrf);
 check($firstLogin->status === 200 && $firstLogin->body['data']['first_login'] === true, 'Primeiro login deve sinalizar acesso ao perfil.');
 $csrf = $firstLogin->body['data']['csrf_token'];
-$profileUpdate = $auth->handle('PUT', '/v1/profile', [], $origin, ['CIDADE' => 'Campinas', 'ENVIA_EMAIL' => 'N'], $csrf);
+$profileUpdate = $auth->handle('PUT', '/v1/profile', [], $origin, ['CIDADE' => 'Campinas', 'ENVIA_EMAIL' => 'N', 'role' => 'admin'], $csrf);
 check($profileUpdate->status === 200 && $profileUpdate->body['data']['CIDADE'] === 'Campinas'
-    && $profileUpdate->body['data']['ENVIA_EMAIL'] === 'N', 'Perfil migrado deve aceitar atualizações.');
+    && !array_key_exists('ENVIA_EMAIL', $profileUpdate->body['data'])
+    && $profileUpdate->body['data']['role'] === 'user',
+    'Perfil deve atualizar os dados sem expor a preferência removida ou alterar o papel.');
 $secondLogin = $auth->handle('POST', '/v1/auth/login', [], $origin, $registration, $csrf);
 check($secondLogin->status === 200 && $secondLogin->body['data']['first_login'] === false, 'Segundo login não deve repetir a sinalização.');
 
@@ -348,8 +373,8 @@ $home = $auth->handle('GET', '/v1/home', [], $origin)->body['data'];
 check($home['top_24h'][0]['image'] === null, 'O card público deve ocultar imagens restritas.');
 
 $db->prepare('UPDATE pages SET is_searchable = 0 WHERE id <> ?')->execute([$articleId]);
-$insert = $db->prepare("INSERT INTO pages (legacy_identifier, identifier, slug, title, kind, source, is_searchable, access_level_id, view_count)
-    VALUES (?, ?, ?, ?, 'article', ?, ?, 1, 100)");
+$insert = $db->prepare("INSERT INTO pages (legacy_identifier, identifier, slug, title, kind, source, is_searchable, view_count)
+    VALUES (?, ?, ?, ?, 'article', ?, ?, 100)");
 foreach ([['Sem-Conteudo', " \n\t ", 1], ['Fora-Da-Busca', 'Texto de teste', 0]] as [$title, $source, $searchable]) {
     $identifier = strtolower($title);
     $insert->execute([$identifier, $identifier, $title, $title, $source, $searchable]);
