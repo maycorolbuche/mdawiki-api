@@ -43,7 +43,7 @@ As imagens raster são limitadas a 500×500, a miniatura a 100×100 e a capa é 
 
 Os arquivos ficam em `MEDIA_ROOT/wiki`, `MEDIA_ROOT/wiki_mini` e `MEDIA_ROOT/wiki_cp`, servidos por `/media/wiki/...`, `/media/wiki_mini/...` e `/media/wiki_cp/...`. Os caminhos `@imgs_wiki*` continuam gravados no banco e são convertidos em URLs públicas somente na leitura. Esses diretórios precisam permitir escrita pelo PHP. Habilite **GD** no PHP para gerar as versões raster; o Composer e o CI incluem essa extensão. Não há nova variável de ambiente nem alteração de esquema.
 
-O front envia base64 diretamente no PUT da página. URLs locais retornadas pelo antigo POST `/v1/media` continuam aceitas por compatibilidade e são convertidas em base64, sem buscar URLs externas. Remover limpa os três campos e os derivados dessa página; restaurar ou reprocessar regenera os arquivos a partir da fonte armazenada, sem depender de um upload antigo. `bin/import-media.php` também importa as pastas de miniaturas e capas do acervo legado.
+O front envia base64 diretamente no PUT da página. URLs locais retornadas pelo antigo POST `/v1/media` continuam aceitas por compatibilidade e são convertidas em base64, sem buscar URLs externas. Remover limpa os três campos e os derivados dessa página; restaurar ou reprocessar regenera os arquivos a partir da fonte armazenada, sem depender de um upload antigo.
 
 
 ### E-mails da API
@@ -58,11 +58,11 @@ A migração `004_drop_mail_configuration.sql` remove as três tabelas de config
 
 ### Cadastro na base migrada
 
-Em uma instalação existente, execute `php bin/migrate-normalized-registration.php` no banco migrado para habilitar cadastro, ativação e reenvio de código. O importador cria as tabelas em novas migrações. As contas novas usam o AUTO_INCREMENT de `users.id`. O importador preserva os IDs do legado e deve ser executado em uma base vazia para evitar conflitos com contas criadas na API. IDs existentes são preservados ao atualizar a instalação.
+Em uma instalação existente, execute `php bin/migrate-normalized-registration.php` no banco migrado para habilitar cadastro, ativação e reenvio de código. As contas novas usam o AUTO_INCREMENT de `users.id`. IDs existentes são preservados ao atualizar a instalação.
 
 ### Logs de erros
 
-Em uma instalação existente, execute `php bin/migrate-system-error-logs.php` uma vez para criar `system_error_logs` no banco da API. O importador também cria a tabela automaticamente. Falhas de e-mail, inclusive nas retentativas do cron, registram data, etapa, código do erro e metadados de diagnóstico. A tabela não armazena credenciais, destinatários nem o conteúdo da mensagem.
+Em uma instalação existente, execute `php bin/migrate-system-error-logs.php` uma vez para criar `system_error_logs` no banco da API. Falhas de e-mail, inclusive nas retentativas do cron, registram data, etapa, código do erro e metadados de diagnóstico. A tabela não armazena credenciais, destinatários nem o conteúdo da mensagem.
 
 ```sql
 SELECT id, created_at, error_code, message, context

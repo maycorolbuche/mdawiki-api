@@ -11,131 +11,37 @@ function check(bool $condition, string $message): void
 
 $server = 'mysql:host=127.0.0.1;port=3306;charset=utf8mb4';
 $db = new PDO($server, 'root', 'test', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
-$db->exec('CREATE DATABASE migration_source');
-$db->exec('CREATE DATABASE migration_target');
-$db->exec('USE migration_source');
-$db->exec(file_get_contents(__DIR__ . '/schema.mysql.sql'));
-$db->exec(file_get_contents(__DIR__ . '/schema.migration.mysql.sql'));
+$db->exec('CREATE DATABASE normalized_test CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');
+$db->exec('USE normalized_test');
+foreach (['001_content_and_media.sql', '002_remaining_legacy_tables.sql', '005_system_error_logs.sql',
+    '006_normalized_registration.sql', '008_page_visits.sql', '009_page_missing_links.sql'] as $migration) {
+    $db->exec(file_get_contents(__DIR__ . '/../migrations/' . $migration));
+}
 
 $a = 'data:image/gif;base64,R0lGODlhAQABAIAAAP///////yH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
-$b = 'data:image/gif;base64,' . base64_encode(base64_decode(explode(',', $a, 2)[1], true) . "\0");
-$page = $db->prepare('INSERT INTO PAGINAS (IDENT, NOME_URL, NOME, CONTEUDO_CODE, DT_ALTERACAO)
-    VALUES (?, ?, ?, ?, ?)');
-$page->execute(['article', 'Artigo_Exemplo', 'EspéciAlidade Teste', "Primeira versão\n==Introdução==", '2026-11-20 09:00:00']);
-$page->execute(['imagem@sample', 'Imagem@Sample', 'Imagem', $a, '2026-11-20 09:00:00']);
-$page->execute(['doc@manual', 'Manual', 'ESPEcialidade Teste', 'Documento obsoleto', '2026-11-20 09:00:00']);
-$page->execute(['documentacao', 'DOC@Manual', 'Outro documento', 'Documento obsoleto', '2026-11-20 09:00:00']);
-$revision = $db->prepare("INSERT INTO PAGINAS_LOGS (NOME_URL_ID, IDENT, NOME_URL, CONTEUDO_CODE)
-    VALUES (?, 'imagem@sample', 'Imagem@Sample', ?)");
-$revision->execute([2, $a]);
-$revision->execute([5, $b]);
-$revision->execute([9, $a]);
-$db->exec("INSERT INTO PAGINAS_CATEGORIAS (IDENT, NOME_URL, CATEGORIA_IDENT, CATEGORIA_URL) VALUES ('article', 'Artigo_Exemplo', 'category', 'Categoria')");
-$db->exec('DROP TABLE ACESSOS_LOGS, EMAIL_LOGS, CRONJOB_LOGS');
-$db->exec("INSERT INTO COMENTARIOS (ID, NOME_URL) VALUES (1, 'Artigo_Exemplo'), (2, 'Pagina_Ausente')");
-$insertUser = $db->prepare("INSERT INTO USUARIOS (ID, EMAIL, SENHA, ATIVO, FOTO_64) VALUES (?, ?, ?, 'S', ?)");
-$insertUser->execute([100, 'migrated@example.test', md5('legacy-password'), $a]);
-$insertUser->execute([101, 'reset@example.test', 'unsupported', null]);
-$db->exec("INSERT INTO CONFIG (CHAVE, VALOR) VALUES ('test', 'first')");
-
-$db->exec("UPDATE PAGINAS SET USU_CADASTRO = 'migrated@example.test', DT_CADASTRO = '2020-01-01 00:00:00'");
-$db->exec("UPDATE PAGINAS_LOGS SET EMAIL = 'migrated@example.test'");
-$db->exec('USE migration_target');
-$root = sys_get_temp_dir() . '/mdawiki-migration-' . bin2hex(random_bytes(8));
-putenv("MEDIA_ROOT={$root}");
-putenv('DB_HOST=127.0.0.1');
-putenv('DB_PORT=3306');
-putenv('DB_DATABASE=migration_target');
-putenv('DB_USERNAME=root');
-putenv('DB_PASSWORD=test');
-putenv('DB_CHARSET=utf8mb4');
-putenv('MIGRATION_DB_HOST=127.0.0.1');
-putenv('MIGRATION_DB_PORT=3306');
-putenv('MIGRATION_DB_DATABASE=migration_source');
-putenv('MIGRATION_DB_CHARSET=utf8mb4');
-putenv('MIGRATION_DB_USERNAME=root');
-putenv('MIGRATION_DB_PASSWORD=test');
-$run = static function (int $expected = 0): void {
-    passthru(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../bin/migrate-legacy.php'), $status);
-    check($status === $expected, 'Código de saída inesperado do importador.');
-};
-
-foreach (['mail_template_recipients', 'mail_templates', 'mail_profile_settings'] as $obsolete) {
-    $db->exec("CREATE TABLE {$obsolete} (id INT PRIMARY KEY)");
-}
-$run();
-check((int) $db->query("SELECT COUNT(*) FROM information_schema.tables
-    WHERE table_schema = DATABASE() AND table_name IN ('mail_template_recipients', 'mail_templates', 'mail_profile_settings')")->fetchColumn() === 0,
-    'As tabelas obsoletas de e-mail devem ser removidas da base migrada.');
-foreach (['pages', 'images', 'image_revisions'] as $table) {
-    check((int) $db->query("SELECT MIN(created_by) FROM $table")->fetchColumn() === 100,
-        "A migração deve localizar o autor por e-mail e gravar o ID em $table.");
-}
-check($db->query('SELECT created_at FROM images')->fetchColumn() === '2020-01-01 00:00:00',
-    'Data de criação da imagem deve vir do legado.');
-
-check((int) $db->query('SELECT COUNT(*) FROM page_categories')->fetchColumn() === 0, 'Categoria derivada foi importada.');
-check((int) $db->query("SELECT needs_rebuild FROM pages WHERE legacy_identifier = 'article'")->fetchColumn() === 0, 'O importador deve concluir a reconstrução.');
-check(array_column($db->query('SHOW COLUMNS FROM page_categories')->fetchAll(PDO::FETCH_ASSOC), 'Field')
-    === ['id', 'page_id', 'category_id', 'position'], 'Estrutura de categorias incorreta.');
-$importedPage = $db->query("SELECT id, slug, identifier FROM pages WHERE legacy_identifier = 'article'")->fetch(PDO::FETCH_ASSOC);
-check($importedPage['slug'] === 'EspéciAlidade-Teste' && $importedPage['identifier'] === 'especialidade-teste', 'Slug e identificador incorretos.');
-check((int) $db->query('SELECT page_id FROM comments WHERE id = 1')->fetchColumn() === (int) $importedPage['id'], 'Comentário sem vínculo por ID.');
-check($db->query('SELECT page_id FROM comments WHERE id = 2')->fetchColumn() === null, 'Referência inexistente recebeu ID.');
-check($db->query('SELECT password_hash FROM users WHERE id = 101')->fetchColumn() === '', 'Hash incompatível não ficou vazio.');
-check($db->query('SELECT password_hash FROM users WHERE id = 100')->fetchColumn() === md5('legacy-password'), 'Hash compatível perdido.');
-check(preg_match('/^[a-f0-9]{64}\.gif$/D', $db->query('SELECT avatar_filename FROM users WHERE id = 100')->fetchColumn()) === 1, 'Avatar não vinculado.');
-$db->exec("UPDATE users SET password_hash = 'reset-in-destination' WHERE id = 101");
-check((int) $db->query('SELECT COUNT(*) FROM page_headings')->fetchColumn() === 1, 'Reprocessamento não reconstruiu subtítulos.');
-$db->exec('DROP TABLE page_headings');
-$removedMedia = $root . '/' . $db->query("SELECT storage_key FROM files WHERE storage_key LIKE 'articles/%' LIMIT 1")->fetchColumn();
-check(unlink($removedMedia), 'A simulação de limpeza de mídia falhou.');
-$publicId = $db->query('SELECT public_id FROM users WHERE id = 100')->fetchColumn();
-$run();
-check($db->query('SELECT public_id FROM users WHERE id = 100')->fetchColumn() === $publicId, 'Perfil público mudou na reexecução.');
-check(is_file($removedMedia), 'Reexecução não recuperou arquivo removido.');
-check((int) $db->query('SELECT COUNT(*) FROM page_headings')->fetchColumn() === 1, 'Reexecução não recriou a tabela e seus subtítulos.');
-check($db->query('SELECT password_hash FROM users WHERE id = 101')->fetchColumn() === 'reset-in-destination', 'Reexecução sobrescreveu senha.');
-check($db->query("SELECT setting_value FROM settings WHERE setting_key = 'test'")->fetchColumn() === 'first', 'Configuração não importada.');
-check((int) $db->query('SELECT COUNT(*) FROM pages')->fetchColumn() === 1, 'Duplicação de páginas.');
-check((int) $db->query('SELECT COUNT(*) FROM files')->fetchColumn() === 3, 'Deduplicação por pasta incorreta.');
-check($db->query('SELECT GROUP_CONCAT(legacy_revision_number ORDER BY legacy_revision_number) FROM image_revisions')->fetchColumn() === '2,5,9',
-    'Sequência inicial incorreta.');
-$links = $db->query('SELECT file_id FROM image_revisions ORDER BY legacy_revision_number')->fetchAll(PDO::FETCH_COLUMN);
-check(count($links) === 3 && $links[0] === $links[2] && $links[0] !== $links[1], 'Histórico A → B → A incorreto.');
-foreach ($db->query('SELECT sha256, storage_key FROM files') as $file) {
-    check(preg_match('~^(articles|users)/[a-f0-9]{64}\.gif$~D', $file['storage_key']) === 1, 'A chave deve incluir a pasta de mídia.');
-    check(hash_file('sha256', $root . '/' . $file['storage_key']) === $file['sha256'], 'Binário incorreto.');
-}
-
-$db->exec('USE migration_source');
-$db->exec("UPDATE PAGINAS SET CONTEUDO_CODE = 'Editado', DT_ALTERACAO = '2026-11-20 10:00:00' WHERE IDENT = 'article'");
-$revision->execute([3, $b]);
-$db->exec('USE migration_target');
-$run();
-check($db->query("SELECT source FROM pages WHERE legacy_identifier = 'article'")->fetchColumn() === 'Editado',
-    'Artigo alterado não atualizado.');
-check($db->query('SELECT GROUP_CONCAT(legacy_revision_number ORDER BY legacy_revision_number) FROM image_revisions')->fetchColumn() === '2,3,5,9',
-    'Inserção tardia deixou buracos.');
-
-$db->exec('USE migration_source');
-$page->execute(['collision', 'Conflito_Legado', 'ESPEcialidade Teste', 'Não deve sobrescrever', '2026-11-20 09:00:00']);
-$revision->execute([15, 'data:image/gif;base64,?']);
-$insertUser->execute([102, 'broken-avatar@example.test', 'unsupported', 'data:image/gif;base64,?']);
-$db->exec('USE migration_target');
-$run(1);
-check((int) $db->query('SELECT COUNT(*) FROM image_revisions')->fetchColumn() === 4, 'Falha parcial gravou revisão inválida.');
-echo "Migração testada com reexecução, atualização e deduplicação.\n";
-
-check((int) $db->query("SELECT COUNT(*) FROM files WHERE storage_key LIKE 'users/%'")->fetchColumn() === 1, 'Pasta de avatares incorreta.');
-check((int) $db->query("SELECT COUNT(*) FROM migration_errors WHERE source_table = 'USUARIOS' AND source_field = 'FOTO_64'")->fetchColumn() === 1, 'Erro de avatar não registrado.');
-check((int) $db->query("SELECT COUNT(*) FROM migration_errors WHERE source_table = 'PAGINAS_LOGS' AND source_field = 'CONTEUDO_CODE'")->fetchColumn() === 1, 'Erro de revisão não registrado.');
-
-check((int) $db->query("SELECT COUNT(*) FROM pages WHERE legacy_identifier = 'collision'")->fetchColumn() === 0, 'Colisão sobrescreveu uma página.');
-check((int) $db->query("SELECT COUNT(*) FROM migration_errors WHERE source_table = 'PAGINAS' AND source_field = 'NOME'")->fetchColumn() === 1, 'Colisão não registrada.');
-
-
-$config = require dirname(__DIR__) . '/config/bootstrap.php';
+$gif = base64_decode(explode(',', $a, 2)[1], true);
+$b = 'data:image/gif;base64,' . base64_encode($gif . "\0");
+$root = sys_get_temp_dir() . '/mdawiki-normalized-' . bin2hex(random_bytes(8));
+mkdir($root . '/articles', 0700, true);
+mkdir($root . '/users', 0700);
+$hash = hash('sha256', $gif);
+$key = 'articles/' . $hash . '.gif';
+$avatar = $hash . '.gif';
+file_put_contents($root . '/' . $key, $gif);
+file_put_contents($root . '/users/' . $avatar, $gif);
+$publicId = str_repeat('a', 32);
+$db->prepare("INSERT INTO users (id, email, name, password_hash, is_active, public_id, avatar_filename, access_level_id)
+    VALUES (100, 'migrated@example.test', 'Editor', ?, 1, ?, ?, 1)")->execute([md5('legacy-password'), $publicId, $avatar]);
+$db->prepare("INSERT INTO files (id, sha256, storage_key, mime_type, size_bytes) VALUES (1, ?, ?, 'image/gif', ?)")
+    ->execute([$hash, $key, strlen($gif)]);
+$db->exec("INSERT INTO images (identifier, slug, title, meta, file_id, legacy_identifier, access_level_id, created_by, created_at)
+    VALUES ('sample', 'Sample', 'Imagem', '{\"width\":1}', 1, 'imagem@sample', 1, 100, '2020-01-01')");
+$db->exec("INSERT INTO image_revisions (image_id, file_id, created_by, created_at)
+    VALUES (1, 1, 100, '2020-01-01'), (1, 1, 100, '2020-01-02'), (1, 1, 100, '2020-01-03'), (1, 1, 100, '2020-01-04')");
+$db->exec("INSERT INTO pages (id, legacy_identifier, identifier, slug, title, source, rendered_html, is_searchable, access_level_id, kind)
+    VALUES (1, 'article', 'especialidade-teste', 'EspéciAlidade-Teste', 'EspéciAlidade Teste', 'Editado', '<p>Editado</p>', 1, 1, 'article')");
+$importedPage = ['id' => 1];
+require dirname(__DIR__) . '/config/bootstrap.php';
 $normalized = new MDAWiki\NormalizedPageRepository(new MDAWiki\Database($db), 1, 'https://api.example.test/media');
 $preview = new MDAWiki\Application(static fn () => $normalized, [
     'normalized_read_only' => true, 'origins' => [], 'frontend_url' => 'https://example.test',
@@ -293,23 +199,15 @@ $accountService->notifyProfile(100);
 check(str_contains($mailBody, 'href="https://example.test/u/' . $publicId . '"'), 'E-mail deve apontar para o perfil público do usuário.');
 check($auth->handle('POST', '/v1/auth/logout', [], $origin, [], $login->body['data']['csrf_token'])->status === 200, 'Logout migrado falhou.');
 
-$db->exec('USE migration_source');
-$page->execute(['abc', 'Abc', 'ABC', 'Conteúdo da categoria no legado', '2026-11-21 10:00:00']);
-$db->exec('USE migration_target');
-$run(1);
-$category = $db->query("SELECT id, source FROM pages WHERE identifier = 'abc'")->fetch(PDO::FETCH_ASSOC);
-check((int) $category['id'] === (int) $abc->body['data']['id']
-    && $category['source'] === 'Conteúdo da categoria no legado', 'A importação deve reaproveitar o ID da categoria vazia.');
-
-$addRelated = $db->prepare("INSERT INTO pages (legacy_identifier, identifier, slug, title, kind, is_searchable, access_level_id, legacy_checksum)
-    VALUES (?, ?, ?, ?, 'article', 1, ?, ?)");
+$addRelated = $db->prepare("INSERT INTO pages (legacy_identifier, identifier, slug, title, kind, is_searchable, access_level_id)
+    VALUES (?, ?, ?, ?, 'article', 1, ?)");
 $relate = $db->prepare('INSERT INTO page_categories (page_id, category_id, position) VALUES (?, ?, ?)');
 $relate->execute([$articleId, $categoryIds[0], 1]);
 $relate->execute([$articleId, $categoryIds[1], 2]);
 $publicIds = [];
 for ($i = 1; $i <= 8; $i++) {
     $name = 'related-' . $i;
-    $addRelated->execute([$name, $name, $name, $name, $i === 8 ? 5 : 1, str_repeat('0', 64)]);
+    $addRelated->execute([$name, $name, $name, $name, $i === 8 ? 5 : 1]);
     $id = $db->lastInsertId();
     $relate->execute([$id, $categoryIds[0], 1]);
     $relate->execute([$id, $categoryIds[1], 2]);
@@ -446,11 +344,11 @@ $home = $auth->handle('GET', '/v1/home', [], $origin)->body['data'];
 check($home['top_24h'][0]['image'] === null, 'O card público deve ocultar imagens restritas.');
 
 $db->prepare('UPDATE pages SET is_searchable = 0 WHERE id <> ?')->execute([$articleId]);
-$insert = $db->prepare("INSERT INTO pages (legacy_identifier, identifier, slug, title, kind, source, is_searchable, access_level_id, legacy_checksum, view_count)
-    VALUES (?, ?, ?, ?, 'article', ?, ?, 1, ?, 100)");
+$insert = $db->prepare("INSERT INTO pages (legacy_identifier, identifier, slug, title, kind, source, is_searchable, access_level_id, view_count)
+    VALUES (?, ?, ?, ?, 'article', ?, ?, 1, 100)");
 foreach ([['Sem-Conteudo', " \n\t ", 1], ['Fora-Da-Busca', 'Texto de teste', 0]] as [$title, $source, $searchable]) {
     $identifier = strtolower($title);
-    $insert->execute([$identifier, $identifier, $title, $title, $source, $searchable, str_repeat('0', 64)]);
+    $insert->execute([$identifier, $identifier, $title, $title, $source, $searchable]);
     $db->prepare('INSERT INTO page_visits (page_id, visited_at) VALUES (?, ?)')->execute([$db->lastInsertId(), time()]);
 }
 $home = $auth->handle('GET', '/v1/home', [], $origin)->body['data'];
