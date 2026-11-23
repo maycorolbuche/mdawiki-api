@@ -37,8 +37,8 @@ final class NormalizedImages
         }
         $members = $this->db->rows("SELECT DISTINCT p.id, p.slug, COALESCE(p.title, p.slug) AS title
             FROM page_media m JOIN pages p ON p.id = m.page_id
-            WHERE m.image_id = ? AND p.is_searchable = 1 AND COALESCE(p.access_level_id, 1) <= ?
-            AND p.legacy_identifier NOT LIKE 'page@%' ORDER BY title, p.id", [$image['id'], $this->config['public_max_level']]);
+            WHERE m.image_id = ? AND p.is_searchable = 1
+            AND p.legacy_identifier NOT LIKE 'page@%' ORDER BY title, p.id", [$image['id']]);
         $history = $this->db->rows("SELECT r.id, r.created_at, f.storage_key,
             COALESCE(NULLIF(u.display_name, ''), NULLIF(u.name, '')) AS author, CASE WHEN u.is_active = 1 THEN u.public_id END AS author_profile_id FROM image_revisions r
             JOIN files f ON f.id = r.file_id LEFT JOIN users u ON u.id = r.created_by
