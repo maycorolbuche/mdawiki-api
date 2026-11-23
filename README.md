@@ -13,7 +13,7 @@ php tests/run.php
 php tests/features.php
 ```
 
-Em produção a raiz HTTP deve apontar exclusivamente para `public/`. `.env`, `src`, `vendor` e `var` ficam fora da raiz pública. A conta do banco precisa de leitura e escrita nas tabelas existentes. Instalação não executa DDL.
+Em produção a raiz HTTP deve apontar exclusivamente para `public/`. `.env`, `src`, `vendor` e `var` ficam fora da raiz pública. A conta do banco precisa de leitura e escrita nas tabelas existentes. A API não executa DDL. Para inicializar uma base normalizada vazia, importe [migrations/001_database.sql](migrations/001_database.sql) antes de publicar.
 
 - `GET /v1/pages`, `/v1/pages/{slug}`: exportação pública e artigos, incluindo relações e redirecionamentos.
 - `/v1/auth/*`: sessão/CSRF, login, logout, cadastro, ativação, recuperação e redefinição de senha.
@@ -54,15 +54,15 @@ Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE` (`tls`, `ssl` ou `none`), `SMT
 
 Os assuntos usam `[page][new|update]`, `[img][new|update|delete]` e `[user][new|update]`. Reprocessamento e gravações sem mudança não geram aviso. Falhas nas cópias e notificações opcionais entram na fila em `STORAGE_DIR/mail-outbox`, sem reverter o que foi salvo. Falha no envio obrigatório mantém o tratamento transacional dos fluxos de conta.
 
-A migração `004_drop_mail_configuration.sql` remove as três tabelas de configuração de e-mail na base normalizada. A API deixou de consultar o SMTP e os modelos legados. O cron existente (`bin/maintenance.php` ou `bin/send-mail.php`) processa as novas falhas após cinco minutos, com até dez tentativas por mensagem. A fila antiga no banco fica fora desse processamento.
+O cron existente (`bin/maintenance.php` ou `bin/send-mail.php`) processa as novas falhas após cinco minutos, com até dez tentativas por mensagem. A fila antiga no banco fica fora desse processamento.
 
 ### Cadastro na base migrada
 
-Em uma instalação existente, execute `php bin/migrate-normalized-registration.php` no banco migrado para habilitar cadastro, ativação e reenvio de código. As contas novas usam o AUTO_INCREMENT de `users.id`. IDs existentes são preservados ao atualizar a instalação.
+As contas novas usam o AUTO_INCREMENT de `users.id`. IDs existentes são preservados ao atualizar a instalação.
 
 ### Logs de erros
 
-Em uma instalação existente, execute `php bin/migrate-system-error-logs.php` uma vez para criar `system_error_logs` no banco da API. Falhas de e-mail, inclusive nas retentativas do cron, registram data, etapa, código do erro e metadados de diagnóstico. A tabela não armazena credenciais, destinatários nem o conteúdo da mensagem.
+Falhas de e-mail, inclusive nas retentativas do cron, registram data, etapa, código do erro e metadados de diagnóstico. A tabela não armazena credenciais, destinatários nem o conteúdo da mensagem.
 
 ```sql
 SELECT id, created_at, error_code, message, context
@@ -83,6 +83,6 @@ Os avatares já cadastrados e a importação do acervo são preservados. Essa re
 Em `dev`, aponte `DB_*` para a base importada. A API reconhece a estrutura pelo banco conectado. A base importada atende leitura pública, exportação, busca, início e contadores básicos. Autenticação, edição, histórico, catálogos e reconstrução dos vínculos da base migrada ainda estão em adaptação.
 
 
-A home da base migrada usa visitas com horário para calcular os rankings móveis de 24 horas, 7 e 30 dias. Em instalações existentes, execute `php bin/migrate-page-visits.php`. A coleta começa após a implantação, pois os contadores históricos não têm horário individual. O cron de manutenção remove registros com mais de 31 dias.
+A home da base migrada usa visitas com horário para calcular os rankings móveis de 24 horas, 7 e 30 dias. A coleta começa após a implantação, pois os contadores históricos não têm horário individual. O cron de manutenção remove registros com mais de 31 dias.
 
-O card **Nos ajude com esses conteúdos** sorteia até dez destinos internos inexistentes de páginas públicas buscáveis. Em instalações existentes, execute `php bin/migrate-page-missing-links.php` e, com o código novo publicado, `php bin/rebuild-normalized-pages.php` para preencher os vínculos dos artigos existentes. Novas gravações mantêm a tabela atualizada.
+O card **Nos ajude com esses conteúdos** sorteia até dez destinos internos inexistentes de páginas públicas buscáveis. Execute `php bin/rebuild-normalized-pages.php` para preencher os vínculos dos artigos existentes. Novas gravações mantêm a tabela atualizada.
