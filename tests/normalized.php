@@ -339,6 +339,10 @@ $db->prepare('INSERT INTO page_media (page_id, image_id, position, is_template) 
 $home = $auth->handle('GET', '/v1/home', [], $origin)->body['data'];
 check((int) $home['top_24h'][0]['views'] === 1 && (int) $home['top_week'][0]['views'] === 2, 'Visita antiga só deve contar no ranking semanal.');
 check(str_contains($home['top_24h'][0]['image'] ?? '', '/media/articles/'), 'O card deve receber a URL da imagem vinculada.');
+$article = $auth->handle('GET', '/v1/pages/EspéciAlidade-Teste')->body['data'];
+check($article['image'] === $home['top_24h'][0]['image'], 'O artigo e a home devem usar a mesma imagem.');
+$export = $auth->handle('GET', '/v1/pages', ['limit' => 1])->body['data'];
+check($export[0]['image'] === $article['image'], 'O build estático deve receber a imagem do artigo.');
 $db->prepare('UPDATE images SET access_level_id = 5 WHERE id = ?')->execute([$imageId]);
 $home = $auth->handle('GET', '/v1/home', [], $origin)->body['data'];
 check($home['top_24h'][0]['image'] === null, 'O card público deve ocultar imagens restritas.');

@@ -6,8 +6,12 @@ namespace MDAWiki;
 final class NormalizedPageRepository implements PageRepository
 {
     private const PUBLIC_PAGE = "p.is_searchable = 1 AND COALESCE(p.access_level_id, 1) <= ? AND CHAR_LENGTH(p.identifier) > 1 AND p.legacy_identifier NOT LIKE 'page@%'";
+    private const COVER_IMAGE = '(SELECT f.storage_key FROM page_media m
+            JOIN images i ON i.id = m.image_id JOIN files f ON f.id = i.file_id
+            WHERE m.page_id = p.id AND COALESCE(m.is_template, 0) = 0 AND i.access_level_id <= ?
+            ORDER BY m.position, m.id LIMIT 1)';
     private const SELECT_PAGE = 'SELECT p.id, p.slug, p.title, p.kind, p.rendered_html AS html,
-        p.plain_text AS text, COALESCE(p.rebuilt_at, p.updated_at) AS updated_at
+        p.plain_text AS text, COALESCE(p.rebuilt_at, p.updated_at) AS updated_at, ' . self::COVER_IMAGE . ' AS image
         FROM pages p';
 
     public function __construct(private readonly Database $db, private readonly int $maxLevel, private readonly string $mediaUrl, private readonly string $frontendUrl = 'https://mda.wiki.br')
@@ -20,7 +24,7 @@ final class NormalizedPageRepository implements PageRepository
             throw new \InvalidArgumentException('Cursor inválido para a base migrada.');
         }
         $rows = $this->db->rows(self::SELECT_PAGE . ' WHERE ' . self::PUBLIC_PAGE
-            . ' AND p.id > CAST(? AS UNSIGNED) ORDER BY p.id LIMIT ?', [$this->maxLevel, $after ?: '0', $limit]);
+            . ' AND p.id > CAST(? AS UNSIGNED) ORDER BY p.id LIMIT ?', [$this->maxLevel, $this->maxLevel, $after ?: '0', $limit]);
 
         return array_map($this->withRelations(...), $rows);
     }
@@ -46,7 +50,7 @@ final class NormalizedPageRepository implements PageRepository
         }
         $row = $this->db->one(self::SELECT_PAGE . ' WHERE ' . self::PUBLIC_PAGE
             . ' AND (p.identifier = ? OR p.legacy_identifier = ?) ORDER BY p.identifier = ? DESC LIMIT 1',
-            [$this->maxLevel, $identifier, Database::id($slug), $identifier]);
+            [$this->maxLevel, $this->maxLevel, $identifier, Database::id($slug), $identifier]);
         if ($row === null) {
             return null;
         }
@@ -148,10 +152,7 @@ final class NormalizedPageRepository implements PageRepository
 
     public function home(): array
     {
-        $columns = self::CARD . ', p.plain_text AS description, (SELECT f.storage_key FROM page_media m
-            JOIN images i ON i.id = m.image_id JOIN files f ON f.id = i.file_id
-            WHERE m.page_id = p.id AND COALESCE(m.is_template, 0) = 0 AND i.access_level_id <= ?
-            ORDER BY m.position, m.id LIMIT 1) AS image';
+        $columns = self::CARD . ', p.plain_text AS description, ' . self::COVER_IMAGE . ' AS image';
         $sql = 'SELECT ' . $columns . ' FROM pages p WHERE ' . self::PUBLIC_PAGE;
         $withContent = " AND p.source REGEXP '[^[:space:]]'";
         $levels = [$this->maxLevel, $this->maxLevel];
@@ -190,7 +191,7 @@ final class NormalizedPageRepository implements PageRepository
     {
         $row['id'] = (string) $row['id'];
         $row['description'] ??= '';
-        $row['image'] = empty($row['image']) ? null : rtrim($this->mediaUrl, '/') . '/' . $row['image'];
+        $row['image'] = $this->imageUrl($row['image'] ?? null);
         return $row;
     }
 
@@ -202,9 +203,15 @@ final class NormalizedPageRepository implements PageRepository
             [$this->maxLevel, $key, $this->maxLevel]) !== null;
     }
 
+    private function imageUrl(?string $key): ?string
+    {
+        return $key ? rtrim($this->mediaUrl, '/') . '/' . $key : null;
+    }
+
     private function present(array $row): array
     {
         $row['id'] = (string) $row['id'];
+        $row['image'] = $this->imageUrl($row['image'] ?? null);
         return $row;
     }
 }
