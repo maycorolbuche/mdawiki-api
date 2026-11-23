@@ -36,7 +36,7 @@ final class WikiRenderer
             if (in_array($id,$stack,true)) throw new HttpError(422,'include_cycle','Inclusão circular: '.$name);
             if ($this->config['normalized_editor'] ?? false) {
                 $row = NormalizedPageRepository::lookup($this->db, $name);
-                $p = $row && $row['is_searchable'] && (int) ($row['access_level_id'] ?? 1) <= (int) $this->config['public_max_level']
+                $p = $row && $row['is_searchable']
                     && !str_starts_with($row['legacy_identifier'], 'page@') ? ['CONTEUDO_CODE' => $row['source']] : null;
             } else {
                 $p=$this->db->one("SELECT CONTEUDO_CODE FROM PAGINAS WHERE IDENT = ? AND BUSCA = 'S' AND COALESCE(NIVEL,1) <= ? AND IDENT NOT LIKE 'page@%'",[$id,(int)$this->config['public_max_level']]);

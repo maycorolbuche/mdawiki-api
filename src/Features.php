@@ -121,13 +121,13 @@ final class Features
         [$limit,$offset]=$this->bounds($q);$type=Database::id(is_string($q['type'] ?? null)?$q['type']:'paginas');$filter=$this->publicFilter();$params=[];
         if (($this->config['normalized_editor'] ?? false) && $type === 'atualizar') {
             $user = $this->accounts->current(true);
-            if ((int) $user['NIVEL'] < 5) {
+            if ($user['role'] !== 'admin') {
                 throw new HttpError(403, 'permission_denied', 'Acesso restrito a administradores.');
             }
-            $rows = $this->db->rows("SELECT id, slug, COALESCE(title, slug) AS title FROM pages
-                WHERE needs_rebuild = 1 AND kind <> 'image' AND legacy_identifier NOT LIKE 'page@%'
-                AND COALESCE(access_level_id, 1) <= ? ORDER BY title, id LIMIT ? OFFSET ?",
-                [(int) $user['NIVEL'], $limit + 1, $offset]);
+            $rows = $this->db->rows("SELECT p.id, p.slug, COALESCE(p.title, p.slug) AS title
+                FROM page_rebuild_queue q JOIN pages p ON p.id = q.page_id
+                WHERE p.kind <> 'image' AND p.legacy_identifier NOT LIKE 'page@%'
+                ORDER BY title, p.id LIMIT ? OFFSET ?", [$limit + 1, $offset]);
             return ['type' => $type, 'items' => array_slice($rows, 0, $limit),
                 'next_offset' => count($rows) > $limit ? $offset + $limit : null];
         }
