@@ -4,4 +4,4 @@ CREATE TABLE IF NOT EXISTS page_visits (
     visited_at BIGINT UNSIGNED NOT NULL,
     INDEX page_visits_window (visited_at, page_id),
     FOREIGN KEY (page_id) REFERENCES pages (id) ON DELETE CASCADE
-) ENGINE=InnoDB;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

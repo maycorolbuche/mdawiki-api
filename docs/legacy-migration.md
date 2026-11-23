@@ -11,7 +11,7 @@ MIGRATION_DB_PASSWORD=
 MIGRATION_DB_CHARSET=latin1
 ```
 
-A origem é acessada em modo somente leitura. Ajuste `MIGRATION_DB_CHARSET` conforme a conexão com o legado. O destino usa `utf8mb4`. Crie previamente a base de destino como uma base separada. Use PHP CLI com `pdo_mysql`, `mbstring`, `dom` e `intl`. A conta de origem precisa de permissão SELECT. A de destino precisa de CREATE, REFERENCES, SELECT, INSERT, UPDATE e DELETE. Bases de destino antigas com índice único em `files.sha256` também precisam de ALTER.
+A origem é acessada em modo somente leitura. Ajuste `MIGRATION_DB_CHARSET` conforme a conexão com o legado. O destino usa `utf8mb4`. Crie previamente a base de destino como uma base separada. Use PHP CLI com `pdo_mysql`, `mbstring`, `dom` e `intl`. A conta de origem precisa de permissão SELECT. A de destino precisa de CREATE, ALTER, DROP, REFERENCES, SELECT, INSERT, UPDATE e DELETE. Crie a base de destino com charset `utf8mb4` e collation `utf8mb4_unicode_ci`, e configure `DB_CHARSET=utf8mb4` para as conexões da API com essa base.
 
 ```bash
 php bin/migrate-legacy.php
