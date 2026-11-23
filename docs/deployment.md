@@ -1,6 +1,6 @@
 # Publicar a API independente
 
-O frontend depende somente desta API. Não há includes, chamadas HTTP ou cron executado no `mdawiki-site`. O schema existente é mantido; não execute os arquivos `tests/schema.*.sql` no banco real.
+O frontend depende somente desta API. Não há includes, chamadas HTTP ou cron executado no `mdawiki-site`. Para instalações novas, importe [o schema consolidado](../migrations/001_database.sql) em uma base MySQL vazia. O arquivo cria tabelas ausentes e não converte tabelas existentes. Os arquivos `tests/schema.*.sql` são exclusivos dos testes.
 
 1. Instale PHP 8.2+ com PDO MySQL, mbstring, DOM, sessões e suporte a imagens. Rode `composer install --no-dev --optimize-autoloader` e publique também `vendor/`.
 2. A raiz HTTP deve ser **somente `public/`**. Preserve `.env`, `var/` e o acervo entre deploys. A conta MySQL agora precisa de SELECT, INSERT, UPDATE e DELETE nas tabelas existentes; não precisa de ALTER/CREATE.
