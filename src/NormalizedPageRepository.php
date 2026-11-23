@@ -5,7 +5,7 @@ namespace MDAWiki;
 
 final class NormalizedPageRepository implements PageRepository
 {
-    private const PUBLIC_PAGE = "p.is_searchable = 1 AND COALESCE(p.access_level_id, 1) <= ? AND CHAR_LENGTH(p.identifier) > 1 AND p.legacy_identifier NOT LIKE 'page@%'";
+    private const PUBLIC_PAGE = "p.is_searchable = 1 AND CHAR_LENGTH(p.identifier) > 1 AND p.legacy_identifier NOT LIKE 'page@%'";
     private const COVER_IMAGE = '(SELECT f.storage_key FROM page_media m
             JOIN images i ON i.id = m.image_id JOIN files f ON f.id = i.file_id
             WHERE m.page_id = p.id AND COALESCE(m.is_template, 0) = 0 AND i.access_level_id <= ?
@@ -24,7 +24,7 @@ final class NormalizedPageRepository implements PageRepository
             throw new \InvalidArgumentException('Cursor inválido para a base migrada.');
         }
         $rows = $this->db->rows(self::SELECT_PAGE . ' WHERE ' . self::PUBLIC_PAGE
-            . ' AND p.id > CAST(? AS UNSIGNED) ORDER BY p.id LIMIT ?', [$this->maxLevel, $this->maxLevel, $after ?: '0', $limit]);
+            . ' AND p.id > CAST(? AS UNSIGNED) ORDER BY p.id LIMIT ?', [$this->maxLevel, $after ?: '0', $limit]);
 
         return array_map($this->withRelations(...), $rows);
     }
@@ -50,7 +50,7 @@ final class NormalizedPageRepository implements PageRepository
         }
         $row = $this->db->one(self::SELECT_PAGE . ' WHERE ' . self::PUBLIC_PAGE
             . ' AND (p.identifier = ? OR p.legacy_identifier = ?) ORDER BY p.identifier = ? DESC LIMIT 1',
-            [$this->maxLevel, $this->maxLevel, $identifier, Database::id($slug), $identifier]);
+            [$this->maxLevel, $identifier, Database::id($slug), $identifier]);
         if ($row === null) {
             return null;
         }
@@ -69,19 +69,19 @@ final class NormalizedPageRepository implements PageRepository
             'own.page_id = ? AND p.id <> ?', [$page['id'], $page['id']], true);
         $categories = $this->db->rows('SELECT p.id, p.slug, p.title FROM page_categories c
             JOIN pages p ON p.id = c.category_id WHERE c.page_id = ? AND ' . self::PUBLIC_PAGE
-            . ' ORDER BY c.position, c.id', [$page['id'], $this->maxLevel]);
+            . ' ORDER BY c.position, c.id', [$page['id']]);
         $page['categories'] = array_map(static fn (array $category): array => [
             'id' => (string) $category['id'], 'slug' => $category['slug'], 'title' => $category['title'] ?? $category['slug'],
         ], $categories);
         $members = $this->db->rows('SELECT p.id, p.slug, COALESCE(p.title, p.slug) AS title
             FROM page_categories c JOIN pages p ON p.id = c.page_id WHERE c.category_id = ? AND ' . self::PUBLIC_PAGE
-            . ' ORDER BY p.title, p.id', [$page['id'], $this->maxLevel]);
+            . ' ORDER BY p.title, p.id', [$page['id']]);
         $page['category_members'] = array_map(static fn (array $member): array => [
             'id' => (string) $member['id'], 'slug' => $member['slug'], 'title' => $member['title'],
         ], $members);
         $redirect = $this->db->one('SELECT p.slug FROM page_redirects r JOIN pages p ON p.id = r.target_page_id
             WHERE r.page_id = ? AND ' . self::PUBLIC_PAGE . ' ORDER BY r.position, r.id LIMIT 1',
-            [$page['id'], $this->maxLevel]);
+            [$page['id']]);
         $page['redirect_slug'] = $redirect['slug'] ?? null;
 
         return $page;
@@ -92,7 +92,7 @@ final class NormalizedPageRepository implements PageRepository
         $sql = "SELECT DISTINCT p.id, p.slug, COALESCE(p.title, p.slug) AS title FROM $joins
             WHERE $where AND " . self::PUBLIC_PAGE;
         $sql = $randomSample ? "SELECT * FROM ($sql) AS candidates ORDER BY RAND() LIMIT 5" : $sql . ' ORDER BY title, p.id';
-        $rows = $this->db->rows($sql, [...$params, $this->maxLevel]);
+        $rows = $this->db->rows($sql, $params);
         return array_map(static fn (array $row): array => ['id' => (string) $row['id']] + $row, $rows);
     }
 
@@ -113,7 +113,7 @@ final class NormalizedPageRepository implements PageRepository
         $like = '%' . str_replace(['!', '%', '_'], ['!!', '!%', '!_'], trim($term)) . '%';
         $rows = $this->db->rows('SELECT ' . self::CARD . ', LEFT(p.plain_text, 240) AS description FROM pages p WHERE ' . self::PUBLIC_PAGE
             . " AND (p.title LIKE ? ESCAPE '!' OR p.plain_text LIKE ? ESCAPE '!') ORDER BY p.title, p.id LIMIT ? OFFSET ?",
-            [$this->maxLevel, $like, $like, $limit + 1, $offset]);
+            [$like, $like, $limit + 1, $offset]);
         return ['items' => array_map($this->card(...), array_slice($rows, 0, $limit)),
             'next_offset' => count($rows) > $limit ? $offset + $limit : null];
     }
@@ -121,7 +121,7 @@ final class NormalizedPageRepository implements PageRepository
     public function statistics(): array
     {
         $row = $this->db->one("SELECT COUNT(*) AS pages, (SELECT COUNT(*) FROM images WHERE access_level_id <= ?) AS images,
-            SUM(p.view_count) AS views FROM pages p WHERE " . self::PUBLIC_PAGE, [$this->maxLevel, $this->maxLevel]);
+            SUM(p.view_count) AS views FROM pages p WHERE " . self::PUBLIC_PAGE, [$this->maxLevel]);
         return array_map('intval', $row);
     }
 
@@ -129,7 +129,7 @@ final class NormalizedPageRepository implements PageRepository
     {
         $page = self::lookup($this->db, $slug);
         if (!$page || !$this->db->one('SELECT p.id FROM pages p WHERE p.id = ? AND ' . self::PUBLIC_PAGE,
-            [$page['id'], $this->maxLevel])) {
+            [$page['id']])) {
             throw new HttpError(404, 'not_found', 'Página não encontrada.');
         }
         $id = (int) $page['id'];
@@ -155,7 +155,7 @@ final class NormalizedPageRepository implements PageRepository
         $columns = self::CARD . ', p.plain_text AS description, ' . self::COVER_IMAGE . ' AS image';
         $sql = 'SELECT ' . $columns . ' FROM pages p WHERE ' . self::PUBLIC_PAGE;
         $withContent = " AND p.source REGEXP '[^[:space:]]'";
-        $levels = [$this->maxLevel, $this->maxLevel];
+        $levels = [$this->maxLevel];
         $result = [
             'statistics' => $this->statistics(),
             'random' => array_map($this->homeCard(...), $this->db->rows($sql . $withContent . ' ORDER BY RAND() LIMIT 3', $levels)),
@@ -166,7 +166,7 @@ final class NormalizedPageRepository implements PageRepository
                 FROM page_missing_links m JOIN pages p ON p.id = m.page_id
                 WHERE " . self::PUBLIC_PAGE . " AND NOT EXISTS (
                     SELECT 1 FROM pages target WHERE target.identifier = SUBSTRING(m.href, 2)
-                ) GROUP BY m.href ORDER BY RAND() LIMIT 10", [$this->maxLevel]),
+                ) GROUP BY m.href ORDER BY RAND() LIMIT 10"),
         ];
         $now = time();
         foreach (['top_24h' => 1, 'top_week' => 7, 'top_month' => 30] as $key => $days) {
@@ -174,7 +174,7 @@ final class NormalizedPageRepository implements PageRepository
                 (SELECT page_id, COUNT(*) AS views FROM page_visits
                     WHERE visited_at >= ? AND visited_at <= ? GROUP BY page_id) v ON v.page_id = p.id
                 WHERE ' . self::PUBLIC_PAGE . $withContent . ' ORDER BY v.views DESC, p.id LIMIT 10',
-                [$this->maxLevel, $now - $days * 86400, $now, $this->maxLevel]);
+                [$this->maxLevel, $now - $days * 86400]);
             $result[$key] = array_map($this->homeCard(...), $rows);
         }
         $result['top_today'] = $result['top_24h']; // Compatibility with older home clients.

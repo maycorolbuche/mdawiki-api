@@ -35,12 +35,11 @@ final class Accounts
         }
         $column = $field === 'ID' ? 'id' : 'email';
         $rows = $this->db->rows("SELECT id AS ID, email AS EMAIL, password_hash AS SENHA, public_id AS PUBLIC_ID,
-            name AS NOME, display_name AS APELIDO, access_level_id AS NIVEL, avatar_filename AS FOTO,
+            name AS NOME, display_name AS APELIDO, role AS role, CASE role WHEN 'reader' THEN 0 WHEN 'admin' THEN 5 ELSE 1 END AS NIVEL, avatar_filename AS FOTO,
             birth_date AS DATA_NASC, city AS CIDADE, state_code AS ESTADO, club AS CLUBE,
             association AS ASSOCIACAO, club_type AS TIPO_CLUBE, biography AS BIOGRAFIA,
             created_at AS DT_CADASTRO, updated_at AS DT_ALTERACAO,
-            CASE WHEN is_active = 1 THEN 'S' ELSE 'N' END AS ATIVO,
-            CASE WHEN receives_notifications = 1 THEN 'S' ELSE 'N' END AS ENVIA_EMAIL
+            CASE WHEN is_active = 1 THEN 'S' ELSE 'N' END AS ATIVO
             FROM users WHERE {$column} = ? LIMIT 2", [$value]);
         return count($rows) === 1 ? $rows[0] : null;
     }
@@ -54,7 +53,7 @@ final class Accounts
         return $user;
     }
     public function profile(array $user): array {
-        $fields = ['ID','NOME','APELIDO','EMAIL','DATA_NASC','CIDADE','ESTADO','CLUBE','ASSOCIACAO','TIPO_CLUBE','BIOGRAFIA','NIVEL','ENVIA_EMAIL','ATIVO','DT_CADASTRO','DT_ALTERACAO'];
+        $fields = ['ID','NOME','APELIDO','EMAIL','DATA_NASC','CIDADE','ESTADO','CLUBE','ASSOCIACAO','TIPO_CLUBE','BIOGRAFIA','NIVEL','role','ATIVO','DT_CADASTRO','DT_ALTERACAO'];
         $data = array_intersect_key($user, array_flip($fields));
         $data['photo'] = self::photoUrl($user,$this->config);
         return $data;
@@ -68,7 +67,7 @@ final class Accounts
             'ID' => 'ID', 'NOME' => 'Nome', 'APELIDO' => 'Nome de exibição', 'EMAIL' => 'E-mail',
             'DATA_NASC' => 'Data de nascimento', 'CIDADE' => 'Cidade', 'ESTADO' => 'Estado',
             'CLUBE' => 'Clube', 'ASSOCIACAO' => 'Associação', 'TIPO_CLUBE' => 'Tipo de clube',
-            'BIOGRAFIA' => 'Biografia', 'NIVEL' => 'Nível de acesso', 'ENVIA_EMAIL' => 'Recebe notificações',
+            'BIOGRAFIA' => 'Biografia', 'NIVEL' => 'Nível de acesso',
             'ATIVO' => 'Ativo', 'DT_CADASTRO' => 'Cadastro', 'DT_ALTERACAO' => 'Última alteração',
         ];
         $details = [];
@@ -161,8 +160,8 @@ final class Accounts
             }
             $pdo->beginTransaction();
             $this->db->run('INSERT INTO users (email, name, password_hash, display_name, public_id,
-                is_active, receives_notifications, access_level_id, created_at)
-                VALUES (?, ?, ?, ?, ?, 0, 1, 1, ?)',
+                is_active, created_at)
+                VALUES (?, ?, ?, ?, ?, 0, ?)',
                 [$email, $name, '', mb_substr(strstr($email, '@', true), 0, 50),
                     bin2hex(random_bytes(16)), date('Y-m-d H:i:s')]);
             $id = (int) $pdo->lastInsertId();
@@ -299,25 +298,19 @@ final class Accounts
         return ['message'=>'Senha redefinida. Entre com a nova senha.'];
     }
     public function update(array $body): array {
-        $u=$this->current(true); $allowed=['NOME'=>150,'APELIDO'=>50,'CIDADE'=>150,'ESTADO'=>2,'CLUBE'=>50,'ASSOCIACAO'=>50,'TIPO_CLUBE'=>50,'BIOGRAFIA'=>10000,'DATA_NASC'=>10,'ENVIA_EMAIL'=>1]; $sets=[]; $values=[];
+        $u=$this->current(true); $allowed=['NOME'=>150,'APELIDO'=>50,'CIDADE'=>150,'ESTADO'=>2,'CLUBE'=>50,'ASSOCIACAO'=>50,'TIPO_CLUBE'=>50,'BIOGRAFIA'=>10000,'DATA_NASC'=>10]; $sets=[]; $values=[];
         $normalized = $this->config['normalized_read_only'] ?? false;
         $columns = ['NOME'=>'name','APELIDO'=>'display_name','CIDADE'=>'city','ESTADO'=>'state_code','CLUBE'=>'club',
-            'ASSOCIACAO'=>'association','TIPO_CLUBE'=>'club_type','BIOGRAFIA'=>'biography','DATA_NASC'=>'birth_date',
-            'ENVIA_EMAIL'=>'receives_notifications'];
+            'ASSOCIACAO'=>'association','TIPO_CLUBE'=>'club_type','BIOGRAFIA'=>'biography','DATA_NASC'=>'birth_date'];
         foreach ($allowed as $key=>$maximum) if (array_key_exists($key,$body)) {
             $raw=$body[$key] ?? '';
             if (!is_string($raw) || mb_strlen($raw)>$maximum) throw new HttpError(422,'invalid_profile','Campo inválido: '.$key);
             $value=trim($raw);
             if ($key==='DATA_NASC' && $value!=='' && (!preg_match('/^(\d{4})-(\d{2})-(\d{2})$/',$value,$m) || !checkdate((int)$m[2],(int)$m[3],(int)$m[1]))) throw new HttpError(422,'invalid_date','Data de nascimento inválida.');
             if ($key==='NOME' && mb_strlen($value)<2) throw new HttpError(422,'invalid_name','Informe seu nome.');
-            if ($key==='ENVIA_EMAIL' && !in_array($value,['S','N'],true)) throw new HttpError(422,'invalid_profile','Preferência inválida.');
             $column = $normalized ? $columns[$key] : $key;
             $sets[] = "$column = ?";
-            $values[] = match (true) {
-                $key === 'DATA_NASC' && $value === '' => null,
-                $normalized && $key === 'ENVIA_EMAIL' => (int) ($value === 'S'),
-                default => $value,
-            };
+            $values[] = $key === 'DATA_NASC' && $value === '' ? null : $value;
         }
         if ($sets) {
             $values[] = date('Y-m-d H:i:s');
