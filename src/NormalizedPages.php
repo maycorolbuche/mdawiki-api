@@ -96,9 +96,9 @@ final class NormalizedPages
         try {
             $this->db->run("INSERT INTO pages
                 (legacy_identifier, identifier, slug, kind, is_searchable, access_level_id, needs_rebuild, view_count,
-                 is_html, created_by, created_at, legacy_checksum)
-                VALUES (?, ?, ?, 'article', 1, 1, 0, 0, 0, ?, ?, ?)",
-                ['@article:' . hash('sha256', $identifier), $identifier, $canonical, $user['ID'], $now, str_repeat('0', 64)]);
+                 is_html, created_by, created_at)
+                VALUES (?, ?, ?, 'article', 1, 1, 0, 0, 0, ?, ?)",
+                ['@article:' . hash('sha256', $identifier), $identifier, $canonical, $user['ID'], $now]);
         } catch (\PDOException $error) {
             if ((int) ($error->errorInfo[1] ?? 0) !== 1062) {
                 throw $error;
@@ -159,7 +159,7 @@ final class NormalizedPages
             $now = date('Y-m-d H:i:s');
             $new = $page === null;
             $page ??= $this->insertPage($slug, $user, $now);
-            $last = $this->db->one('SELECT MAX(revision_number) AS revision, LEAST(COALESCE(MIN(legacy_revision_number), 0), 0) AS legacy
+            $last = $this->db->one('SELECT MAX(revision_number) AS revision
                 FROM page_revisions WHERE page_id = ?', [$page['id']]);
             $number = (int) $last['revision'];
             $rendered = $this->render($page, $source);
@@ -167,11 +167,11 @@ final class NormalizedPages
             if ($edited) {
                 $number++;
                 $this->db->run('INSERT INTO page_revisions
-                    (page_id, legacy_revision_number, revision_number, slug, title, source, rendered_html,
-                     is_searchable, access_level_id, created_by, is_expired, created_at, legacy_checksum)
-                     VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?)',
-                    [$page['id'], (int) $last['legacy'] - 1, $number, $page['slug'], $title, $source, $rendered['html'],
-                     $page['is_searchable'], $page['access_level_id'], $user['ID'], $now, str_repeat('0', 64)]);
+                    (page_id, revision_number, slug, title, source, rendered_html,
+                     is_searchable, access_level_id, created_by, is_expired, created_at)
+                     VALUES (?,?,?,?,?,?,?,?,?,0,?)',
+                    [$page['id'], $number, $page['slug'], $title, $source, $rendered['html'],
+                     $page['is_searchable'], $page['access_level_id'], $user['ID'], $now]);
                 $this->db->run('UPDATE pages SET title = ?, source = ?, updated_at = ?, updated_by = ? WHERE id = ?',
                     [$title, $source, $now, $user['ID'], $page['id']]);
                 $page['title'] = $title;

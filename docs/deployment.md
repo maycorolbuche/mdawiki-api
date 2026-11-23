@@ -6,8 +6,8 @@ O frontend depende somente desta API. Não há includes, chamadas HTTP ou cron e
 2. A raiz HTTP deve ser **somente `public/`**. Preserve `.env`, `var/` e o acervo entre deploys. A conta MySQL agora precisa de SELECT, INSERT, UPDATE e DELETE nas tabelas existentes; não precisa de ALTER/CREATE.
 3. Configure `.env` a partir do exemplo. Gere `APP_KEY` uma vez com `php -r "echo bin2hex(random_bytes(32)), PHP_EOL;"`, guarde fora do Git e inclua nos backups. Configure `FRONTEND_URL` com a URL do novo frontend e `MEDIA_PUBLIC_URL` com a URL desta API seguida de `/media`.
 4. Liste as origens exatas em `ALLOWED_ORIGINS`, sem barra final. Em produção use HTTPS e `SESSION_SECURE=true`. Para PHP local HTTP use `SESSION_SECURE=false` e inclua a origem/porta do Vite. Não use `*` com contas/sessões.
-5. Configure `SMTP_*`. Se SMTP_HOST estiver vazio, o remetente configurado em EMAIL_CONFIG/EMAIL_MSG para USU_CADASTRO_ATIVAR é reutilizado, diretamente pela nova API. E-mails e links usam o novo frontend; o PHP antigo não é chamado.
-6. **Antes de desligar o diretório antigo**, copie o acervo com `php bin/import-media.php /caminho/para/site-antigo`. O comando copia @imgs_wiki, @imgs_user e imagens de @imgs para o armazenamento da API, sem apagar/sobrescrever arquivos existentes; também recupera avatares base64 ausentes. As URLs do HTML compilado são reescritas para `/media/wiki`, `/media/users` e `/media/assets`. Confira uma imagem e um avatar pela nova URL.
+5. Configure `SMTP_*` para o envio de e-mails.
+6. Preserve o diretório de mídia da instalação, incluindo `articles/` e `users/`.
 7. Agende `php /caminho/mdawiki-api/bin/maintenance.php` a cada cinco minutos usando o PHP correto da hospedagem. Ele reprocessa até 100 páginas marcadas, incluindo dependências de includes/imagens, e limpa limitadores expirados. Sitemap e HTML estático são gerados pelo build do frontend; home, estatísticas e listas consultam o banco atual.
 8. Publique/recompile o frontend depois de esta API estar funcionando. Valide login, edição/prévia, histórico, recuperação por e-mail e uma imagem antes de desligar o serviço antigo.
 

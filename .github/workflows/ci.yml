@@ -41,4 +41,4 @@ jobs:
           path: composer.lock
           retention-days: 3
       - run: python3 tests/integration_http.py
-      - run: php tests/legacy-migration.php
+      - run: php tests/normalized.php

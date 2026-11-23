@@ -132,10 +132,10 @@ final class PageRelations
         $now = date('Y-m-d H:i:s');
         $this->db->run("INSERT INTO pages
             (legacy_identifier, identifier, slug, title, kind, source, rendered_html, plain_text,
-             is_searchable, access_level_id, needs_rebuild, view_count, is_html, created_at, updated_at, rebuilt_at, legacy_checksum)
-            VALUES (?, ?, ?, ?, 'article', '', '', '', 1, 1, 0, 0, 0, ?, ?, ?, ?)
+             is_searchable, access_level_id, needs_rebuild, view_count, is_html, created_at, updated_at, rebuilt_at)
+            VALUES (?, ?, ?, ?, 'article', '', '', '', 1, 1, 0, 0, 0, ?, ?, ?)
             ON DUPLICATE KEY UPDATE id = id",
-            ['@category:' . hash('sha256', $identifier), $identifier, $slug, $title, $now, $now, $now, str_repeat('0', 64)]);
+            ['@category:' . hash('sha256', $identifier), $identifier, $slug, $title, $now, $now, $now]);
         $page = $this->db->one('SELECT id FROM pages WHERE identifier = ? FOR UPDATE', [$identifier]);
         $id = (int) $page['id'];
         $this->resolveMissing($id, $identifier);

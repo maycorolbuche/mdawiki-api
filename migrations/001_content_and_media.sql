@@ -36,7 +36,6 @@ CREATE TABLE IF NOT EXISTS users (
     `deleted_page_count` INT,
     `last_seen_at` DATETIME,
     `visit_count` INT,
-    `legacy_access_level` INT,
     `created_at` DATETIME,
     `updated_at` DATETIME,
     INDEX users_email_idx (email),
@@ -64,7 +63,6 @@ CREATE TABLE IF NOT EXISTS pages (
     created_at DATETIME,
     updated_at DATETIME,
     rebuilt_at DATETIME,
-    legacy_checksum CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL,
     FOREIGN KEY (updated_by) REFERENCES users (id) ON DELETE SET NULL,
     INDEX pages_slug_idx (slug)
@@ -73,7 +71,6 @@ CREATE TABLE IF NOT EXISTS pages (
 CREATE TABLE IF NOT EXISTS page_revisions (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     page_id BIGINT UNSIGNED NOT NULL,
-    legacy_revision_number INT NOT NULL,
     revision_number BIGINT UNSIGNED NOT NULL,
     slug VARCHAR(250) NOT NULL,
     title VARCHAR(250),
@@ -84,9 +81,7 @@ CREATE TABLE IF NOT EXISTS page_revisions (
     created_by INT,
     is_expired BOOLEAN,
     created_at DATETIME,
-    legacy_checksum CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL,
-    UNIQUE KEY page_revisions_legacy_unique (page_id, legacy_revision_number),
     INDEX page_revisions_order_idx (page_id, revision_number),
     FOREIGN KEY (page_id) REFERENCES pages (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -113,11 +108,10 @@ CREATE TABLE IF NOT EXISTS image_revisions (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     image_id BIGINT UNSIGNED NOT NULL,
     file_id BIGINT UNSIGNED,
-    legacy_revision_number INT NULL,
     created_by INT,
     access_level_id INT NOT NULL DEFAULT 1,
     created_at DATETIME,
-    UNIQUE (image_id, legacy_revision_number),
+    INDEX image_revisions_image_idx (image_id),
     FOREIGN KEY (image_id) REFERENCES images (id),
     FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL,
     FOREIGN KEY (file_id) REFERENCES files (id)
