@@ -8,10 +8,15 @@ final class Features
     private Pages $pages;
     private WikiRenderer $renderer;
     private RateLimiter $rate;
-    private LegacyMail $notifications;
+    private WikiMail $notifications;
     public function __construct(private Database $db, private Session $session, private array $config, Closure $mail) {
-        $this->notifications=new LegacyMail($db,$config,$mail);$this->accounts=new Accounts($db,$session,$config,$mail,$this->notifications);$this->renderer=new WikiRenderer($db,$config);$this->pages=new Pages($db,$this->accounts,$this->renderer,$config,$this->notifications);$this->rate=new RateLimiter($config['storage_dir'].'/rates');
+        $this->notifications=new WikiMail($config,$mail);$this->accounts=new Accounts($db,$session,$config,$mail,$this->notifications);$this->renderer=new WikiRenderer($db,$config);$this->pages=new Pages($db,$this->accounts,$this->renderer,$config,$this->notifications);$this->rate=new RateLimiter($config['storage_dir'].'/rates');
     }
+    private function normalizedPages(): NormalizedPages
+    {
+        return new NormalizedPages($this->db, $this->accounts, $this->renderer, $this->notifications);
+    }
+
     public function handle(string $method,string $path,array $query,array $body,string $csrf,string $ip): Response {
         try {
             if (!in_array($method,['GET','POST','PUT'],true)) throw new HttpError(405,'method_not_allowed','Método não permitido.');
@@ -22,6 +27,10 @@ final class Features
                 if ($auth) $this->rate->check('account:'.hash('sha256',strtolower(is_string($body['email'] ?? null)?$body['email']:$ip)),20);
             }
             $data=match (true) {
+                ($this->config['normalized_read_only'] ?? false) && $method === 'GET'
+                    && preg_match('~^/v1/public-users/([a-f0-9]{32})$~D', $path, $m) === 1 => $this->accounts->publicProfile($m[1]),
+                ($this->config['normalized_editor'] ?? false) && in_array($method, ['GET', 'PUT'], true) && preg_match('~^/v1/images/([^/]+)$~D', $path, $m) === 1
+                    => $this->image($method, $this->slug(rawurldecode($m[1])), $body),
                 $method==='GET' && $path==='/v1/auth/session' => $this->accounts->session(),
                 $method==='POST' && $path==='/v1/auth/login' => $this->accounts->login($body),
                 $method==='POST' && $path==='/v1/auth/logout' => $this->accounts->logout(),
@@ -44,7 +53,9 @@ final class Features
                 $method==='GET' && preg_match('~^/v1/view/([^/]+)$~D',$path,$m)===1 => $this->view(rawurldecode($m[1])),
                 $method==='GET' && preg_match('~^/v1/users(?:/(\d+))?$~D',$path,$m)===1 => $this->users($query,isset($m[1])?(int)$m[1]:null),
                 preg_match('~^/v1/pages/([^/]+)/(editor|history|preview|restore|rebuild)$~D',$path,$m)===1 => $this->pageAction($method,rawurldecode($m[1]),$m[2],$query,$body),
-                $method==='PUT' && preg_match('~^/v1/pages/([^/]+)$~D',$path,$m)===1 => $this->pages->save($this->slug(rawurldecode($m[1])),$body),
+                $method==='PUT' && preg_match('~^/v1/pages/([^/]+)$~D',$path,$m)===1 => ($this->config['normalized_editor'] ?? false)
+                    ? $this->normalizedPages()->save($this->slug(rawurldecode($m[1])), $body)
+                    : $this->pages->save($this->slug(rawurldecode($m[1])), $body),
                 default => throw new HttpError(404,'route_not_found','Rota não encontrada.'),
             };
             return new Response(200,['data'=>$data]);
@@ -54,7 +65,14 @@ final class Features
         if ($slug==='' || mb_strlen($slug)>250 || preg_match('~[/\\\\\x00-\x1f\x7f?#]~',$slug)) throw new HttpError(422,'invalid_slug','Endereço inválido.'); return $slug;
     }
     private function view(string $slug): array {
-        $slug=$this->slug($slug);$user=$this->accounts->current(true);$p=$this->pages->source($slug);
+        $slug=$this->slug($slug);$user=$this->accounts->current(true);
+        if ($this->config['normalized_read_only'] ?? false) {
+            $repo = new NormalizedPageRepository($this->db, (int) $this->config['public_max_level'], $this->config['media_public_url'], $this->config['frontend_url']);
+            $row = $repo->find($slug);
+            if ($row === null) throw new HttpError(404, 'not_found', 'Página não encontrada.');
+            return (new Application(static fn () => $repo, $this->config))->present($row) + ['is_public' => true];
+        }
+        $p=$this->pages->source($slug);
         if (!$p) throw new HttpError(404,'not_found','Página não encontrada.');
         $level=max((int)$user['NIVEL'],(int)$this->config['public_max_level']);
         if ((int)($p['NIVEL'] ?? 1)>$level || str_starts_with(strtolower($p['IDENT']),'page@')) throw new HttpError(403,'permission_denied','Você não tem permissão para esta página.');
@@ -64,6 +82,17 @@ final class Features
     }
     private function pageAction(string $method,string $slug,string $action,array $query,array $body): array {
         $slug=$this->slug($slug);
+        if ($this->config['normalized_editor'] ?? false) {
+            $pages = $this->normalizedPages();
+            return match ([$method, $action]) {
+                ['GET', 'editor'] => $pages->editor($slug),
+                ['GET', 'history'] => $pages->history($slug, $this->integer($query['before'] ?? PHP_INT_MAX, 1, PHP_INT_MAX)),
+                ['POST', 'preview'] => $pages->preview($slug, $body),
+                ['POST', 'restore'] => $pages->save($slug, $body, $this->integer($body['revision'] ?? 0, 1, PHP_INT_MAX)),
+                ['POST', 'rebuild'] => $pages->save($slug, [], rebuild: true),
+                default => throw new HttpError(405, 'method_not_allowed', 'Método não permitido.'),
+            };
+        }
         if ($method==='GET' && $action==='editor') return $this->pages->editor($slug);
         if ($method==='GET' && $action==='history') return $this->pages->history($slug,$this->integer($query['before'] ?? PHP_INT_MAX,1,PHP_INT_MAX));
         if ($method==='POST' && $action==='preview') return $this->pages->preview($slug,$body);
@@ -90,6 +119,18 @@ final class Features
     }
     private function catalog(array $q): array {
         [$limit,$offset]=$this->bounds($q);$type=Database::id(is_string($q['type'] ?? null)?$q['type']:'paginas');$filter=$this->publicFilter();$params=[];
+        if (($this->config['normalized_editor'] ?? false) && $type === 'atualizar') {
+            $user = $this->accounts->current(true);
+            if ((int) $user['NIVEL'] < 5) {
+                throw new HttpError(403, 'permission_denied', 'Acesso restrito a administradores.');
+            }
+            $rows = $this->db->rows("SELECT id, slug, COALESCE(title, slug) AS title FROM pages
+                WHERE needs_rebuild = 1 AND kind <> 'image' AND legacy_identifier NOT LIKE 'page@%'
+                AND COALESCE(access_level_id, 1) <= ? ORDER BY title, id LIMIT ? OFFSET ?",
+                [(int) $user['NIVEL'], $limit + 1, $offset]);
+            return ['type' => $type, 'items' => array_slice($rows, 0, $limit),
+                'next_offset' => count($rows) > $limit ? $offset + $limit : null];
+        }
         $sql=match($type) {
             'categorias' => "SELECT c.CATEGORIA_IDENT AS id,c.CATEGORIA_URL AS slug,MIN(c.CATEGORIA) AS title,COUNT(*) AS count FROM PAGINAS_CATEGORIAS c JOIN PAGINAS p ON p.IDENT=c.IDENT WHERE $filter GROUP BY c.CATEGORIA_IDENT,c.CATEGORIA_URL ORDER BY title",
             'links_inexistentes' => "SELECT DISTINCT l.LINK_IDENT AS id,l.LINK_URL AS slug,l.LINK AS title FROM PAGINAS_LINKS l JOIN PAGINAS p ON p.IDENT=l.IDENT LEFT JOIN PAGINAS target ON target.IDENT=l.LINK_IDENT WHERE $filter AND target.IDENT IS NULL AND l.LINK_URL IS NOT NULL AND l.LINK_IDENT NOT LIKE '#%' ORDER BY title",
@@ -130,7 +171,12 @@ final class Features
         return ['statistics'=>$this->statistics()] + (new Home($this->db,$this->renderer,$this->publicFilter()))->get();
     }
     private function visit(array $body): array {
-        $slug=$this->slug(is_string($body['slug'] ?? null)?$body['slug']:'');$filter=$this->publicFilter();
+        $slug = $this->slug(is_string($body['slug'] ?? null) ? $body['slug'] : '');
+        if ($this->config['normalized_read_only'] ?? false) {
+            $repository = new NormalizedPageRepository($this->db, (int) $this->config['public_max_level'], $this->config['media_public_url']);
+            return ['counted' => $repository->recordVisit($slug, $this->session)];
+        }
+        $filter=$this->publicFilter();
         $p=$this->db->one("SELECT p.IDENT,p.NOME_URL FROM PAGINAS p WHERE $filter AND p.NOME_URL = ?",[$slug]);
         if (!$p) throw new HttpError(404,'not_found','Página não encontrada.');
         if (($this->session->data['visits'][$p['IDENT']] ?? 0)>time()-30) return ['counted'=>false];
@@ -156,7 +202,32 @@ final class Features
         $rows=$this->db->rows('SELECT * FROM USUARIOS'.($filters?' WHERE '.implode(' AND ',$filters):'').' ORDER BY ID DESC LIMIT ? OFFSET ?',$values);
         return ['items'=>array_map($this->accounts->profile(...),array_slice($rows,0,$limit)),'next_offset'=>count($rows)>$limit?$offset+$limit:null];
     }
-    private function upload(array $body): array { $u=$this->accounts->current(true);if ((int)$u['NIVEL']<1) throw new HttpError(403,'permission_denied','Você não tem permissão para enviar imagens da wiki.');$this->rate->check('media-user:'.$u['ID'],20,3600);return (new Media($this->config))->upload($body); }
-    private function photo(array $body): array { $u=$this->accounts->current(true);$file=(new Media($this->config))->upload($body,'users',true);$this->db->run('UPDATE USUARIOS SET FOTO = ?, FOTO_32X32 = ?, FOTO_64 = NULL, FOTO_32X32_64 = NULL WHERE ID = ?',[$file['filename'],$file['filename'],(int)$u['ID']]);$this->notifications->notify('USU_ALTERACAO',$u['EMAIL']);return $file; }
-}
+    private function image(string $method, string $slug, array $body): array
+    {
+        $images = new NormalizedImages($this->db, $this->config, $method === 'GET' ? null : $this->normalizedPages(), $this->notifications);
+        if ($method === 'GET') return $images->show($slug);
+        $user = $this->accounts->current(true);
+        if ((int) $user['NIVEL'] < 1) throw new HttpError(403, 'permission_denied', 'Você não pode enviar imagens.');
+        $this->rate->check('media-user:' . $user['ID'], 20, 3600);
+        if (($body['clear'] ?? false) === true) return $images->clear($slug, $body, $user);
+        return array_key_exists('revision_id', $body)
+            ? $images->restore($slug, $body, $user)
+            : $images->save($slug, $body, $user);
+    }
 
+    private function upload(array $body): array { $u=$this->accounts->current(true);if ((int)$u['NIVEL']<1) throw new HttpError(403,'permission_denied','Você não tem permissão para enviar imagens da wiki.');$this->rate->check('media-user:'.$u['ID'],20,3600);return (new Media($this->config))->upload($body); }
+    private function photo(array $body): array
+    {
+        $user = $this->accounts->current(true);
+        $file = (new Media($this->config))->upload($body, 'users', true);
+        if ($this->config['normalized_read_only'] ?? false) {
+            $this->db->run('UPDATE users SET avatar_filename = ?, updated_at = NOW() WHERE id = ?', [$file['filename'], (int) $user['ID']]);
+            $this->accounts->notifyProfile((int) $user['ID']);
+            return $file;
+        }
+        $this->db->run('UPDATE USUARIOS SET FOTO = ?, FOTO_32X32 = ?, FOTO_64 = NULL, FOTO_32X32_64 = NULL WHERE ID = ?',
+            [$file['filename'], $file['filename'], (int) $user['ID']]);
+        $this->accounts->notifyProfile((int) $user['ID']);
+        return $file;
+    }
+}

@@ -1,4 +1,6 @@
 """Real PHP HTTP/session/SMTP integration against the isolated CI MySQL database."""
+import email
+from email import policy
 import http.cookiejar
 import json
 import os
@@ -101,7 +103,9 @@ with tempfile.TemporaryDirectory(prefix="mdawiki-http-") as storage:
             csrf = request("/v1/auth/session")[2]["data"]["csrf_token"]
             status, _, result = request("/v1/auth/register", "POST", {"name": "HTTP Test", "email": "http@example.test", "password": "http-password-123", "password_confirmation": "http-password-123"}, csrf)
             assert status == 200, result
-            assert len(messages) == 1 and "site.mda.wiki.br/page@AtivaConta" in messages[0], "Real PHPMailer delivery uses new frontend"
+            assert len(messages) == 1
+            message = email.message_from_string(messages[0], policy=policy.default)
+            assert "site.mda.wiki.br/p/ativar-conta" in message.get_body(preferencelist=("plain",)).get_content()
             assert b"<?php" not in request("/media/wiki/..%2F..%2F..%2Fconfig%2Fbootstrap.php")[2]
             print("Native PHP HTTP, cookies, CSRF, CORS, private reads and SMTP integration passed.")
         finally:

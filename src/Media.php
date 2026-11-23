@@ -3,11 +3,17 @@ declare(strict_types=1);
 namespace MDAWiki;
 final class Media
 {
+    public const MISSING_IMAGE = 'assets/img_nao_encontrada.svg';
+
     public static function rewrite(string $value,array $config): string {
         $base=rtrim($config['media_public_url'],'/');
         $prefixes=['https://mda.wiki.br/site/','http://mda.wiki.br/site/','https://www.mda.wiki.br/site/','http://www.mda.wiki.br/site/','https://mda.wiki.br/','http://mda.wiki.br/',$config['frontend_url'].'/site/',$config['frontend_url'].'/','{{{url_diretorio}}}','{{{url_site}}}','/site/'];
         foreach ($prefixes as $prefix) foreach(['@imgs_wiki/'=>'wiki/','@imgs_wiki_mini/'=>'wiki_mini/','@imgs_wiki_cp/'=>'wiki_cp/','@imgs_user/'=>'users/','@imgs/'=>'assets/'] as $old=>$new) $value=str_replace($prefix.$old,$base.'/'.$new,$value);
-        return str_replace(['{{{url_diretorio}}}','@imgs_wiki/','@imgs_wiki_mini/','@imgs_wiki_cp/','@imgs_user/','@imgs/'],[$base.'/',$base.'/wiki/',$base.'/wiki_mini/',$base.'/wiki_cp/',$base.'/users/',$base.'/assets/'],$value);
+        $value = str_replace(['{{{url_diretorio}}}','@imgs_wiki/','@imgs_wiki_mini/','@imgs_wiki_cp/','@imgs_user/','@imgs/'],[$base.'/',$base.'/wiki/',$base.'/wiki_mini/',$base.'/wiki_cp/',$base.'/users/',$base.'/assets/'],$value);
+        if ($config['normalized_read_only'] ?? false) {
+            $value = str_replace($base . '/assets/img_nao_encontrada.png', $base . '/' . self::MISSING_IMAGE, $value);
+        }
+        return $value;
     }
     public function __construct(private array $config) {}
     public function upload(array $body, string $group='wiki', bool $requireSquare=false): array {
@@ -29,12 +35,31 @@ final class Media
         $name=bin2hex(random_bytes(16)).'.'.$formats[$info['mime']];if (file_put_contents($directory.'/'.$name,$bytes,LOCK_EX)===false) throw new \RuntimeException('Cannot save image');
         return ['url'=>$this->config['media_public_url'].'/'.$group.'/'.$name,'filename'=>$name,'width'=>$info[0],'height'=>$info[1]];
     }
-    public function serve(string $path): never {
+    public function serve(string $path, ?callable $allowMigratedArticle = null): never {
+        if ($path === '/media/' . self::MISSING_IMAGE) {
+            header('Content-Type: image/svg+xml');
+            header('X-Content-Type-Options: nosniff');
+            echo '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="90" viewBox="0 0 120 90"><title>Sem imagem</title><rect width="120" height="90" rx="6" fill="#edf0f4"/><g stroke="#64748b" stroke-width="3" fill="none"><rect x="36" y="14" width="48" height="36" rx="3"/><path d="m37 44 13-12 9 8 8-11 16 15"/><circle cx="72" cy="23" r="3"/></g><text x="60" y="72" fill="#334155" font-size="13" font-family="sans-serif" text-anchor="middle">Sem imagem</text></svg>';
+            exit;
+        }
         $root=realpath($this->config['media_root']);$decoded=rawurldecode(substr($path,7));
         $file=$root && !str_contains($decoded,"\0") ? realpath($root.'/'.$decoded):false;
-        $types=['svg'=>'image/svg+xml','png'=>'image/png','jpg'=>'image/jpeg','jpeg'=>'image/jpeg','gif'=>'image/gif','webp'=>'image/webp','avif'=>'image/avif'];
+        $types=['svg'=>'image/svg+xml','png'=>'image/png','jpg'=>'image/jpeg','jpeg'=>'image/jpeg','gif'=>'image/gif','webp'=>'image/webp','avif'=>'image/avif','bmp'=>'image/bmp'];
         $type=$file?$types[strtolower(pathinfo($file,PATHINFO_EXTENSION))] ?? null:null;
         if (!$file || !$root || !str_starts_with($file,$root.DIRECTORY_SEPARATOR) || !$type || !is_file($file)) { http_response_code(404);exit; }
+        $key = str_replace(DIRECTORY_SEPARATOR, '/', substr($file, strlen($root) + 1));
+        if (str_starts_with(strtolower($key), 'articles/')) {
+            try {
+                if ($allowMigratedArticle === null || !$allowMigratedArticle($key)) {
+                    http_response_code(404);
+                    exit;
+                }
+            } catch (\Throwable $error) {
+                error_log((string) $error);
+                http_response_code(503);
+                exit;
+            }
+        }
         header('Content-Type: '.$type);header('X-Content-Type-Options: nosniff');header("Content-Security-Policy: sandbox; default-src 'none'; style-src 'unsafe-inline'");header('Cache-Control: public, max-age=0, must-revalidate');readfile($file);exit;
     }
     /** Sanitizes SVG snapshots; active markup is also rejected on new uploads. */

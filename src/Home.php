@@ -31,7 +31,7 @@ final class Home
             GROUP BY l.LINK_IDENT ORDER BY title LIMIT 10");
         foreach ($result as &$items) foreach ($items as &$item) {
             $text = strip_tags($item['description'] ?? '');
-            $item['description'] = mb_substr($text,0,300).(mb_strlen($text)>300 ? '...' : '');
+            $item['description'] = PageSummary::shorten($text, 300);
             $item['image'] = empty($item['image']) ? null : $this->renderer->mediaUrl($item['image']);
             if (isset($item['views'])) $item['views'] = (int)$item['views'];
         }

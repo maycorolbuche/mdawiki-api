@@ -44,7 +44,26 @@ final class Application
         if ($method === 'OPTIONS') {
             return new Response(204, [], $headers + ['Access-Control-Allow-Methods' => 'GET, POST, PUT, OPTIONS', 'Access-Control-Allow-Headers' => 'Accept, Content-Type, X-CSRF-Token']);
         }
-        if ($this->features !== null && (preg_match('~^/v1/(auth/|profile(?:/|$)|media$|search$|catalog$|statistics$|home$|visits$|view/|users(?:/|$))~', $path) || preg_match('~^/v1/pages/[^/]+/(editor|history|preview|restore|rebuild)$~D', $path) || ($method === 'PUT' && str_starts_with($path, '/v1/pages/')))) {
+        $normalized = $this->config['normalized_read_only'] ?? false;
+        $previewAccountRoute = ($method === 'GET' && in_array($path, ['/v1/auth/session', '/v1/profile'], true))
+            || ($method === 'PUT' && $path === '/v1/profile')
+            || ($method === 'POST' && in_array($path, ['/v1/auth/login', '/v1/auth/logout', '/v1/auth/register', '/v1/auth/activate', '/v1/auth/resend'], true))
+            || ($method === 'GET' && preg_match('~^/v1/view/[^/]+$~D', $path))
+            || ($method === 'GET' && $path === '/v1/catalog' && ($query['type'] ?? null) === 'atualizar'
+                && ($this->config['normalized_editor'] ?? false));
+        $normalizedPageRoute = ($this->config['normalized_editor'] ?? false) && (
+            ($method === 'GET' && preg_match('~^/v1/pages/[^/]+/(editor|history)$~D', $path))
+            || ($method === 'POST' && preg_match('~^/v1/pages/[^/]+/(preview|restore|rebuild)$~D', $path))
+            || ($method === 'PUT' && preg_match('~^/v1/pages/[^/]+$~D', $path)));
+        $previewAccountRoute = $previewAccountRoute || $normalizedPageRoute
+            || ($normalized && $method === 'GET' && preg_match('~^/v1/public-users/[a-f0-9]{32}$~D', $path))
+            || ($normalized && $method === 'POST' && in_array($path, ['/v1/profile/photo', '/v1/visits'], true))
+            || ($normalized && in_array($method, ['GET', 'PUT'], true) && preg_match('~^/v1/images/[^/]+$~D', $path));
+        if ($normalized && !$previewAccountRoute
+            && ($method !== 'GET' || !preg_match('~^/(?:health|v1/(?:home|search|statistics)|v1/pages(?:/[^/]+)?|media/.*)?$~D', $path))) {
+            return new Response(501, ['error' => ['code' => 'read_only_preview', 'message' => 'A base migrada está em prévia de leitura pública.']], $headers);
+        }
+        if ($this->features !== null && ($normalized ? $previewAccountRoute : (preg_match('~^/v1/(auth/|profile(?:/|$)|media$|search$|catalog$|statistics$|home$|visits$|view/|users(?:/|$))~', $path) || preg_match('~^/v1/pages/[^/]+/(editor|history|preview|restore|rebuild)$~D', $path) || ($method === 'PUT' && str_starts_with($path, '/v1/pages/'))))) {
             if ($method !== 'GET' && $origin === '') return new Response(403, ['error'=>['code'=>'origin_required','message'=>'Origem da solicitação ausente.']], $headers);
             try {
                 $response = (($this->features)())->handle($method,$path,$query,$body,$csrf,$ip);
@@ -66,6 +85,19 @@ final class Application
         $stage = 'routing';
         $debug = (bool) ($this->config['debug'] ?? false);
         try {
+            if (($this->config['normalized_read_only'] ?? false) && in_array($path, ['/v1/home', '/v1/search', '/v1/statistics'], true)) {
+                $repository = ($this->repository)();
+                try {
+                    $data = match ($path) {
+                        '/v1/home' => $repository->home(),
+                        '/v1/search' => $repository->search($query),
+                        '/v1/statistics' => $repository->statistics(),
+                    };
+                    return new Response(200, ['data' => $data], $headers);
+                } catch (HttpError $error) {
+                    return new Response($error->status, ['error' => ['code' => $error->errorCode, 'message' => $error->getMessage()]], $headers);
+                }
+            }
             if ($path === '/v1/pages') {
                 $limit = filter_var($query['limit'] ?? 100, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 500]]);
                 if ($limit === false || !is_string($query['after'] ?? '')) {
@@ -95,7 +127,7 @@ final class Application
                 if ($row !== null) {
                     return new Response(200, ['data' => $this->present($row)], $headers);
                 }
-                $details = ['layer' => 'article', 'stage' => $stage, 'database' => 'query_succeeded', 'lookup_field' => 'NOME_URL', 'reason' => 'not_found_or_not_public'];
+                $details = ['layer' => 'article', 'stage' => $stage, 'database' => 'query_succeeded', 'lookup_field' => ($this->config['normalized_read_only'] ?? false) ? 'identifier' : 'NOME_URL', 'reason' => 'not_found_or_not_public'];
                 if ($debug) {
                     $details['slug'] = $slug;
                     if ($repository instanceof DiagnosablePageRepository) {
@@ -148,6 +180,7 @@ final class Application
             'missing_links' => $row['missing_links'] ?? [],
             'redirect_slug' => $row['redirect_slug'] ?? null,
             'image_usage' => $row['image_usage'] ?? [],
+            ...(($this->config['normalized_read_only'] ?? false) ? ['read_only' => !($this->config['normalized_editor'] ?? false) || ($row['kind'] ?? '') === 'image'] : []),
         ];
     }
 }

@@ -337,7 +337,7 @@ function page_templates($conteudo, $page)
 				$tmp .= "'''Nota:''' Para outros significados, veja $v.<br>";
 			}
 			if (@$vls["links"] != "") {
-				$ve = explode(",", @$vls["links"]);
+				$ve = explode(",", $vls["links"] ?? "");
 				foreach ($ve as $v) {
 					$v = trim(str_replace("++", "|", $v));
 					if (substr($v, 0, 2) != "[[") {
@@ -393,7 +393,7 @@ function page_templates($conteudo, $page)
 				$tmp .= "<b>$v</b> pode se referir &agrave;:";
 			}
 			$tmp .= "<ul>";
-			$ve = explode(",", @$vls["links"]);
+			$ve = explode(",", $vls["links"] ?? "");
 			foreach ($ve as $v) {
 				$v = trim(str_replace("++", "|", $v));
 				if (substr($v, 0, 2) != "[[") {
@@ -445,9 +445,9 @@ function page_templates($conteudo, $page)
 		$tmp .= "<table class=\"table mbn tc-med-1\"><tbody>";
 		if (@$vls["cargo"] != "") {
 			$c = explode(",", $vls["cargo"]);
-			$a = explode(",", @$vls["antecessor"]);
-			$s = explode(",", @$vls["sucessor"]);
-			$m = explode(",", @$vls["mandato"]);
+			$a = explode(",", $vls["antecessor"] ?? "");
+			$s = explode(",", $vls["sucessor"] ?? "");
+			$m = explode(",", $vls["mandato"] ?? "");
 			foreach ($c as $key => $cargo) {
 				$tmp .= "<tr><td><span>Cargo:</span></td><td><span>$cargo</span></td></tr>";
 				$tmp .= (@$m[$key] != "" ? "<tr><td style='border:0'><span>Mandato:</span></td><td style='border:0'><span>" . $m[$key] . "</span></td></tr>" : "");
@@ -506,7 +506,7 @@ function page_templates($conteudo, $page)
 				$p_url_path = explode("/", $p_url["path"]);
 				$p_url_id = "";
 				if (@$p_url_path[1] == "watch") {
-					$tmp_p = explode("&", $p_url["query"]);
+					$tmp_p = explode("&", $p_url["query"] ?? "");
 					for ($i = 0; $i <= count($tmp_p) - 1; $i++) {
 						list($key, $value) = explode("=", $tmp_p[$i] . "=");
 						if ($key == "v") {
@@ -573,7 +573,7 @@ function page_templates($conteudo, $page)
 		$tmp .= "==" . (@$vls["titulo"] != '' ? @$vls["titulo"] : "Refer&ecirc;ncias") . "==";
 		if (@$vls["texto"] != "") {
 			$t = explode(",", $vls["texto"]);
-			$l = explode(",", @$vls["link"]);
+			$l = explode(",", $vls["link"] ?? "");
 			$tmp .= "<ol start=\"1\" style='font-weight:normal;font-size:13px;'>";
 			foreach ($t as $key => $texto) {
 				$tmp .= "<li><span class=\"texto\">";
@@ -648,7 +648,7 @@ function page_templates($conteudo, $page)
 			$value = substr($value, 0, -5);
 			$img_t = "S";
 		}
-		$rs = resolve_image($value);
+		$rs = resolve_image($value . ($img_t === "S" ? "!tmpl" : ""));
 		if (count($rs) > 0) {
 			$linha = $rs;
 			$file = json_decode($linha["IMAGEM"], true);

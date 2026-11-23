@@ -29,6 +29,13 @@ verify(request('/v1/profile','PUT',['NOME'=>'Nome atualizado','NIVEL'=>1,'ATIVO'
 verify(request('/v1/profile','PUT',['DATA_NASC'=>null,'CIDADE'=>null])->status===200,'Nullable legacy profile fields can be saved');
 verify((int)$db->one('SELECT NIVEL FROM USUARIOS WHERE ID=1')['NIVEL']===5,'Mass assignment cannot change privileges');
 $db->run("INSERT INTO PAGINAS (IDENT,NOME_URL,NOME,CONTEUDO_CODE,CONTEUDO,CONTEUDO_TXT,NIVEL) VALUES ('incluido','Incluído','Incluído','Texto incluído.','','',1)");
+$plain = (new MDAWiki\WikiRenderer($db, $config))->render(
+    "<style>.artigo { color: red; }</style>{{Especialidade:clube=DBV|area=HM|cod=024|nivel=1|ano=1964|origem=Associação Geral|icone=HM024}}\n# Primeiro requisito\n{{Externo:{{Interno:teste}}}}\n# [[Outra página|Segundo requisito]]",
+    'Teste_texto'
+);
+verify(str_contains($plain['html'], '<style>') && str_contains($plain['html'], '1964'), 'Styles and template stay in the rendered article');
+verify(preg_replace('/\s+/u', ' ', $plain['text']) === 'Primeiro requisito Segundo requisito',
+    'Plain text excludes CSS and template contents: ' . $plain['text']);
 $code="{{Especialidade:clube=DBV|area=HM|cod=024|nivel=1|ano=1964|origem=Associação Geral|icone=HM024}}\n== Requisitos ==\n# Primeiro requisito\n# [[Outra página|Outro artigo]]\n{{Categoria:Artes e Habilidades Manuais}}\n{{Incluir:Incluído}}";
 verify(request('/v1/pages/Sab%C3%A3o/editor')->body['data']['exists']===false,'New article source can be created by authenticated user');
 $preview=request('/v1/pages/Sab%C3%A3o/preview','POST',['source'=>$code]);
@@ -91,8 +98,8 @@ request('/v1/auth/logout','POST');
 $register=request('/v1/auth/register','POST',['name'=>'Conta nova','email'=>'new@example.test','password'=>'new-password-123','password_confirmation'=>'new-password-123']);verify($register->status===200,'Registration: '.json_encode($register->body));
 verify(request('/v1/auth/login','POST',['email'=>'new@example.test','password'=>'new-password-123'])->status===403,'Activation required');
 $activation=$db->one('SELECT CODIGO_CONTA FROM USUARIOS WHERE EMAIL = ?',['new@example.test'])['CODIGO_CONTA'];verify(count($mail)===1 && str_contains($mail[0]['text'],$activation),'Activation sent through injected mail transport');
-verify(request('/v1/auth/activate','POST',['code'=>$activation])->status===200,'Activate new account');
-verify(request('/v1/auth/activate','POST',['code'=>$activation])->status===422,'Activation code cannot be replayed');
+verify(request('/v1/auth/activate','POST',['code'=>$activation,'email'=>'new@example.test'])->status===200,'Activate new account');
+verify(request('/v1/auth/activate','POST',['code'=>$activation,'email'=>'new@example.test'])->status===422,'Activation code cannot be replayed');
 $db->run("UPDATE USUARIOS SET SENHA = '' WHERE EMAIL = ?", ['new@example.test']);
 verify(request('/v1/auth/login','POST',['email'=>'new@example.test','password'=>'new-password-123'])->status===401,'Blank password requires reset');
 request('/v1/auth/forgot','POST',['email'=>'new@example.test']);$text=end($mail)['text'];preg_match('/token=([a-f0-9]{64})/',$text,$token);
@@ -121,6 +128,17 @@ $image=request('/v1/pages/imagem%40Teste','PUT',['title'=>'Imagem teste','source
 require __DIR__.'/images.inc.php';
 if (class_exists(DOMDocument::class)) { $svg=(new MDAWiki\Media($config))->restore('data:image/svg+xml;base64,'.base64_encode('<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"><script>alert(1)</script><path d="M0 0"/></svg>'));$bytes=file_get_contents($config['media_root'].'/wiki/'.$svg['filename']);verify(!str_contains($bytes,'script') && !str_contains($bytes,'onload'),'SVG history restoration strips active content'); }
 $renderer=new WikiRenderer($db,$config);$db->run("INSERT INTO PAGINAS (IDENT,NOME_URL,NOME,CONTEUDO_CODE) VALUES ('cycle','Cycle','Cycle','{{Incluir:Cycle}}')");
+set_error_handler(static function (int $severity, string $message): never {
+    throw new ErrorException($message, 0, $severity);
+}, E_DEPRECATED);
+try {
+    $biography = $renderer->render('{{Biografia:nome=Pessoa|cargo=Presidente,Secretário|mandato=2025}}', 'Pessoa')['html'];
+    verify(str_contains($biography, 'Presidente') && str_contains($biography, 'Secretário')
+        && str_contains($biography, '2025') && !str_contains($biography, 'Antecessor:')
+        && !str_contains($biography, 'Sucessor:'), 'Biography renders with optional fields omitted');
+} finally {
+    restore_error_handler();
+}
 try {$renderer->render('{{Incluir:Cycle}}','Other');throw new RuntimeException('Cycle accepted');}catch(MDAWiki\HttpError $e){verify($e->errorCode==='include_cycle','Detect recursive includes');}
 $badMail=new Accounts($db,new Session(),$config,static function(){throw new RuntimeException('SMTP unavailable');});
 try {$badMail->register(['name'=>'Failed','email'=>'failed@example.test','password'=>'valid-password','password_confirmation'=>'valid-password']);throw new RuntimeException('Mail should fail');}catch(RuntimeException $e){verify($db->one('SELECT ID FROM USUARIOS WHERE EMAIL = ?',['failed@example.test'])===null,'Mail failure rolls back registration');}
@@ -158,6 +176,9 @@ foreach(['private'=>5,'hidden'=>1,'redirect'=>1] as $name=>$level) {
 $db->run("INSERT INTO PAGINAS_REDIRECIONAMENTOS (IDENT,NOME_URL,ID,PAGINA_URL) VALUES ('home_redirect','home_redirect',1,'home_today')");
 $db->run("INSERT INTO PAGINAS_IMAGENS (IDENT,NOME_URL,ID,IMAGEM_URL,IMAGEM_FILE_URL,IMAGEM_FILE_MINI_URL,IMAGEM_FILE_CP_URL,TEMPLATE) VALUES ('home_today','home_today',1,'photo','https://mda.wiki.br/site/@imgs_wiki/photo.png','https://mda.wiki.br/site/@imgs_wiki_mini/photo.png','','N')");
 foreach([['home_today',1,'home_missing','Falta este conteúdo'],['home_week',1,'home_missing','Falta este conteúdo'],['home_private',1,'home_secret_missing','Link privado']] as [$source,$id,$target,$title]) $db->run('INSERT INTO PAGINAS_LINKS (IDENT,ID,LINK,LINK_IDENT,LINK_URL) VALUES (?,?,?,?,?)',[$source,$id,$title,$target,$target]);
+verify(MDAWiki\PageSummary::shorten('Uma excursão longa', 9) === 'Uma excursão...', 'Summary completes the Unicode word');
+verify(MDAWiki\PageSummary::shorten('Uma excursão', 9) === 'Uma excursão', 'Summary adds no ellipsis when the final word completes the content');
+verify(MDAWiki\PageSummary::shorten('Uma excursão longa', 4) === 'Uma...', 'Summary ends at an existing word boundary');
 $homeResponse=request('/v1/home');verify($homeResponse->status===200,'Home request succeeds');$home=$homeResponse->body['data'];
 foreach(['random','recent','popular','top_today','top_week','top_month','missing'] as $key) {
     verify(is_array($home[$key]) && count($home[$key])<=($key==='random'?3:10),'Home block limits: '.$key);

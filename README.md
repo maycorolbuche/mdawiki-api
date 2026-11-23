@@ -46,42 +46,43 @@ Os arquivos ficam em `MEDIA_ROOT/wiki`, `MEDIA_ROOT/wiki_mini` e `MEDIA_ROOT/wik
 O front envia base64 diretamente no PUT da página. URLs locais retornadas pelo antigo POST `/v1/media` continuam aceitas por compatibilidade e são convertidas em base64, sem buscar URLs externas. Remover limpa os três campos e os derivados dessa página; restaurar ou reprocessar regenera os arquivos a partir da fonte armazenada, sem depender de um upload antigo. `bin/import-media.php` também importa as pastas de miniaturas e capas do acervo legado.
 
 
-### E-mails de eventos compatíveis com o legado
+### E-mails da API
 
-A API reutiliza as tabelas existentes `EMAIL_MSG`, `EMAIL_ENVIO`, `EMAIL_CONFIG` e `EMAIL_LOGS`; não há migration nem novas variáveis obrigatórias. Os modelos e os destinatários precisam estar cadastrados nessas tabelas, como no site antigo.
+Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE` (`tls`, `ssl` ou `none`), `SMTP_USERNAME`, `SMTP_PASSWORD` e `SMTP_FROM` no ambiente da API. O layout HTML inclui o logo do MDAWiki e uma versão em texto.
 
-| Evento | Quando é disparado |
-| --- | --- |
-| `PAGE_ALT` | Criação, alteração ou restauração de artigo/imagem; inclui gravações recuperadas pelo comando local. Reprocessamento automático não representa nova edição e não envia aviso. |
-| `USU_CADASTRO_ATIVAR` | Novo cadastro. |
-| `USU_CADASTRO_ATIVAR_ENVCODIGO` | Reenvio do código de ativação. |
-| `USU_CADASTRO_ATIVADO` | Ativação concluída. |
-| `USU_ALTERACAO` | Alteração do perfil ou envio de nova foto. |
-| `USU_ALTERACAO_SENHA` | Troca de senha ou redefinição concluída. |
-| `USU_ALTERACAO_EMAIL_ENVCODIGO` | Confirmação solicitada para o novo e-mail. |
-| `USU_ALTERACAO_EMAIL` | Troca de e-mail concluída. |
+`MAIL_USER_COPY_TO` recebe cópias ocultas dos e-mails de conta, em uma entrega separada com o destinatário original no cabeçalho `X-Original-To`. Códigos e links de acesso ficam ocultos na cópia. `MAIL_ADMIN_TO` recebe avisos de criação e atualização de páginas, publicação, alteração e remoção de arquivos de imagem, cadastro e alterações do usuário. Ambas as variáveis são opcionais e aceitam endereços separados por vírgula ou ponto e vírgula.
 
-Assunto e mensagem por destinatário em `EMAIL_ENVIO` têm precedência quando não estão vazios; caso contrário, usa `EMAIL_MSG`. Para, CC e CCO também vêm de `EMAIL_ENVIO`. O SMTP é selecionado pelo `IDENTIF` do modelo, consultando `EMAIL_CONFIG`; sem configuração específica, utiliza o SMTP do ambiente. Mensagens dos modelos são HTML UTF-8.
+Os assuntos usam `[page][new|update]`, `[img][new|update|delete]` e `[user][new|update]`. Reprocessamento e gravações sem mudança não geram aviso. Falhas nas cópias e notificações opcionais entram na fila em `STORAGE_DIR/mail-outbox`, sem reverter o que foi salvo. Falha no envio obrigatório mantém o tratamento transacional dos fluxos de conta.
 
-As variáveis `<[NOME]>`, `<[EMAIL]>`, `<[EMAIL_NOVO]>`, `<[APELIDO]>`, `<[PAGINA]>`, `<[PAGINA_URL]>`, `<[CONTEUDO_CODE]>`, `<[CONTEUDO]>`, `<[CODIGO]>`, dados de clube/perfil, `<[IP]>`, `<[NAVEGADOR]>`, `<[DATAHORA]>`, `<[LINK]>` e `<[URL_SITE]>` são preenchidas como no legado. LINK usa o endereço da página no novo FRONTEND_URL. Confirme os links fixos dos modelos do banco antes de desativar o domínio antigo; prefira as variáveis de URL. EMAIL_ANTIGO também está disponível no aviso de alteração de e-mail.
+A migração `004_drop_mail_configuration.sql` remove as três tabelas de configuração de e-mail na base normalizada. A API deixou de consultar o SMTP e os modelos legados. O cron existente (`bin/maintenance.php` ou `bin/send-mail.php`) processa as novas falhas após cinco minutos, com até dez tentativas por mensagem. A fila antiga no banco fica fora desse processamento.
 
-Notificações opcionais respeitam `USUARIOS.ENVIA_EMAIL=N`. Os códigos necessários para ativar uma conta ou confirmar novo e-mail continuam sendo enviados mesmo com notificações opcionais desativadas. Se nenhum modelo entregar o código ao destinatário necessário, mantém o envio simples atual como alternativa, sem duplicar uma mensagem pessoal já atendida pelo modelo. A recuperação de senha mantém o link seguro com token e não volta a usar senha provisória em texto.
+### Cadastro na base migrada
 
-O envio é tentado na solicitação e os eventos ficam em `EMAIL_LOGS`: `N` pendente, `S` enviado, `E` falha, com data, motivo original e contador de tentativas. Erro no aviso de uma edição não desfaz o conteúdo salvo. Falha no envio obrigatório do código impede a conclusão daquele fluxo e preserva o tratamento transacional existente.
+Em uma instalação existente, execute `php bin/migrate-normalized-registration.php` no banco migrado para habilitar cadastro, ativação e reenvio de código. O importador cria as tabelas em novas migrações. As contas novas usam o AUTO_INCREMENT de `users.id`. O importador preserva os IDs do legado e deve ser executado em uma base vazia para evitar conflitos com contas criadas na API. IDs existentes são preservados ao atualizar a instalação.
 
-Para retentativas, o comando `bin/maintenance.php` já processa a fila. Também existe um comando separado:
+### Logs de erros
 
-```sh
-php /caminho/mdawiki-api/bin/send-mail.php
+Em uma instalação existente, execute `php bin/migrate-system-error-logs.php` uma vez para criar `system_error_logs` no banco da API. O importador também cria a tabela automaticamente. Falhas de e-mail, inclusive nas retentativas do cron, registram data, etapa, código do erro e metadados de diagnóstico. A tabela não armazena credenciais, destinatários nem o conteúdo da mensagem.
+
+```sql
+SELECT id, created_at, error_code, message, context
+FROM system_error_logs
+WHERE component = 'mail'
+ORDER BY id DESC
+LIMIT 30;
 ```
-
-Se a manutenção ainda não estiver agendada, execute o comando de e-mails por cron a cada cinco minutos. Ele processa até 50 registros, aguarda cinco minutos entre tentativas e limita falhas automáticas a dez tentativas. Mensagens novas usam UID `api-...`; o comando não reenvia automaticamente o histórico pendente do site antigo. Não execute o enviador legado sobre a mesma fila simultaneamente. Bloqueios locais por registro evitam duplicação entre processos da API no mesmo servidor.
-
-Confira `EMAIL_LOGS.ENVIADO`, `RETORNO` e `TENTATIVAS_ENVIO` para diagnosticar falhas. Após corrigir a configuração, uma falha esgotada pode ser liberada pelo administrador ajustando o contador/data do registro. Os testes usam transporte simulado: não enviam mensagens reais nem exigem credenciais SMTP.
-
 
 ### Foto de perfil quadrada
 
 `POST /v1/profile/photo` exige uma imagem raster quadrada (PNG, JPEG, GIF ou WebP). O front abre o modal Cropper.js e converte o recorte para PNG de 512×512 antes do envio, inclusive quando a origem escolhida é SVG. A API verifica as dimensões reais antes de gravar o arquivo ou alterar o perfil; uma imagem não quadrada ou SVG sem recorte retorna `422 invalid_profile_photo`.
 
 Os avatares já cadastrados e a importação do acervo são preservados. Essa restrição pertence ao upload de foto de perfil e não se aplica às imagens de artigos. Não há novas variáveis de ambiente ou mudanças de esquema.
+
+## Prévia da base migrada
+
+Em `dev`, aponte `DB_*` para a base importada. A API reconhece a estrutura pelo banco conectado. A base importada atende leitura pública, exportação, busca, início e contadores básicos. Autenticação, edição, histórico, catálogos e reconstrução dos vínculos da base migrada ainda estão em adaptação.
+
+
+A home da base migrada usa visitas com horário para calcular os rankings móveis de 24 horas, 7 e 30 dias. Em instalações existentes, execute `php bin/migrate-page-visits.php`. A coleta começa após a implantação, pois os contadores históricos não têm horário individual. O cron de manutenção remove registros com mais de 31 dias.
+
+O card **Nos ajude com esses conteúdos** sorteia até dez destinos internos inexistentes de páginas públicas buscáveis. Em instalações existentes, execute `php bin/migrate-page-missing-links.php` e, com o código novo publicado, `php bin/rebuild-normalized-pages.php` para preencher os vínculos dos artigos existentes. Novas gravações mantêm a tabela atualizada.

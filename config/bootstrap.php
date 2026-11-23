@@ -33,7 +33,7 @@ return [
     'storage_dir' => getenv('STORAGE_DIR') ?: dirname(__DIR__).'/var',
     'media_root' => getenv('MEDIA_ROOT') ?: dirname(__DIR__).'/var/media',
     'media_public_url' => rtrim(getenv('MEDIA_PUBLIC_URL') ?: 'https://api.mda.wiki.br/media','/'),
-    'mail' => ['host'=>getenv('SMTP_HOST') ?: '', 'port'=>(int)(getenv('SMTP_PORT') ?: 587), 'secure'=>getenv('SMTP_SECURE') ?: 'tls', 'username'=>getenv('SMTP_USERNAME') ?: '', 'password'=>getenv('SMTP_PASSWORD') ?: '', 'from'=>getenv('SMTP_FROM') ?: ''],
+    'mail' => ['user_copy_to'=>getenv('MAIL_USER_COPY_TO') ?: '', 'admin_to'=>getenv('MAIL_ADMIN_TO') ?: '', 'host'=>getenv('SMTP_HOST') ?: '', 'port'=>(int)(getenv('SMTP_PORT') ?: 587), 'secure'=>getenv('SMTP_SECURE') ?: 'tls', 'username'=>getenv('SMTP_USERNAME') ?: '', 'password'=>getenv('SMTP_PASSWORD') ?: '', 'from'=>getenv('SMTP_FROM') ?: ''],
     'debug' => filter_var(getenv('APP_DEBUG') ?: 'false', FILTER_VALIDATE_BOOLEAN),
     'app_env' => getenv('APP_ENV') ?: 'production',
     'origins' => array_values(array_filter(array_map('trim', explode(',', getenv('ALLOWED_ORIGINS') ?: '')))),
