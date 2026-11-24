@@ -12,11 +12,21 @@ let db
 const request = path => runtime.dispatchFetch('http://localhost' + path)
 
 before(async () => {
-  const built = await build({ entryPoints: ['src/index.ts'], bundle: true, format: 'esm', write: false, external: ['node:crypto'], plugins: [{
+  const built = await build({ entryPoints: ['src/index.ts'], bundle: true, format: 'esm', write: false, plugins: [{
+    name: 'simulate-hosted-pbkdf2-limit',
+    setup(plugin) {
+      plugin.onResolve({ filter: /^node:crypto$/ }, () => ({ path: 'crypto', namespace: 'test' }))
+      plugin.onLoad({ filter: /^crypto$/, namespace: 'test' }, () => ({
+        contents: `export const pbkdf2 = (...args) => {
+          args.at(-1)(new DOMException('Maximum PBKDF2 iterations exceeded', 'NotSupportedError'));
+        };`,
+      }))
+    },
+  }, {
     name: 'capture-smtp',
     setup(plugin) {
       plugin.onResolve({ filter: /^\.\/smtp$/ }, () => ({ path: 'smtp', namespace: 'test' }))
-      plugin.onLoad({ filter: /.*/, namespace: 'test' }, () => ({
+      plugin.onLoad({ filter: /^smtp$/, namespace: 'test' }, () => ({
         contents: `export const smtpConfigured = env => Boolean(env.SMTP_HOST);
           export const sendSmtp = (env, to, subject, text) =>
             env.MEDIA.put('test-mail/' + to, JSON.stringify({ subject, text }));`,
