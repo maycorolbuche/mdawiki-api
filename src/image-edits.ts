@@ -1,40 +1,15 @@
 import { mailRecipients, notifyEvent } from './wiki-mail'
 import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
-import { imageSize } from 'image-size'
+import { decodeUpload, formats, maxBytes, readImage } from './image-upload'
 import { activeAccount, readSession, same, allowedAttempt } from './accounts'
 import { publicImage } from './directory'
 import { identifier, legacyIdentifier, mediaUrl } from './pages'
 import { query, validSlug, type Env } from './types'
 
-const maxBytes = 5_000_000
-const formats: Record<string, string> = { jpg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp' }
 const error = (code: string, message: string) => ({ error: { code, message } })
 const conflict = error('edit_conflict', 'A imagem mudou. Atualize a página e tente novamente.')
 const invalidUpload = error('invalid_upload', 'Envie uma imagem PNG, JPEG, GIF ou WebP de até 5 MB e 20 megapixels.')
-
-function readImage(bytes: Uint8Array) {
-  if (bytes.length > maxBytes) return null
-  try {
-    const { type, width, height } = imageSize(bytes)
-    const extension = type ?? ''
-    if (!Object.hasOwn(formats, extension) || !width || !height || width * height > 20_000_000) return null
-    return { extension, width, height, size_bytes: bytes.length }
-  } catch {
-    return null
-  }
-}
-
-function decodeUpload(data: unknown) {
-  if (typeof data !== 'string' || data.length > Math.ceil(maxBytes / 3) * 4 + 32) return null
-  const encoded = /^data:image\/(?:png|jpeg|gif|webp);base64,([a-z0-9+/]+={0,2})$/i.exec(data)?.[1]
-  if (!encoded) return null
-  try {
-    return Uint8Array.from(atob(encoded), character => character.charCodeAt(0))
-  } catch {
-    return null
-  }
-}
 
 type Image = { id: number; slug: string; file_id: number | null; access_level_id: number }
 export const imageEdits = new Hono<{ Bindings: Env }>()
