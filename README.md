@@ -77,8 +77,8 @@ O Worker já insere as páginas afetadas na fila. Em homologação, o cron tenta
 
 ## Escrita de artigos em homologação
 
-Aplique as migrations e configure `ARTICLE_WRITES_ENABLED=true` apenas com dados de homologação. Essa configuração habilita a edição, a prévia, a restauração de revisões e o cron de reprocessamento no Worker. A versão de edição faz parte do contrato HTTP. O lote D1 guarda conteúdo, revisão e vínculos na mesma transação e rejeita concorrência com HTTP 409.
+Aplique as migrations do D1 antes do deploy. Edição, prévia, restauração e reprocessamento manual seguem as permissões da conta. A fila automática é executada quando `ARTICLE_REBUILD_CRON_ENABLED=true`. A versão de edição faz parte do contrato HTTP. O lote D1 guarda conteúdo, revisão e vínculos na mesma transação e rejeita concorrência com HTTP 409.
 
 O renderizador sanitiza HTML e processa a marcação básica, incluindo títulos, listas, links, categorias, inclusões, imagens e redirecionamentos. Macros de apresentação, tabelas wiki e regras PCRE do PHP exigem validação adicional. Macros desconhecidas e tabelas wiki retornam `unsupported_markup`. O HTML armazenado segue disponível nesses casos. O reprocessamento preserva páginas com erro na fila.
 
-Para rollback dessa etapa, publique a versão anterior do Worker. A coluna de controle é aditiva e compatível com a versão anterior. Para interromper gravações e o consumo da fila de artigos no Worker atual, retire a variável `ARTICLE_WRITES_ENABLED`.
+Para rollback dessa etapa, publique a versão anterior do Worker. A coluna de controle é aditiva e compatível com a versão anterior.

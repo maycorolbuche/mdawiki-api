@@ -16,7 +16,6 @@ const conflict = error('edit_conflict', 'Outra edição foi salva. Recarregue a 
 const invalidPage = error('invalid_page', 'Informe um título e conteúdo de até 500 KB.')
 const routes = new Hono<{ Bindings: Env }>()
 export const articleWrites = routes
-const editingDisabled = error('read_only_preview', 'Edição indisponível neste ambiente.')
 
 export async function pageVersion(page: Pick<Page, 'id' | 'title' | 'source' | 'updated_at' | 'updated_by'> | null) {
   if (!page) return ''
@@ -138,7 +137,6 @@ async function save(db: D1Database, page: Page | null, slug: string, title: stri
 }
 
 routes.get('/pages/:slug/editor', async c => {
-  if (c.env.ARTICLE_WRITES_ENABLED !== 'true') return c.json(editingDisabled, 501)
   c.header('Cache-Control', 'no-store')
   const user = await activeAccount(c, await readSession(c))
   if (!user) return c.json(error('login_required', 'Entre na sua conta para continuar.'), 401)
@@ -156,7 +154,6 @@ routes.get('/pages/:slug/editor', async c => {
 
 routes.on(['PUT', 'POST'], ['/pages/:slug', '/pages/:slug/:action{preview|restore|rebuild}'],
   bodyLimit({ maxSize: 3_020_000 }), async c => {
-    if (c.env.ARTICLE_WRITES_ENABLED !== 'true') return c.json(editingDisabled, 501)
     c.header('Cache-Control', 'no-store')
     const action = c.req.param('action')
     if ((!action && c.req.method !== 'PUT') || (action && c.req.method !== 'POST')) {
@@ -217,7 +214,7 @@ routes.on(['PUT', 'POST'], ['/pages/:slug', '/pages/:slug/:action{preview|restor
 
 /** Reprocessa em lotes pequenos e mantém uma página com erro na fila para diagnóstico. */
 export async function rebuildQueuedArticles(env: Env) {
-  if (env.ARTICLE_WRITES_ENABLED !== 'true') return
+  if (env.ARTICLE_REBUILD_CRON_ENABLED !== 'true') return
   const db = env.DB
   const rows = await query(db, `SELECT p.* FROM page_rebuild_queue q JOIN pages p ON p.id = q.page_id
     WHERE p.kind <> 'image' AND p.legacy_identifier NOT LIKE 'page@%' ORDER BY q.queued_at, q.page_id LIMIT 5`).all<Page>()

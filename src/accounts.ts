@@ -173,7 +173,7 @@ accounts.get('/view/:slug', async c => {
   const slug = c.req.param('slug')
   if (!validSlug(slug)) return c.json(failure('invalid_slug', 'Endereço inválido.'), 422)
   const page = await findPage(c.env.DB, new URL(c.req.url).origin, c.env.FRONTEND_URL.replace(/\/$/, ''), slug)
-  return page ? c.json({ data: { ...page, is_public: true, read_only: c.env.ARTICLE_WRITES_ENABLED !== 'true' } }) : c.json(failure('not_found', 'Página não encontrada.'), 404)
+  return page ? c.json({ data: { ...page, is_public: true } }) : c.json(failure('not_found', 'Página não encontrada.'), 404)
 })
 
 accounts.post('/visits', bodyLimit({ maxSize: 4096, onError: c => c.json(failure('body_too_large', 'Solicitação muito grande.'), 413) }), async c => {

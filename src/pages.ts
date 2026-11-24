@@ -18,6 +18,7 @@ export const mediaUrl = (base: string, key: string | null) =>
 
 type Card = { id: string; slug: string; title: string }
 type Page = Card & {
+  kind: string;
   html: string | null; text: string | null; image: string | null; updated_at: string | null;
   categories: string; mentions: string; related_pages: string; category_members: string;
   missing_links: string; redirect_slug: string | null;
@@ -29,7 +30,7 @@ function relation(from: string, condition: string, order: string, limit = '') {
     FROM (SELECT DISTINCT ${card} FROM ${from} WHERE ${condition} AND ${publicPage} ORDER BY ${order} ${limit}))`
 }
 
-const pageQuery = `SELECT CAST(article.id AS TEXT) AS id, article.slug, article.title,
+const pageQuery = `SELECT CAST(article.id AS TEXT) AS id, article.slug, article.title, article.kind,
   article.rendered_html AS html, article.plain_text AS text, COALESCE(article.rebuilt_at, article.updated_at) AS updated_at,
   ${cover.replace('m.page_id = p.id', 'm.page_id = article.id')} AS image,
   ${relation('page_categories c JOIN pages p ON p.id = c.category_id', 'c.page_id = article.id', 'c.position, c.id')} AS categories,
@@ -57,7 +58,7 @@ function present(row: Page, api: string, frontend: string) {
     canonical_url: frontend + '/' + encodeURIComponent(slug) + '/',
     categories: JSON.parse(row.categories), mentions: JSON.parse(row.mentions),
     category_members: JSON.parse(row.category_members), related_pages: JSON.parse(row.related_pages),
-    missing_links: JSON.parse(row.missing_links), study_material_url: null, image_usage: [], read_only: true,
+    missing_links: JSON.parse(row.missing_links), study_material_url: null, image_usage: [], read_only: row.kind === 'image',
   }
 }
 

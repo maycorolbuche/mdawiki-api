@@ -53,7 +53,7 @@ app.get('/v1/pages/:slug', async c => {
   const slug = c.req.param('slug')
   if (!validSlug(slug)) return c.json(error('invalid_slug', 'Endereço inválido.'), 400)
   const data = await findPage(c.env.DB, origin(c.req.url), c.env.FRONTEND_URL.replace(/\/$/, ''), slug)
-  return data ? c.json({ data: { ...data, read_only: c.env.ARTICLE_WRITES_ENABLED !== 'true' } })
+  return data ? c.json({ data })
     : c.json(error('not_found', 'Artigo não encontrado ou indisponível.'), 404)
 })
 app.get('/v1/search', async c => {
