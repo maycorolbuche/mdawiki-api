@@ -13,7 +13,7 @@ const escape = (value: string) => value.replace(/[&<>"']/g, char =>
 const strip = (value: string) => decodeHTML(sanitizeHtml(value, { allowedTags: [], allowedAttributes: {} })).trim()
 type Include = { name: string; section: string }
 type Link = { name: string; fragment: string; label: string }
-type ImageRef = { id: number | null; template: boolean }
+type ImageRef = { identifier: string; legacy: string; template: boolean }
 const includePattern = /\{\{Incluir:([^{}]+)\}\}/gi
 const includesIn = (source: string): Include[] => Array.from(source.matchAll(includePattern), match => {
   const [name, section = ''] = match[1].trim().split(/#(.*)/s)
@@ -89,7 +89,7 @@ export async function renderWiki(db: D1Database, source: string, slug: string, f
     const image = await query(db, `SELECT id, slug FROM images
       WHERE (identifier = ? OR legacy_identifier = ?) AND access_level_id <= 1
       ORDER BY identifier = ? DESC LIMIT 1`, key, 'imagem@' + legacyIdentifier(name), key).first<{ id: number; slug: string }>()
-    images.push({ id: image?.id ?? null, template: /!tmpl$/i.test(reference) })
+    images.push({ identifier: key, legacy: 'imagem@' + legacyIdentifier(name), template: /!tmpl$/i.test(reference) })
     const url = '{{{url_diretorio}}}' + articleImagePath(image?.slug ?? name).slice('/media/'.length)
     parts[i] = '<a href="' + frontend + '/i/' + encodeURIComponent(image?.slug ?? name) + '"><img src="' + escape(url) +
       '" alt="' + escape(name) + '"></a>'
