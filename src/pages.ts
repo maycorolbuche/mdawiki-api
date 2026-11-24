@@ -1,3 +1,4 @@
+import { presentArticleImages } from './article-images'
 import { decodeHTML } from 'entities'
 import { query } from './types'
 
@@ -47,10 +48,11 @@ const pageQuery = `SELECT CAST(article.id AS TEXT) AS id, article.slug, article.
 /** Formata o HTML importado sem executar o renderizador wiki durante a leitura. */
 function present(row: Page, api: string, frontend: string) {
   const { id, slug, updated_at, redirect_slug } = row
-  const html = (row.html ?? '')
+  const resolved = (row.html ?? '')
     .replaceAll('{{{url_site}}}', frontend + '/')
     .replaceAll('{{{url_diretorio}}}', api + '/media/')
     .replace(/https?:\/\/api\.mda\.wiki\.br\/media\//gi, api + '/media/')
+  const html = presentArticleImages(resolved, api, frontend)
   const description = decodeHTML((row.text ?? '').replace(/<[^>]*>/g, '')).trim()
   return {
     id, slug, title: decodeHTML(row.title ?? slug), html, updated_at, redirect_slug,
