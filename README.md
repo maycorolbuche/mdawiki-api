@@ -59,7 +59,7 @@ O exportador preserva IDs e vínculos, valida as restrições no SQLite e imprim
 - A busca usa a comparação nativa do SQLite. A equivalência completa de acentos e maiúsculas com o MySQL ainda precisa de validação.
 - A leitura usa HTML importado, com substituição dos marcadores de URL e do domínio antigo da API nas referências de mídia. A decoração dinâmica de links de artigos e a integração com material de estudo ainda precisam de portabilidade.
 - A entrega R2 cobre as chaves normalizadas de artigos públicos e fotos associadas a contas ativas. O sistema antigo continua responsável pelos fluxos de edição e compatibilidade com outras chaves de mídia.
-- Cadastro, recuperação de senha, edição de perfil, upload avulso e e-mails são etapas seguintes da migração.
+- Recuperação de senha, edição de perfil, upload avulso e avisos administrativos por e-mail são etapas seguintes da migração.
 
 ## Sessões e visitas
 
@@ -82,3 +82,9 @@ Aplique as migrations do D1 antes do deploy. Edição, prévia, restauração e 
 O renderizador sanitiza HTML e processa a marcação básica, incluindo títulos, listas, links, categorias, inclusões, imagens e redirecionamentos. Macros de apresentação, tabelas wiki e regras PCRE do PHP exigem validação adicional. Macros desconhecidas e tabelas wiki retornam `unsupported_markup`. O HTML armazenado segue disponível nesses casos. O reprocessamento preserva páginas com erro na fila.
 
 Para rollback dessa etapa, publique a versão anterior do Worker. A coluna de controle é aditiva e compatível com a versão anterior.
+
+## Cadastro e ativação
+
+O Worker implementa `POST /v1/auth/register`, `POST /v1/auth/activate` e `POST /v1/auth/resend`. A conta é criada inativa. Um código de seis dígitos vence em 24 horas e só pode ser consumido uma vez. O reenvio substitui o código anterior. Em caso de falha SMTP após a gravação, a conta permanece inativa e admite reenvio.
+
+Configure `APP_KEY` e os valores `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_FROM`, `SMTP_USERNAME` e `SMTP_PASSWORD` no Worker. Use TLS explícito (`tls`, normalmente porta 587) ou TLS implícito (`ssl`, normalmente porta 465). Mantenha credenciais nos secrets da Cloudflare. As rotas usam a tabela existente `user_activations`.
