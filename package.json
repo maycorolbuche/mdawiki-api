@@ -9,6 +9,7 @@
     "deploy": "wrangler deploy"
   },
   "dependencies": {
+    "@noble/hashes": "2.4.0",
     "entities": "^7.0.0",
     "hono": "^4.13.21",
     "image-size": "^2.1.0",
