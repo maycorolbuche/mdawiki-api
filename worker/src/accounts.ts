@@ -7,7 +7,7 @@ import { query, validSlug, type Env } from './types'
 type Api = { Bindings: Env }
 type RequestContext = Context<Api>
 type Session = { token_hash: string; csrf_token: string; user_id: number | null; password_fingerprint: string | null }
-type Account = { ID: number; SENHA: string; FOTO: string | null; ATIVO: 'S' | 'N' }
+type Account = { ID: number; SENHA: string; FOTO: string | null; ATIVO: 'S' | 'N'; role: 'reader' | 'user' | 'admin'; NIVEL: number }
 const accountFields = `id AS ID, password_hash AS SENHA, avatar_filename AS FOTO, email AS EMAIL,
   name AS NOME, display_name AS APELIDO, role, CASE role WHEN 'reader' THEN 0 WHEN 'admin' THEN 5 ELSE 1 END AS NIVEL,
   birth_date AS DATA_NASC, city AS CIDADE, state_code AS ESTADO, club AS CLUBE,
@@ -19,7 +19,7 @@ const hex = (bytes: ArrayBuffer | Uint8Array) => Array.from(new Uint8Array(bytes
 const token = () => hex(crypto.getRandomValues(new Uint8Array(32)))
 const now = () => Math.floor(Date.now() / 1000)
 const digest = async (value: string, algorithm = 'SHA-256') => hex(await crypto.subtle.digest(algorithm, encoder.encode(value)))
-const same = (a: string, b: string) => a.length === b.length && (crypto.subtle as SubtleCrypto & { timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean }).timingSafeEqual(encoder.encode(a), encoder.encode(b))
+export const same = (a: string, b: string) => a.length === b.length && (crypto.subtle as SubtleCrypto & { timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean }).timingSafeEqual(encoder.encode(a), encoder.encode(b))
 const failure = (code: string, message: string) => ({ error: { code, message } })
 const csrfFailure = failure('csrf_failed', 'Sessão expirada. Atualize a página e tente novamente.')
 const loginRequired = failure('login_required', 'Entre na sua conta para continuar.')
@@ -31,14 +31,14 @@ function profile(user: Account, url: string) {
 }
 
 /** Guarda no D1 apenas o hash do cookie, consultando a expiração em cada requisição. */
-async function readSession(c: RequestContext) {
+export async function readSession(c: RequestContext) {
   const value = getCookie(c, cookie)
   if (!value || !/^[a-f0-9]{64}$/.test(value)) return null
   return query(c.env.DB, 'SELECT * FROM worker_sessions WHERE token_hash = ? AND expires_at > ?',
     await digest(value), now()).first<Session>()
 }
 
-async function activeAccount(c: RequestContext, session: Session | null) {
+export async function activeAccount(c: RequestContext, session: Session | null) {
   if (!session?.user_id) return null
   const user = await query(c.env.DB, `SELECT ${accountFields} FROM users WHERE id = ? AND is_active = 1`,
     session.user_id).first<Account>()
@@ -51,7 +51,7 @@ function writeCookie(c: RequestContext, value: string, maxAge?: number) {
 }
 
 /** Limita a emissão de sessões e tentativas de login sem armazenar e-mail ou IP em texto puro. */
-async function allowedAttempt(c: RequestContext, scope: string, max: number) {
+export async function allowedAttempt(c: RequestContext, scope: string, max: number) {
   const result = await query(c.env.DB, `INSERT INTO worker_rate_limits(scope, window, attempts) VALUES (?, ?, 1)
     ON CONFLICT(scope, window) DO UPDATE SET attempts = attempts + 1 WHERE attempts < ? RETURNING attempts`,
     await digest(scope), Math.floor(now() / 3600), max).first()

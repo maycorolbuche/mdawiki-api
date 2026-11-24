@@ -19,7 +19,7 @@ before(async () => {
     bindings: { FRONTEND_URL: 'https://mda.wiki.br', ALLOWED_ORIGINS: origin, APP_KEY: appKey },
   }))
   db = await runtime.getD1Database('DB')
-  const schema = (await Promise.all(['0001_schema.sql', '0002_sessions.sql', '0003_visit_windows.sql'].map(name => readFile('migrations/' + name, 'utf8')))).join('\n')
+  const schema = (await Promise.all(['0001_schema.sql', '0002_sessions.sql', '0003_visit_windows.sql', '0004_image_history.sql'].map(name => readFile('migrations/' + name, 'utf8')))).join('\n')
   const ddl = schema.replace(/^--.*$/gm, '')
   const triggers = ddl.match(/CREATE TRIGGER[\s\S]*?\nEND;/g) ?? []
   const statements = ddl.replace(/CREATE TRIGGER[\s\S]*?\nEND;/g, '').split(';').map(sql => sql.trim()).filter(Boolean)
@@ -143,4 +143,43 @@ test('deduplicates visits across concurrent requests and updates the counter onc
   assert.equal(results.filter(result => result.data.counted).length, 1)
   assert.equal(await db.prepare('SELECT COUNT(*) AS count FROM page_visits').first('count'), before + 1)
   assert.equal(await db.prepare('SELECT view_count FROM pages WHERE id = 41').first('view_count'), 1)
+})
+
+test('writes R2 images, queues linked articles and restores a former revision', async () => {
+  const session = await request('/v1/auth/session')
+  const { data } = await session.json()
+  const headers = { Origin: origin, Cookie: session.headers.get('set-cookie').split(';')[0],
+    'X-CSRF-Token': data.csrf_token, 'Content-Type': 'application/json' }
+  const login = await runtime.dispatchFetch('http://localhost/v1/auth/login', {
+    method: 'POST', headers, body: JSON.stringify({ email: 'private@example.test', password: legacyPassword }),
+  })
+  assert.equal(login.status, 200)
+  headers.Cookie = login.headers.get('set-cookie').split(';')[0]
+  headers['X-CSRF-Token'] = (await login.json()).data.csrf_token
+  await db.prepare("INSERT INTO page_revisions (page_id, revision_number, slug, title, source, created_by, access_level_id) VALUES (41, 1, 'Cães', 'Público', 'Wiki', 1, 1), (41, 2, 'Cães', 'Restrito', 'Wiki interno', 1, 5)").run()
+  const history = await runtime.dispatchFetch('http://localhost/v1/pages/C%C3%A3es/history', { headers })
+  assert.equal(history.status, 200)
+  assert.deepEqual((await history.json()).data.revisions.map(row => row.id), [1])
+  assert.equal((await request('/v1/pages/C%C3%A3es/history')).status, 401)
+  const preflight = await runtime.dispatchFetch('http://localhost/v1/images/Public', { method: 'OPTIONS',
+    headers: { Origin: origin, 'Access-Control-Request-Method': 'PUT' } })
+  assert.match(preflight.headers.get('Access-Control-Allow-Methods'), /PUT/)
+  const update = body => runtime.dispatchFetch('http://localhost/v1/images/Public', {
+    method: 'PUT', headers, body: JSON.stringify(body),
+  })
+  const file = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j8NgAAAAASUVORK5CYII='
+  const uploaded = await update({ base_version: '1', data: file })
+  assert.equal(uploaded.status, 200, await uploaded.clone().text())
+  const image = (await uploaded.json()).data
+  assert.notEqual(image.version, '1')
+  assert.equal(image.meta.width, 1)
+  assert.equal(await db.prepare('SELECT page_id FROM page_rebuild_queue WHERE page_id = 41').first('page_id'), 41)
+  assert.equal((await request(new URL(image.url).pathname)).status, 200)
+  assert.equal((await update({ base_version: '1', clear: true })).status, 409)
+  const cleared = await update({ base_version: image.version, clear: true })
+  assert.equal(cleared.status, 200)
+  assert.equal((await cleared.json()).data.url, null)
+  const restore = await update({ base_version: '', revision_id: image.history[0].id })
+  assert.equal(restore.status, 200)
+  assert.equal((await restore.json()).data.version, '1')
 })
