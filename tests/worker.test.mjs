@@ -35,7 +35,7 @@ before(async () => {
       MAIL_USER_COPY_TO: 'copy@example.test; invalid, COPY@example.test' },
   }))
   db = await runtime.getD1Database('DB')
-  const schema = (await Promise.all(['0001_schema.sql', '0002_sessions.sql', '0003_visit_windows.sql', '0004_image_history.sql', '0005_page_edit_token.sql', '0006_password_resets.sql', '0007_mail_outbox.sql'].map(name => readFile('migrations/' + name, 'utf8')))).join('\n')
+  const schema = (await Promise.all(['0001_schema.sql', '0002_sessions.sql', '0003_visit_windows.sql', '0004_image_history.sql', '0005_page_edit_token.sql', '0006_password_resets.sql', '0007_mail_outbox.sql', '0008_email_changes.sql'].map(name => readFile('migrations/' + name, 'utf8')))).join('\n')
   const ddl = schema.replace(/^--.*$/gm, '')
   const triggers = ddl.match(/CREATE TRIGGER[\s\S]*?\nEND;/g) ?? []
   const statements = ddl.replace(/CREATE TRIGGER[\s\S]*?\nEND;/g, '').split(';').map(sql => sql.trim()).filter(Boolean)
@@ -324,4 +324,66 @@ test('notifies administrators and redacts credentials in hidden user copies', as
     assert.match(mail.text, /https:\/\/mda.wiki.br\/u\//)
     assert.doesNotMatch(mail.text + mail.options.html, /pbkdf2-sha256|test-password-123|token=/)
   }
+})
+
+test('edits account details and photo, rotates password sessions and verifies a new email', async () => {
+  const session = await request('/v1/auth/session')
+  const initial = { Origin: origin, Cookie: session.headers.get('set-cookie').split(';')[0],
+    'X-CSRF-Token': (await session.json()).data.csrf_token, 'Content-Type': 'application/json' }
+  const call = (path, body, headers, method = 'POST') => runtime.dispatchFetch('http://localhost/v1' + path, {
+    method, headers, body: JSON.stringify(body),
+  })
+  const email = 'private@example.test'
+  const login = await call('/auth/login', { email, password: legacyPassword }, initial)
+  assert.equal(login.status, 200)
+  const headers = { ...initial, Cookie: login.headers.get('set-cookie').split(';')[0],
+    'X-CSRF-Token': (await login.json()).data.csrf_token }
+  assert.equal((await call('/profile', { NOME: 'Inválido' }, initial, 'PUT')).status, 403)
+  assert.equal((await call('/profile', { DATA_NASC: '2023-02-29' }, headers, 'PUT')).status, 422)
+  const edited = await call('/profile', { NOME: 'Nome atualizado', DATA_NASC: '2024-02-29',
+    EMAIL: 'ignore@example.test', role: 'admin' }, headers, 'PUT')
+  assert.equal(edited.status, 200, await edited.clone().text())
+  const { data: profile } = await edited.json()
+  assert.equal(profile.NOME, 'Nome atualizado')
+  assert.equal(profile.EMAIL, email)
+  assert.notEqual(profile.role, 'admin')
+  assert.equal(profile.SENHA, undefined)
+
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j8NgAAAAASUVORK5CYII='
+  assert.equal((await call('/profile/photo', { data: 'data:image/svg+xml;base64,PHN2Zz4=' }, headers)).status, 422)
+  const uploaded = await call('/profile/photo', { data: png }, headers)
+  assert.equal(uploaded.status, 200, await uploaded.clone().text())
+  const { data: photo } = await uploaded.json()
+  assert.match(photo.url, /\/media\/users\/avatar-.*\.png$/)
+  assert.equal((await runtime.dispatchFetch(photo.url)).status, 200)
+
+  const password = 'nova-senha-teste'
+  const change = { current_password: legacyPassword, password, password_confirmation: password }
+  assert.equal((await call('/profile/password', { ...change, current_password: 'incorreta' }, headers)).status, 422)
+  const changed = await call('/profile/password', change, headers)
+  assert.equal(changed.status, 200, await changed.clone().text())
+  const current = { ...headers, Cookie: changed.headers.get('set-cookie').split(';')[0],
+    'X-CSRF-Token': (await changed.json()).data.csrf_token }
+  assert.notEqual(headers.Cookie, current.Cookie)
+  const oldSession = await runtime.dispatchFetch('http://localhost/v1/profile', { headers })
+  assert.equal(oldSession.status, 401)
+
+  const newEmail = 'novo@example.test'
+  assert.equal((await call('/profile/email', { email: newEmail }, current)).status, 200)
+  assert.equal(await db.prepare('SELECT email FROM users WHERE id = 1').first('email'), email)
+  const bucket = await runtime.getR2Bucket('MEDIA')
+  const mail = await (await bucket.get('test-mail/' + newEmail)).json()
+  const code = mail.text.match(/[a-f0-9]{20}$/)[0]
+  assert.notEqual(await db.prepare('SELECT token_hash FROM worker_email_changes WHERE user_id = 1').first('token_hash'), code)
+  assert.equal((await call('/profile/email', { email: 'outro@example.test', code }, current)).status, 422)
+  const confirmed = await call('/profile/email', { email: newEmail, code }, current)
+  assert.equal(confirmed.status, 200, await confirmed.clone().text())
+  assert.equal((await confirmed.json()).data.user.EMAIL, newEmail)
+  assert.equal(await db.prepare('SELECT COUNT(*) n FROM worker_email_changes WHERE user_id = 1').first('n'), 0)
+  assert.equal((await call('/profile/email', { email: newEmail, code }, current)).status, 409)
+  const fresh = await request('/v1/auth/session')
+  const anonymous = { ...initial, Cookie: fresh.headers.get('set-cookie').split(';')[0],
+    'X-CSRF-Token': (await fresh.json()).data.csrf_token }
+  assert.equal((await call('/auth/login', { email: newEmail, password: legacyPassword }, anonymous)).status, 401)
+  assert.equal((await call('/auth/login', { email: newEmail, password }, anonymous)).status, 200)
 })
