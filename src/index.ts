@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { failureReason, type RegistrationStage } from './diagnostics'
 import { registration } from './registration'
 import { articleWrites, rebuildQueuedArticles } from './article-writes'
 import { editorHistory } from './editor-history'
@@ -9,7 +10,7 @@ import { serveMedia } from './media'
 import { findPage, home, listPages, searchPages, statistics } from './pages'
 import { validSlug, type Env } from './types'
 
-const app = new Hono<{ Bindings: Env }>()
+const app = new Hono<{ Bindings: Env; Variables: { registrationStage: RegistrationStage } }>()
 const error = (code: string, message: string) => ({ error: { code, message } })
 const integer = (value: string, min: number, max: number) =>
   /^\d+$/.test(value) && Number(value) >= min && Number(value) <= max
@@ -85,9 +86,12 @@ app.on(['GET', 'HEAD'], '/media/:group/:file', async c =>
 app.notFound(c => c.req.path.startsWith('/v1/') && !['GET', 'HEAD'].includes(c.req.method)
   ? c.json(error('read_only_preview', 'Esta operação ainda não está disponível no Worker.'), 501)
   : c.json(error('route_not_found', 'Rota da API não encontrada.'), 404))
-app.onError((_failure, c) => {
+app.onError((failure, c) => {
   const request_id = crypto.randomUUID()
-  console.error(JSON.stringify({ request_id, method: c.req.method, event: 'request_failed' }))
+  console.error(JSON.stringify({
+    request_id, method: c.req.method, event: 'request_failed',
+    stage: c.get('registrationStage'), reason: failureReason(failure),
+  }))
   return c.json({ error: { code: 'service_unavailable', message: 'Falha ao processar a solicitação.', request_id } }, 503)
 })
 
