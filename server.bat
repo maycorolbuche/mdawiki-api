@@ -1,1 +1,7 @@
-php -S 192.168.1.165:8008 -t public
+@echo off
+setlocal
+cd /d "%~dp0"
+
+echo Iniciando MDAWiki em http://localhost:8008
+call npx wrangler dev --port 8008
+if errorlevel 1 pause
