@@ -7,7 +7,7 @@ import { query, validSlug, type Env } from './types'
 type Api = { Bindings: Env }
 type RequestContext = Context<Api>
 type Session = { token_hash: string; csrf_token: string; user_id: number | null; password_fingerprint: string | null }
-type Account = { ID: number; SENHA: string; FOTO: string | null; ATIVO: 'S' | 'N'; role: 'reader' | 'user' | 'admin'; NIVEL: number }
+type Account = { ID: number; NOME: string | null; EMAIL: string; SENHA: string; FOTO: string | null; ATIVO: 'S' | 'N'; role: 'reader' | 'user' | 'admin'; NIVEL: number }
 const accountFields = `id AS ID, password_hash AS SENHA, avatar_filename AS FOTO, email AS EMAIL,
   name AS NOME, display_name AS APELIDO, role, CASE role WHEN 'reader' THEN 0 WHEN 'admin' THEN 5 ELSE 1 END AS NIVEL,
   birth_date AS DATA_NASC, city AS CIDADE, state_code AS ESTADO, club AS CLUBE,

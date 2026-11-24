@@ -105,3 +105,42 @@ banco do ambiente de teste e confirme a configuração do SMTP e de
 ```sh
 npx wrangler d1 migrations apply mdawiki --remote
 ```
+
+### Notificações por e-mail no Worker
+
+`MAIL_ADMIN_TO` recebe avisos de operações administrativas.
+`MAIL_USER_COPY_TO` recebe cópias ocultas dos e-mails de conta. Ambas as
+listas aceitam vírgula ou ponto e vírgula e ignoram entradas inválidas e
+duplicatas. As cópias mantêm o destinatário original no cabeçalho e
+ocultam códigos e links de autenticação. Configure as variáveis no
+Worker junto das configurações SMTP.
+
+Aplique a migração `0007_mail_outbox.sql` ao D1 antes de publicar. O
+Worker registra falhas em `system_error_logs` sem guardar endereços,
+credenciais ou conteúdo nesse log. A fila no D1 contém o conteúdo das
+notificações opcionais que falharam e usa o cron existente para até
+cinco novas tentativas. As notificações são enviadas depois da
+gravação. Em caso de falha após aceitação pelo provedor, uma nova
+tentativa pode gerar duplicata.
+
+| Evento ou comportamento do PHP | Estado no Worker |
+| --- | --- |
+| Cadastro, reenvio de código e recuperação | E-mail ao usuário com HTML e texto, mais cópia oculta sem segredos quando configurada. |
+| Cadastro, ativação e redefinição concluída | `[user][new]` no cadastro e `[user][update]` após ativação ou troca da senha por recuperação. Perfil, foto e link incluídos quando disponíveis. O perfil público só abre após a ativação. |
+| Edição de perfil, foto, senha autenticada e troca de e-mail | Pendentes. O Worker tem leitura do perfil, mas ainda não tem as rotas de escrita correspondentes. A confirmação do novo endereço e os avisos dessas operações dependem dessas rotas. |
+| Criação, edição e restauração de página | `[page][new]` ou `[page][update]`. Prévia, reprocessamento e alterações sem diferença não geram aviso. |
+| Esvaziamento de página existente | `[page][delete]` com o conteúdo anterior. A gravação de uma página vazia continua usando o fluxo existente de edição. |
+| Envio, substituição, remoção e restauração de imagem | `[img][new]`, `[img][update]` ou `[img][delete]`, conforme a mudança do arquivo. |
+| Exclusão de conta | Fora do fluxo existente. |
+| Layout de e-mail | HTML com alternativa em texto. O Worker carrega o logo pelo endereço do front. O PHP usava um anexo embutido, que pode ter melhor suporte em alguns clientes. |
+| Falhas de envio opcional | D1 e cron do Worker no lugar da fila em disco do PHP. |
+
+Na comparação de rotas, o Worker também cobre sessão, login, logout,
+perfis públicos, consulta e busca de artigos, home, estatísticas,
+visitas, editor, histórico, prévia, restauração e reprocessamento de
+páginas, além da edição e histórico de imagens. O PHP ainda tem
+`GET /v1/users`, `GET /v1/users/{id}` e o upload genérico
+`POST /v1/media`, que não têm equivalentes nessas rotas do Worker.
+O catálogo do Worker cobre a lista de atualização. Esta comparação é
+de rotas e eventos, sem afirmar equivalência de renderização ou de
+regras internas em todas as operações.

@@ -3,7 +3,13 @@ import type { Env } from './types'
 
 const encoder = new TextEncoder()
 const address = /^[a-z0-9.!#$%&'*+\/=?^_`{|}~-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i
-const base64 = (value: string) => btoa(Array.from(encoder.encode(value), byte => String.fromCharCode(byte)).join(''))
+const base64 = (value: string) => {
+  const bytes = encoder.encode(value)
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192))
+  return btoa(binary)
+}
+const wrap = (value: string) => base64(value).match(/.{1,76}/g) ?? []
 
 export function smtpConfigured(env: Env) {
   const port = Number(env.SMTP_PORT ?? '587')
@@ -13,8 +19,10 @@ export function smtpConfigured(env: Env) {
 }
 
 /** Envia por TLS implícito ou STARTTLS, sem transmitir credenciais em texto claro. */
-export async function sendSmtp(env: Env, to: string, subject: string, text: string) {
-  if (!smtpConfigured(env) || !address.test(to)) throw new Error('SMTP não configurado.')
+export async function sendSmtp(env: Env, to: string | string[], subject: string, text: string, options: { html?: string; originalTo?: string } = {}) {
+  const recipients = typeof to === 'string' ? [to] : to
+  const visible = options.originalTo ? [options.originalTo] : recipients
+  if (!smtpConfigured(env) || !recipients.length || [...recipients, ...visible].some(value => !address.test(value))) throw new Error('SMTP não configurado.')
   const implicit = env.SMTP_SECURE === 'ssl'
   let socket = connect({ hostname: env.SMTP_HOST!, port: Number(env.SMTP_PORT ?? '587') },
     { secureTransport: implicit ? 'on' : 'starttls', allowHalfOpen: false })
@@ -73,14 +81,25 @@ export async function sendSmtp(env: Env, to: string, subject: string, text: stri
       } else throw new Error('Autenticação SMTP incompatível.')
     }
     await command('MAIL FROM:<' + env.SMTP_FROM + '>', [250])
-    await command('RCPT TO:<' + to + '>', [250, 251])
+    for (const recipient of recipients) await command('RCPT TO:<' + recipient + '>', [250, 251])
     await command('DATA', [354])
+    const boundary = crypto.randomUUID()
+    const part = (format: 'plain' | 'html', content: string) => [
+      'Content-Type: text/' + format + '; charset=utf-8',
+      'Content-Transfer-Encoding: base64', '', ...wrap(content),
+    ]
+    const body = options.html === undefined ? part('plain', text) : [
+      'Content-Type: multipart/alternative; boundary="' + boundary + '"', '',
+      '--' + boundary, ...part('plain', text),
+      '--' + boundary, ...part('html', options.html), '--' + boundary + '--',
+    ]
     const message = [
-      'From: MDAWiki <' + env.SMTP_FROM + '>', 'To: <' + to + '>',
-      'Subject: =?UTF-8?B?' + base64(subject) + '?=', 'Date: ' + new Date().toUTCString(),
+      'From: MDAWiki <' + env.SMTP_FROM + '>',
+      'To: ' + visible.map(value => '<' + value + '>').join(',\r\n '),
+      'Subject: ' + (/^[\x20-\x7e]{1,70}$/.test(subject) ? subject : '=?UTF-8?B?' + base64(subject) + '?='),
+      'Date: ' + new Date().toUTCString(),
       'Message-ID: <' + crypto.randomUUID() + '@' + env.SMTP_FROM!.split('@')[1] + '>',
-      'MIME-Version: 1.0', 'Content-Type: text/plain; charset=utf-8', 'Content-Transfer-Encoding: base64',
-      '', ...(base64(text).match(/.{1,76}/g) ?? []), '.',
+      'MIME-Version: 1.0', ...body, '.',
     ].join('\r\n')
     await command(message, [250])
     accepted = true

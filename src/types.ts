@@ -10,6 +10,8 @@ export type Env = {
   SMTP_USERNAME?: string
   SMTP_PASSWORD?: string
   SMTP_FROM?: string
+  MAIL_USER_COPY_TO?: string
+  MAIL_ADMIN_TO?: string
   ARTICLE_REBUILD_CRON_ENABLED?: string
 }
 

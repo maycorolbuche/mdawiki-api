@@ -2,7 +2,9 @@ import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { allowedAttempt, passwordHash, readSession, same } from './accounts'
 import { failureReason, type RegistrationStage } from './diagnostics'
-import { sendSmtp, smtpConfigured } from './smtp'
+import { smtpConfigured } from './smtp'
+import { notifyProfile, securityMail } from './wiki-mail'
+import type { Context } from 'hono'
 import { query, type Env } from './types'
 
 const error = (code: string, message: string) => ({ error: { code, message } })
@@ -26,11 +28,11 @@ async function newCode(key: string, email: string) {
   return { code, hash: await activationHash(key, email, code) }
 }
 
-async function deliverCode(env: Env, email: string, code: string, subject: string) {
-  const activation = new URL(env.FRONTEND_URL.replace(/\/$/, '') + '/p/ativar-conta')
+async function deliverCode(c: Context<{ Bindings: Env }>, email: string, code: string, subject: string) {
+  const activation = new URL(c.env.FRONTEND_URL.replace(/\/$/, '') + '/p/ativar-conta')
   activation.searchParams.set('code', code)
   activation.searchParams.set('email', email)
-  await sendSmtp(env, email, subject, 'Use este código para ativar sua conta MDAWiki: ' + code + '\n\n' + activation.href)
+  await securityMail(c, email, subject, 'Use este código para ativar sua conta MDAWiki.', { code, url: activation.href })
 }
 
 function validatePassword(password: unknown, confirmation: unknown, minimum = 6) {
@@ -79,8 +81,7 @@ registration.on('POST', ['/auth/register', '/auth/activate', '/auth/resend', '/a
         const link = new URL('/p/redefinir-senha', c.env.FRONTEND_URL)
         link.searchParams.set('email', email)
         link.searchParams.set('token', rawToken)
-        await sendSmtp(c.env, email, 'Redefina sua senha MDAWiki', 'Use este link em até 30 minutos:\n' + link.href)
-          .catch(() => console.warn(JSON.stringify({ event: 'password_reset_delivery_failed' })))
+        await securityMail(c, email, 'Redefina sua senha MDAWiki', 'Use este link em até 30 minutos.', { url: link.href }).catch(() => {})
       }
       return c.json(generic)
     }
@@ -104,6 +105,7 @@ registration.on('POST', ['/auth/register', '/auth/activate', '/auth/resend', '/a
         AND EXISTS (SELECT 1 FROM users WHERE id = ? AND password_hash = ?)`,
       account.user_id, tokenHash, account.user_id, hash),
     ])
+    if (updated.meta.changes) notifyProfile(c, account.user_id, 'update')
     return updated.meta.changes ? c.json({ data: { message: 'Senha redefinida. Você já pode entrar.' } }) : c.json(invalidCode, 422)
   }
   if (action === 'activate') {
@@ -121,6 +123,7 @@ registration.on('POST', ['/auth/register', '/auth/activate', '/auth/resend', '/a
         SELECT id FROM users WHERE email = ? AND is_active = 1
       )`, hash, legacyHash, email),
     ])
+    for (const row of results[0].results) notifyProfile(c, Number(row.id), 'update')
     return results[0].results.length === 1 ? c.json({ data: { message: 'Conta ativada. Você já pode entrar.' } }) : c.json(invalidCode, 422)
   }
 
@@ -139,7 +142,7 @@ registration.on('POST', ['/auth/register', '/auth/activate', '/auth/resend', '/a
           WHERE user_activations.token_hash NOT IN (excluded.token_hash, ?)
         RETURNING user_id`, activation.hash, account.id, legacyHash).first()
       if (inserted) {
-        await deliverCode(c.env, email, activation.code, 'Código de ativação MDAWiki').catch(() => {})
+        await deliverCode(c, email, activation.code, 'Código de ativação MDAWiki').catch(() => {})
         break
       }
     }
@@ -165,8 +168,9 @@ registration.on('POST', ['/auth/register', '/auth/activate', '/auth/resend', '/a
       SELECT id, ?, datetime('now', '+1 day') FROM users WHERE public_id = ?`, activation.hash, publicId),
   ])
   if (!results[0].results.length) return c.json(error('email_exists', 'Este e-mail já possui cadastro.'), 409)
+  notifyProfile(c, Number(results[0].results[0].id), 'new')
   try {
-    await deliverCode(c.env, email, activation.code, 'Ative sua conta MDAWiki')
+    await deliverCode(c, email, activation.code, 'Ative sua conta MDAWiki')
   } catch (failure) {
     const request_id = crypto.randomUUID()
     console.error(JSON.stringify({
