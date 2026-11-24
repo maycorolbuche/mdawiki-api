@@ -1,4 +1,6 @@
 import { pbkdf2 } from 'node:crypto'
+import { pbkdf2 as portablePbkdf2 } from '@noble/hashes/pbkdf2.js'
+import { sha256 } from '@noble/hashes/sha2.js'
 import { Hono, type Context } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { getCookie, setCookie } from 'hono/cookie'
@@ -63,14 +65,22 @@ export async function allowedAttempt(c: RequestContext, scope: string, max: numb
 export async function passwordHash(password: string, id: number, appKey: string) {
   const key = await crypto.subtle.importKey('raw', encoder.encode(appKey), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
   const salt = hex(await crypto.subtle.sign('HMAC', key, encoder.encode(String(id))))
-  // A API de Node.js preserva as 600 mil iterações exigidas pelo formato legado.
-  const derived = await new Promise<string>((resolve, reject) => {
-    pbkdf2(password, salt, 600_000, 16, 'sha256', (error, digest) => {
-      if (error) reject(error)
-      else resolve(digest.toString('hex'))
+  const iterations = 600_000
+  const keyLength = 16
+  let derived: Uint8Array
+  try {
+    derived = await new Promise<Uint8Array>((resolve, reject) => {
+      pbkdf2(password, salt, iterations, keyLength, 'sha256', (error, digest) => {
+        if (error) reject(error)
+        else resolve(digest)
+      })
     })
-  })
-  return 'p2$' + derived.slice(0, 29)
+  } catch (error) {
+    if (!(error instanceof DOMException) || error.name !== 'NotSupportedError') throw error
+    // O Worker hospedado pode aplicar um teto também à API node:crypto.
+    derived = portablePbkdf2(sha256, password, salt, { c: iterations, dkLen: keyLength })
+  }
+  return 'p2$' + hex(derived).slice(0, 29)
 }
 
 export const accounts = new Hono<Api>()
