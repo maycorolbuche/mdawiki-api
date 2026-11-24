@@ -1,0 +1,22 @@
+{
+  "name": "mdawiki-api-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "node --test tests/*.test.mjs",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "entities": "^7.0.0",
+    "hono": "^4.13.21"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261123.1",
+    "esbuild": "0.28.2",
+    "miniflare": "5.20261123.0-beta",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.167.0"
+  }
+}

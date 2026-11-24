@@ -86,3 +86,7 @@ Em `dev`, aponte `DB_*` para a base importada. A API reconhece a estrutura pelo 
 A home da base migrada usa visitas com horário para calcular os rankings móveis de 24 horas, 7 e 30 dias. A coleta começa após a implantação, pois os contadores históricos não têm horário individual. O cron de manutenção remove registros com mais de 31 dias.
 
 O card **Nos ajude com esses conteúdos** sorteia até dez destinos internos inexistentes de páginas públicas buscáveis. Execute `php bin/rebuild-normalized-pages.php` para preencher os vínculos dos artigos existentes. Novas gravações mantêm a tabela atualizada.
+
+## Worker Cloudflare
+
+A migração para Hono, D1 e R2 está em [worker/README.md](worker/README.md), com instruções de execução local, importação de dados e homologação.
