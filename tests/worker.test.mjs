@@ -16,7 +16,7 @@ before(async () => {
   runtime = new Miniflare(convertV4MiniflareOptions({
     modules: true, script: built.outputFiles[0].text, compatibilityDate: '2026-11-23',
     d1Databases: ['DB'], r2Buckets: ['MEDIA'],
-    bindings: { FRONTEND_URL: 'https://mda.wiki.br', ALLOWED_ORIGINS: origin, APP_KEY: appKey, ARTICLE_WRITES_ENABLED: 'true' },
+    bindings: { FRONTEND_URL: 'https://mda.wiki.br', ALLOWED_ORIGINS: origin, APP_KEY: appKey },
   }))
   db = await runtime.getD1Database('DB')
   const schema = (await Promise.all(['0001_schema.sql', '0002_sessions.sql', '0003_visit_windows.sql', '0004_image_history.sql', '0005_page_edit_token.sql'].map(name => readFile('migrations/' + name, 'utf8')))).join('\n')
