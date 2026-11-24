@@ -40,19 +40,50 @@ O banco local começa vazio. Use registros fictícios para desenvolvimento. O Wr
 4. Configure `APP_KEY` como secret com `npx wrangler secret put APP_KEY`. Use uma chave exclusiva de homologação com pelo menos 32 bytes e contas de teste geradas com essa chave.
 5. Copie os objetos de teste para o bucket nas chaves existentes, como `articles/<nome>` e `users/<nome>`. Verifique `GET /health`, `GET /v1/statistics` e `GET /media/...` no endereço do Worker de homologação.
 
-## Importação
+## Importação do MySQL para o D1
 
-Use PHP CLI com PDO MySQL e SQLite. Rode a exportação de uma cópia consistente do MySQL com schema normalizado. Use credenciais de leitura e um caminho fora do repositório. O SQL inclui dados de contas e hashes de senha. Em homologação compartilhe apenas dados fictícios ou previamente sanitizados.
+A rotina lê o **MySQL normalizado** do MDAWiki (`pages`, `users`, `images`,
+`files` e tabelas relacionadas). O banco antigo com `PAGINAS` e
+`USUARIOS` precisa passar pela normalização antes. Use Node.js, dependências
+instaladas com `npm ci` e PHP CLI com `pdo_mysql` e `pdo_sqlite`.
+A conta MySQL deve ter acesso de leitura às tabelas de origem.
 
-```sh
-export MYSQL_DSN='mysql:host=127.0.0.1;dbname=mdawiki;charset=utf8mb4'
-export MYSQL_USER='usuario_de_leitura'
-# Carregue MYSQL_PASSWORD no ambiente por um meio seguro.
-php legacy/scripts/export-mysql.php /caminho/privado/mdawiki-data.sql
-npx wrangler d1 execute mdawiki --local --file=/caminho/privado/mdawiki-data.sql
+No PowerShell 7, a partir da raiz do projeto:
+
+```powershell
+$env:MYSQL_HOST = '127.0.0.1'
+$env:MYSQL_PORT = '3306'
+$env:MYSQL_DATABASE = 'mdawiki_mysql'
+$env:MYSQL_USER = 'usuario_de_leitura'
+$env:MYSQL_PASSWORD = Read-Host 'Senha do MySQL' -MaskInput
+
+npm run migrate:mysql -- --output "$env:USERPROFILE/mdawiki-data.sql"
 ```
 
-O exportador preserva IDs e vínculos, valida as restrições no SQLite e imprime as contagens e o tamanho com índices. Ele recusa sobrescrever o arquivo de saída ou gerar instruções acima do limite do D1. Use uma base de destino nova para cada importação. Compare as contagens das tabelas e teste leitura e mídia antes de considerar uma importação remota. O SQL gerado contém somente dados. A estrutura vem das migrations.
+O comando acima só exporta e valida em SQLite. Para exportar e importar
+na mesma execução, indique o nome ou binding de um D1 vazio que esteja
+configurado no `wrangler.jsonc`. Use um novo nome de arquivo para cada
+exportação:
+
+```powershell
+npm run migrate:mysql -- --database mdawiki --local --output "$env:USERPROFILE/mdawiki-local.sql"
+# Quando tiver validado a cópia local, autentique o Wrangler e informe o D1 remoto vazio.
+npm run migrate:mysql -- --database mdawiki --remote --output "$env:USERPROFILE/mdawiki-remoto.sql"
+Remove-Item Env:MYSQL_PASSWORD
+```
+
+O comando preserva IDs e vínculos, aplica as migrations no destino,
+recusa um banco com dados nas tabelas importadas e confere a contagem
+de registros por tabela após a carga. Use o D1 de destino sem tráfego de
+escrita durante a importação. O arquivo SQL inclui dados de contas e
+hashes de senha. Guarde-o fora do repositório. O exportador também aceita
+`MYSQL_DSN` para substituir host, porta e banco.
+
+A carga inclui as referências de mídia. Copie os arquivos para o R2
+usando as mesmas chaves em `files.storage_key` e os nomes das fotos em
+`users.avatar_filename`. Depois, confira a leitura de artigos, imagens e
+perfis no Worker que usa esse D1. As senhas no formato PHP continuam
+sujeitas ao fluxo de redefinição.
 
 ## Diferenças nesta etapa
 

@@ -3,9 +3,21 @@
 declare(strict_types=1);
 
 // Read a consistent, read-only MySQL snapshot and emit data-only SQL for a fresh D1 database.
-if (PHP_SAPI !== 'cli' || $argc !== 2 || !getenv('MYSQL_DSN') || !getenv('MYSQL_USER')) {
-    fwrite(STDERR, "Usage: MYSQL_DSN=... MYSQL_USER=... MYSQL_PASSWORD=... php export-mysql.php data.sql\n");
+if (PHP_SAPI !== 'cli' || $argc !== 2 || getenv('MYSQL_USER') === false || getenv('MYSQL_USER') === '') {
+    fwrite(STDERR, "Uso: informe MYSQL_USER, MYSQL_PASSWORD e MYSQL_HOST/MYSQL_DATABASE ou MYSQL_DSN.\n");
     exit(2);
+}
+
+$dsn = getenv('MYSQL_DSN');
+if ($dsn === false || $dsn === '') {
+    $host = getenv('MYSQL_HOST') ?: '127.0.0.1';
+    $port = filter_var(getenv('MYSQL_PORT') ?: '3306', FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 65535]]);
+    $database = getenv('MYSQL_DATABASE') ?: '';
+    if (!preg_match('/^[a-zA-Z0-9.:%_\[\]-]+$/D', $host) || !preg_match('/^[a-zA-Z0-9_-]+$/D', $database) || $port === false) {
+        fwrite(STDERR, "Informe MYSQL_DATABASE e confira MYSQL_HOST e MYSQL_PORT.\n");
+        exit(2);
+    }
+    $dsn = "mysql:host=$host;port=$port;dbname=$database;charset=utf8mb4";
 }
 
 umask(0077);
@@ -29,10 +41,16 @@ try {
     $target->exec('PRAGMA foreign_keys = ON');
     $target->exec(file_get_contents(dirname(__DIR__, 2) . '/migrations/0001_schema.sql'));
 
-    $source = new PDO(getenv('MYSQL_DSN'), getenv('MYSQL_USER'), getenv('MYSQL_PASSWORD') ?: '', [
+    $source = new PDO($dsn, getenv('MYSQL_USER'), (string) getenv('MYSQL_PASSWORD'), [
         PDO::MYSQL_ATTR_USE_BUFFERED_QUERY => false,
         PDO::ATTR_STRINGIFY_FETCHES => true,
     ]);
+    $table = 'schema';
+    $normalized = $source->query("SELECT COUNT(*) FROM information_schema.TABLES
+        WHERE TABLE_SCHEMA = DATABASE() AND BINARY TABLE_NAME IN ('pages', 'users', 'images', 'files')")->fetchColumn();
+    if ((int) $normalized !== 4) {
+        throw new DomainException('A origem precisa ser o MySQL normalizado do MDAWiki, com pages, users, images e files.');
+    }
     $source->exec('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
     $source->exec('START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY');
     $target->beginTransaction();
