@@ -18,18 +18,24 @@ before(async () => {
       plugin.onResolve({ filter: /^\.\/smtp$/ }, () => ({ path: 'smtp', namespace: 'test' }))
       plugin.onLoad({ filter: /^smtp$/, namespace: 'test' }, () => ({
         contents: `export const smtpConfigured = env => Boolean(env.SMTP_HOST);
-          export const sendSmtp = (env, to, subject, text) =>
-            env.MEDIA.put('test-mail/' + to, JSON.stringify({ subject, text }));`,
+          export const sendSmtp = async (env, to, subject, text, options) => {
+            if (subject.startsWith('[page][delete]')) throw new Error('Falha SMTP (450).');
+            const mail = JSON.stringify({ to, subject, text, options });
+            await env.MEDIA.put('test-mail/' + to, mail);
+            await env.MEDIA.put('test-notices/' + to + '/' + subject, mail);
+          };`,
       }))
     },
   }] })
   runtime = new Miniflare(convertV4MiniflareOptions({
     modules: true, script: built.outputFiles[0].text, compatibilityDate: '2026-11-23', compatibilityFlags: ['nodejs_compat'],
     d1Databases: ['DB'], r2Buckets: ['MEDIA'],
-    bindings: { FRONTEND_URL: 'https://mda.wiki.br', ALLOWED_ORIGINS: origin, APP_KEY: appKey, SMTP_HOST: 'smtp.example.test' },
+    bindings: { FRONTEND_URL: 'https://mda.wiki.br', ALLOWED_ORIGINS: origin, APP_KEY: appKey, SMTP_HOST: 'smtp.example.test',
+      MAIL_ADMIN_TO: 'admin@example.test; other@example.test, ADMIN@example.test',
+      MAIL_USER_COPY_TO: 'copy@example.test; invalid, COPY@example.test' },
   }))
   db = await runtime.getD1Database('DB')
-  const schema = (await Promise.all(['0001_schema.sql', '0002_sessions.sql', '0003_visit_windows.sql', '0004_image_history.sql', '0005_page_edit_token.sql', '0006_password_resets.sql'].map(name => readFile('migrations/' + name, 'utf8')))).join('\n')
+  const schema = (await Promise.all(['0001_schema.sql', '0002_sessions.sql', '0003_visit_windows.sql', '0004_image_history.sql', '0005_page_edit_token.sql', '0006_password_resets.sql', '0007_mail_outbox.sql'].map(name => readFile('migrations/' + name, 'utf8')))).join('\n')
   const ddl = schema.replace(/^--.*$/gm, '')
   const triggers = ddl.match(/CREATE TRIGGER[\s\S]*?\nEND;/g) ?? []
   const statements = ddl.replace(/CREATE TRIGGER[\s\S]*?\nEND;/g, '').split(';').map(sql => sql.trim()).filter(Boolean)
@@ -236,7 +242,10 @@ test('creates and updates an article atomically, validates edits and restores a 
   assert.equal((await call('', 'PUT', { title: 'Meu artigo', source: 'Conflito', base_version: version.base_version })).status, 409)
   const restored = await call('/restore', 'POST', { revision: 1, base_version: next.base_version })
   assert.equal(restored.status, 200, await restored.clone().text())
-  assert.equal((await restored.json()).data.revision, 3)
+  const restoredVersion = (await restored.json()).data
+  assert.equal(restoredVersion.revision, 3)
+  const cleared = await call('', 'PUT', { title: 'Meu artigo', source: '', base_version: restoredVersion.base_version })
+  assert.equal(cleared.status, 200)
 })
 
 
@@ -270,4 +279,49 @@ test('registers an inactive account, resends and activates with a one-use code',
   assert.equal((await call('activate', { email, code: second })).status, 200)
   assert.equal((await call('activate', { email, code: second })).status, 422)
   assert.equal((await call('login', { email, password })).status, 200)
+})
+
+test('notifies administrators and redacts credentials in hidden user copies', async () => {
+  const bucket = await runtime.getR2Bucket('MEDIA')
+  async function findMail(to, subject) {
+    for (let attempt = 0; attempt < 30; attempt++) {
+      const message = await bucket.get('test-notices/' + to + '/' + subject)
+      if (message) return message.json()
+      await new Promise(resolve => setTimeout(resolve, 30))
+    }
+    assert.fail('Notificação ausente: ' + subject)
+  }
+  const admins = 'ADMIN@example.test,other@example.test'
+  const page = await findMail(admins, '[page][new] Meu artigo')
+  assert.match(page.options.html, /https:\/\/mda.wiki.br\/Meu-Artigo/)
+  assert.match(page.options.html, /&lt;script&gt;/)
+  await findMail(admins, '[page][update] Meu artigo')
+  let queued
+  for (let attempt = 0; attempt < 30 && !queued; attempt++) {
+    queued = await db.prepare("SELECT payload FROM worker_mail_outbox WHERE operation = 'page_delete'").first('payload')
+    if (!queued) await new Promise(resolve => setTimeout(resolve, 30))
+  }
+  assert.equal(JSON.parse(queued).subject, '[page][delete] Meu artigo')
+  assert.match(JSON.parse(queued).text, /Introdução/)
+  assert.equal(await db.prepare("SELECT error_code FROM system_error_logs WHERE operation = 'page_delete'").first('error_code'), 'smtp_450')
+  const deleted = await findMail(admins, '[img][delete] Public')
+  assert.match(deleted.text, /https:\/\/mda.wiki.br\/i\/Public/)
+  await findMail(admins, '[img][new] Public')
+  await findMail(admins, '[img][update] Public')
+  const copy = await findMail('COPY@example.test', 'Redefina sua senha MDAWiki')
+  assert.deepEqual(copy.to, ['COPY@example.test'])
+  assert.equal(copy.options.originalTo, 'private@example.test')
+  assert.match(copy.text, /Link de acesso ocultado/)
+  assert.doesNotMatch(copy.options.html, /token=|COPY@example.test/)
+  const activationCopy = await findMail('COPY@example.test', 'Ative sua conta MDAWiki')
+  assert.match(activationCopy.text, /Código ocultado/)
+  assert.doesNotMatch(activationCopy.options.html, /code=/)
+  const accounts = await bucket.list({ prefix: 'test-notices/' + admins + '/[user]' })
+  assert.ok(accounts.objects.some(object => object.key.includes('[user][new]')))
+  assert.ok(accounts.objects.some(object => object.key.includes('[user][update]')))
+  for (const object of accounts.objects) {
+    const mail = await (await bucket.get(object.key)).json()
+    assert.match(mail.text, /https:\/\/mda.wiki.br\/u\//)
+    assert.doesNotMatch(mail.text + mail.options.html, /pbkdf2-sha256|test-password-123|token=/)
+  }
 })
