@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { articleWrites, rebuildQueuedArticles } from './article-writes'
 import { editorHistory } from './editor-history'
 import { imageEdits } from './image-edits'
 import { accounts, purgeExpiredData } from './accounts'
@@ -37,6 +38,7 @@ app.use('*', async (c, next) => {
 app.route('/v1', accounts)
 app.route('/v1', imageEdits)
 app.route('/v1', editorHistory)
+app.route('/v1', articleWrites)
 app.get('/', c => c.json({ ...info, mode: 'preview' }))
 app.get('/health', c => c.json(info))
 app.get('/v1/pages', async c => {
@@ -51,7 +53,8 @@ app.get('/v1/pages/:slug', async c => {
   const slug = c.req.param('slug')
   if (!validSlug(slug)) return c.json(error('invalid_slug', 'Endereço inválido.'), 400)
   const data = await findPage(c.env.DB, origin(c.req.url), c.env.FRONTEND_URL.replace(/\/$/, ''), slug)
-  return data ? c.json({ data }) : c.json(error('not_found', 'Artigo não encontrado ou indisponível.'), 404)
+  return data ? c.json({ data: { ...data, read_only: c.env.ARTICLE_WRITES_ENABLED !== 'true' } })
+    : c.json(error('not_found', 'Artigo não encontrado ou indisponível.'), 404)
 })
 app.get('/v1/search', async c => {
   const term = (c.req.query('q') ?? '').trim()
@@ -90,5 +93,6 @@ export default {
   fetch: app.fetch,
   scheduled: (event: ScheduledController, env: Env, ctx: ExecutionContext) => {
     ctx.waitUntil(purgeExpiredData(env.DB, Math.floor(event.scheduledTime / 1000)))
+    ctx.waitUntil(rebuildQueuedArticles(env))
   },
 }

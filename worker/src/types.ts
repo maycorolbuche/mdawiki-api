@@ -4,6 +4,7 @@ export type Env = {
   FRONTEND_URL: string
   ALLOWED_ORIGINS: string
   APP_KEY?: string
+  ARTICLE_WRITES_ENABLED?: string
 }
 
 export type SqlValue = string | number | null

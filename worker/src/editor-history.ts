@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { pageVersion } from './article-writes'
 import { activeAccount, readSession } from './accounts'
 import { identifier, legacyIdentifier, mediaUrl } from './pages'
 import { query, validSlug, type Env } from './types'
@@ -38,9 +39,7 @@ editorHistory.get('/pages/:slug/history', async c => {
   const revisions = rows.results.slice(0, 50).map(({ avatar_filename, ...revision }) => ({
     ...revision, author_photo: avatar_filename ? mediaUrl(api, 'users/' + avatar_filename) : null,
   }))
-  const version = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(
-    JSON.stringify([page.id, page.title, page.source, page.updated_at, page.updated_by])))
-  const base_version = Array.from(new Uint8Array(version), byte => byte.toString(16).padStart(2, '0')).join('')
+  const base_version = await pageVersion(page)
   return c.json({ data: { title: page.title, revisions, next_cursor: rows.results.length > 50 ? revisions[49].id : null, base_version } })
 })
 
