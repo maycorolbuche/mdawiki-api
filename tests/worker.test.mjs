@@ -12,7 +12,7 @@ let db
 const request = path => runtime.dispatchFetch('http://localhost' + path)
 
 before(async () => {
-  const built = await build({ entryPoints: ['src/index.ts'], bundle: true, format: 'esm', write: false, plugins: [{
+  const built = await build({ entryPoints: ['src/index.ts'], bundle: true, format: 'esm', write: false, external: ['node:crypto'], plugins: [{
     name: 'capture-smtp',
     setup(plugin) {
       plugin.onResolve({ filter: /^\.\/smtp$/ }, () => ({ path: 'smtp', namespace: 'test' }))
@@ -24,7 +24,7 @@ before(async () => {
     },
   }] })
   runtime = new Miniflare(convertV4MiniflareOptions({
-    modules: true, script: built.outputFiles[0].text, compatibilityDate: '2026-11-23',
+    modules: true, script: built.outputFiles[0].text, compatibilityDate: '2026-11-23', compatibilityFlags: ['nodejs_compat'],
     d1Databases: ['DB'], r2Buckets: ['MEDIA'],
     bindings: { FRONTEND_URL: 'https://mda.wiki.br', ALLOWED_ORIGINS: origin, APP_KEY: appKey, SMTP_HOST: 'smtp.example.test' },
   }))
