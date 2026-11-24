@@ -1,6 +1,6 @@
 # API MDAWiki no Cloudflare
 
-Worker de homologação na branch `dev` do repositório da API. Esta etapa cobre leitura pública, sessão, login, logout, consulta do próprio perfil, contagem de visitas, histórico de artigos e escrita de imagens. Os artigos usam o HTML armazenado no banco. Edição de artigos, edição de contas, reprocessamento da fila e fluxos de e-mail ainda dependem do PHP. Use um domínio de homologação.
+Worker de homologação na branch `dev` do repositório da API. Esta etapa cobre leitura pública, sessão, login, logout, consulta do próprio perfil, contagem de visitas, histórico de artigos e escrita de imagens. Os artigos usam o HTML armazenado no banco. A edição e o reprocessamento de artigos estão disponíveis para validação da marcação compatível. Edição de contas, fluxos de e-mail e a renderização de macros restantes ainda dependem do PHP. Use um domínio de homologação.
 
 ## Organização
 
@@ -10,6 +10,8 @@ Worker de homologação na branch `dev` do repositório da API. Esta etapa cobre
 | `src/pages.ts` | Exportação paginada, relações, busca, home e apresentação de artigos. |
 | `src/directory.ts` | Perfis públicos e histórico público de imagens. |
 | `src/accounts.ts` | Sessões, login, consultas autenticadas, CSRF, limites, visitas e limpeza programada. |
+| `src/article-writes.ts` | Edição, prévia, restauração, controle de versão e atualização atômica dos vínculos. |
+| `src/wiki-renderer.ts` | Renderização da marcação wiki compatível e sanitização do HTML gerado. |
 | `src/editor-history.ts` | Histórico de artigos e listagem da fila de reprocessamento para administradores. |
 | `src/image-edits.ts` | Criação, substituição, remoção e restauração de imagens. |
 | `src/media.ts` | Autoriza a chave no D1 antes de ler ou entregar um objeto do R2 privado. |
@@ -57,7 +59,7 @@ O exportador preserva IDs e vínculos, valida as restrições no SQLite e imprim
 - A busca usa a comparação nativa do SQLite. A equivalência completa de acentos e maiúsculas com o MySQL ainda precisa de validação.
 - A leitura usa HTML importado, com substituição dos marcadores de URL e do domínio antigo da API nas referências de mídia. A decoração dinâmica de links de artigos e a integração com material de estudo ainda precisam de portabilidade.
 - A entrega R2 cobre as chaves normalizadas de artigos públicos e fotos associadas a contas ativas. O sistema antigo continua responsável pelos fluxos de edição e compatibilidade com outras chaves de mídia.
-- Cadastro, recuperação de senha, edição de perfil e de artigos, restauração de artigos, upload avulso e e-mails são etapas seguintes da migração.
+- Cadastro, recuperação de senha, edição de perfil, upload avulso e e-mails são etapas seguintes da migração.
 
 ## Sessões e visitas
 
@@ -71,4 +73,12 @@ Contas legadas com MD5 recebem um hash PBKDF2 após o login. O formato PBKDF2 ex
 
 `PUT /v1/images/:slug` aceita o campo de versão `base_version` e um arquivo em `data`, uma remoção com `clear: true` ou uma restauração com `revision_id`. A rota requer sessão, CSRF e papel de editor. Os arquivos são gravados por SHA-256 no R2. O D1 atualiza a referência com controle de concorrência e grava a revisão e a fila de páginas vinculadas via trigger. O objeto anterior é mantido para servir o histórico.
 
-O Worker já insere as páginas afetadas na fila. O reprocessamento automático dessas páginas e os avisos administrativos por e-mail precisam do port do renderizador e do serviço de e-mail. Uma disputa de edição pode deixar um arquivo sem vínculo no R2. A rota pública verifica o vínculo antes de servi-lo.
+O Worker já insere as páginas afetadas na fila. Em homologação, o cron tenta reprocessar artigos com marcação compatível. Os avisos administrativos por e-mail ainda precisam do port do serviço de e-mail. Uma disputa de edição pode deixar um arquivo sem vínculo no R2. A rota pública verifica o vínculo antes de servi-lo.
+
+## Escrita de artigos em homologação
+
+Aplique as migrations e configure `ARTICLE_WRITES_ENABLED=true` apenas com dados de homologação. Essa configuração habilita a edição, a prévia, a restauração de revisões e o cron de reprocessamento no Worker. A versão de edição faz parte do contrato HTTP. O lote D1 guarda conteúdo, revisão e vínculos na mesma transação e rejeita concorrência com HTTP 409.
+
+O renderizador sanitiza HTML e processa a marcação básica, incluindo títulos, listas, links, categorias, inclusões, imagens e redirecionamentos. Macros de apresentação, tabelas wiki e regras PCRE do PHP exigem validação adicional. Macros desconhecidas e tabelas wiki retornam `unsupported_markup`. O HTML armazenado segue disponível nesses casos. O reprocessamento preserva páginas com erro na fila.
+
+Para rollback dessa etapa, publique a versão anterior do Worker. A coluna de controle é aditiva e compatível com a versão anterior. Para interromper gravações e o consumo da fila de artigos no Worker atual, retire a variável `ARTICLE_WRITES_ENABLED`.

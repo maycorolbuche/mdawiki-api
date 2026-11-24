@@ -16,10 +16,10 @@ before(async () => {
   runtime = new Miniflare(convertV4MiniflareOptions({
     modules: true, script: built.outputFiles[0].text, compatibilityDate: '2026-11-23',
     d1Databases: ['DB'], r2Buckets: ['MEDIA'],
-    bindings: { FRONTEND_URL: 'https://mda.wiki.br', ALLOWED_ORIGINS: origin, APP_KEY: appKey },
+    bindings: { FRONTEND_URL: 'https://mda.wiki.br', ALLOWED_ORIGINS: origin, APP_KEY: appKey, ARTICLE_WRITES_ENABLED: 'true' },
   }))
   db = await runtime.getD1Database('DB')
-  const schema = (await Promise.all(['0001_schema.sql', '0002_sessions.sql', '0003_visit_windows.sql', '0004_image_history.sql'].map(name => readFile('migrations/' + name, 'utf8')))).join('\n')
+  const schema = (await Promise.all(['0001_schema.sql', '0002_sessions.sql', '0003_visit_windows.sql', '0004_image_history.sql', '0005_page_edit_token.sql'].map(name => readFile('migrations/' + name, 'utf8')))).join('\n')
   const ddl = schema.replace(/^--.*$/gm, '')
   const triggers = ddl.match(/CREATE TRIGGER[\s\S]*?\nEND;/g) ?? []
   const statements = ddl.replace(/CREATE TRIGGER[\s\S]*?\nEND;/g, '').split(';').map(sql => sql.trim()).filter(Boolean)
@@ -46,7 +46,7 @@ test('exports public pages and resolves slugs and covers without changing IDs', 
   const { data } = await response.json()
   assert.equal(data.id, '41')
   assert.equal(data.image, 'http://localhost/media/articles/public.png')
-  assert.equal(data.read_only, true)
+  assert.equal(data.read_only, false)
   assert.equal((await request('/v1/pages/Privado')).status, 404)
   const list = await (await request('/v1/pages?limit=1')).json()
   assert.deepEqual(list.data.map(page => page.id), ['41'])
@@ -86,7 +86,7 @@ test('allows only configured cross-origin requests and blocks writes in the prev
   const cors = await runtime.dispatchFetch('http://localhost/v1/pages', { headers: { Origin: 'https://dev.mda.wiki.br' } })
   assert.equal(cors.headers.get('access-control-allow-origin'), 'https://dev.mda.wiki.br')
   assert.equal((await runtime.dispatchFetch('http://localhost/v1/pages', { headers: { Origin: 'https://other.test' } })).status, 403)
-  assert.equal((await runtime.dispatchFetch('http://localhost/v1/pages/cães', { method: 'PUT' })).status, 501)
+  assert.equal((await runtime.dispatchFetch('http://localhost/v1/unsupported', { method: 'PUT' })).status, 501)
 })
 
 test('migrates a PHP password, rotates the session and protects the private profile', async () => {
@@ -182,4 +182,44 @@ test('writes R2 images, queues linked articles and restores a former revision', 
   const restore = await update({ base_version: '', revision_id: image.history[0].id })
   assert.equal(restore.status, 200)
   assert.equal((await restore.json()).data.version, '1')
+})
+
+test('creates and updates an article atomically, validates edits and restores a revision', async () => {
+  const session = await request('/v1/auth/session')
+  const { data } = await session.json()
+  const headers = { Origin: origin, Cookie: session.headers.get('set-cookie').split(';')[0],
+    'X-CSRF-Token': data.csrf_token, 'Content-Type': 'application/json' }
+  const login = await runtime.dispatchFetch('http://localhost/v1/auth/login', {
+    method: 'POST', headers, body: JSON.stringify({ email: 'private@example.test', password: legacyPassword }),
+  })
+  assert.equal(login.status, 200)
+  headers.Cookie = login.headers.get('set-cookie').split(';')[0]
+  headers['X-CSRF-Token'] = (await login.json()).data.csrf_token
+  const call = (path, method, body) => runtime.dispatchFetch('http://localhost/v1/pages/Meu-Artigo' + path, {
+    method, headers, body: body === undefined ? undefined : JSON.stringify(body),
+  })
+  const draft = await call('/editor', 'GET')
+  assert.equal(draft.status, 200)
+  assert.equal((await draft.json()).data.exists, false)
+  const source = "== Introdução ==\n'''Texto''' [[Cães|Cães]] [[Futuro]] {{Categoria:Cultura}} <script>alert(1)</script>"
+  const preview = await call('/preview', 'POST', { source })
+  assert.equal(preview.status, 200, await preview.clone().text())
+  const html = (await preview.json()).data.html
+  assert.match(html, /<strong>Texto<\/strong>/)
+  assert.doesNotMatch(html, /script|alert/)
+  assert.equal((await call('/preview', 'POST', { source: '{{MacroLegada:Valor}}' })).status, 422)
+  const created = await call('', 'PUT', { title: 'Meu artigo', source, base_version: '' })
+  assert.equal(created.status, 200, await created.clone().text())
+  const version = (await created.json()).data
+  assert.equal(version.revision, 1)
+  assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM page_categories WHERE page_id = (SELECT id FROM pages WHERE identifier = 'meu-artigo')").first('n'), 1)
+  assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM page_missing_links WHERE href = '/futuro'").first('n'), 1)
+  const changed = await call('', 'PUT', { title: 'Meu artigo', source: 'Nova versão', base_version: version.base_version })
+  assert.equal(changed.status, 200, await changed.clone().text())
+  const next = (await changed.json()).data
+  assert.equal(next.revision, 2)
+  assert.equal((await call('', 'PUT', { title: 'Meu artigo', source: 'Conflito', base_version: version.base_version })).status, 409)
+  const restored = await call('/restore', 'POST', { revision: 1, base_version: next.base_version })
+  assert.equal(restored.status, 200, await restored.clone().text())
+  assert.equal((await restored.json()).data.revision, 3)
 })
