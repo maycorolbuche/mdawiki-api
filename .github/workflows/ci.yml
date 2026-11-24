@@ -42,3 +42,26 @@ jobs:
           retention-days: 3
       - run: python3 tests/integration_http.py
       - run: php tests/normalized.php
+      - name: Validate MySQL export against the D1 schema
+        env:
+          MYSQL_DSN: mysql:host=127.0.0.1;port=3306;dbname=normalized_test;charset=utf8mb4
+          MYSQL_USER: root
+          MYSQL_PASSWORD: test
+        run: php worker/scripts/export-mysql.php "$RUNNER_TEMP/mdawiki-data.sql"
+
+  worker:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: worker/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: npx wrangler deploy --dry-run

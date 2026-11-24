@@ -1,0 +1,22 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "mdawiki-api-dev",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-23",
+  "observability": { "enabled": true, "traces": { "enabled": true } },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "mdawiki-dev",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    { "binding": "MEDIA", "bucket_name": "mdawiki-media-dev" }
+  ],
+  "vars": {
+    "FRONTEND_URL": "https://mda.wiki.br",
+    "ALLOWED_ORIGINS": "http://localhost:5173"
+  }
+}
