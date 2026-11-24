@@ -1,10 +1,13 @@
-name: PHP API
+name: API
 on: [push, pull_request]
 permissions:
   contents: read
 jobs:
-  test:
+  legacy:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: legacy
     services:
       mysql:
         image: mysql:8.0
@@ -19,7 +22,7 @@ jobs:
         with:
           php-version: '8.3'
           extensions: pdo_mysql, pdo_sqlite, mbstring, dom, gd, intl
-      - run: find config src public tests bin -name '*.php' -print0 | xargs -0 -n1 php -l
+      - run: find config src public tests bin scripts -name '*.php' -print0 | xargs -0 -n1 php -l
       - run: php tests/run.php
       - run: php tests/features.php
       - run: php tests/mail.php
@@ -38,7 +41,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: composer-lock
-          path: composer.lock
+          path: legacy/composer.lock
           retention-days: 3
       - run: python3 tests/integration_http.py
       - run: php tests/normalized.php
@@ -47,20 +50,17 @@ jobs:
           MYSQL_DSN: mysql:host=127.0.0.1;port=3306;dbname=normalized_test;charset=utf8mb4
           MYSQL_USER: root
           MYSQL_PASSWORD: test
-        run: php worker/scripts/export-mysql.php "$RUNNER_TEMP/mdawiki-data.sql"
+        run: php scripts/export-mysql.php "$RUNNER_TEMP/mdawiki-data.sql"
 
   worker:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: worker
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: worker/package-lock.json
+          cache-dependency-path: package-lock.json
       - run: npm ci
       - run: npm run check
       - run: npm test
