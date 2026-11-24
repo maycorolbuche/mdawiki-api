@@ -11,6 +11,14 @@ let runtime
 let db
 const request = path => runtime.dispatchFetch('http://localhost' + path)
 
+async function applySchema(schema) {
+  const ddl = schema.replace(/^--.*$/gm, '')
+  const triggers = ddl.match(/CREATE TRIGGER[\s\S]*?\nEND;/g) ?? []
+  const statements = ddl.replace(/CREATE TRIGGER[\s\S]*?\nEND;/g, '').split(';').map(sql => sql.trim()).filter(Boolean)
+  statements.push(...triggers)
+  await db.batch(statements.map(sql => db.prepare(sql)))
+}
+
 before(async () => {
   const built = await build({ entryPoints: ['src/index.ts'], bundle: true, format: 'esm', write: false, plugins: [{
     name: 'capture-smtp',
@@ -36,11 +44,7 @@ before(async () => {
   }))
   db = await runtime.getD1Database('DB')
   const schema = (await Promise.all(['0001_schema.sql', '0002_sessions.sql', '0003_visit_windows.sql', '0004_image_history.sql', '0005_page_edit_token.sql', '0006_password_resets.sql', '0007_mail_outbox.sql', '0008_email_changes.sql'].map(name => readFile('migrations/' + name, 'utf8')))).join('\n')
-  const ddl = schema.replace(/^--.*$/gm, '')
-  const triggers = ddl.match(/CREATE TRIGGER[\s\S]*?\nEND;/g) ?? []
-  const statements = ddl.replace(/CREATE TRIGGER[\s\S]*?\nEND;/g, '').split(';').map(sql => sql.trim()).filter(Boolean)
-  statements.push(...triggers)
-  await db.batch(statements.map(sql => db.prepare(sql)))
+  await applySchema(schema)
   await db.batch([
     db.prepare("INSERT INTO pages (id, slug, title, identifier, legacy_identifier, kind, source, plain_text, rendered_html, is_searchable) VALUES (41, 'Cães', 'Cães', 'caes', 'caes', 'article', 'Wiki', 'Conteúdo', '<p>Conteúdo</p>', 1), (42, 'Privado', 'Privado', 'privado', 'privado', 'article', 'Wiki', 'Privado', '', 0)"),
     db.prepare("INSERT INTO files (id, sha256, storage_key, mime_type, size_bytes) VALUES (1, 'hash', 'articles/public.png', 'image/png', 3), (2, 'hash2', 'articles/private.png', 'image/png', 4)"),
@@ -49,6 +53,11 @@ before(async () => {
     db.prepare("INSERT INTO users (id, name, email, password_hash, is_active, public_id, avatar_filename) VALUES (1, 'Editora', 'private@example.test', 'secret', 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'avatar.png')"),
     db.prepare("INSERT INTO page_visits (page_id, visited_at) VALUES (41, unixepoch())"),
   ])
+  await db.prepare(`INSERT INTO page_templates (page_id, position, template_key) VALUES
+    (41, 1, 'imagem:public'), (41, 2, 'imagem:figura_antiga!tmpl|mini')`).run()
+  await db.prepare(`INSERT INTO images (identifier, slug, title, meta, file_id, access_level_id)
+    VALUES ('figura-antiga', 'Figura-Antiga', 'Figura antiga', '{}', 1, 1)`).run()
+  await applySchema(await readFile('migrations/0009_pending_page_images.sql', 'utf8'))
   const bucket = await runtime.getR2Bucket('MEDIA')
   await bucket.put('articles/public.png', 'png')
   await bucket.put('articles/private.png', 'priv')
@@ -61,6 +70,10 @@ test('exports public pages and resolves slugs and covers without changing IDs', 
   assert.equal(response.status, 200)
   const { data } = await response.json()
   assert.equal(data.id, '41')
+  const backfilled = await db.prepare(`SELECT m.position, m.is_template FROM page_media m
+    JOIN images i ON i.id = m.image_id WHERE m.page_id = 41 AND i.identifier = 'figura-antiga'`).first()
+  assert.deepEqual(backfilled, { position: 2, is_template: 1 })
+  assert.equal(await db.prepare('SELECT COUNT(*) n FROM page_media WHERE page_id = 41 AND image_id = 1').first('n'), 1)
   assert.equal(data.image, 'http://localhost/media/articles/public.png')
   assert.equal(data.read_only, false)
   assert.equal((await request('/v1/pages/Privado')).status, 404)
@@ -233,6 +246,8 @@ test('writes R2 images, queues linked articles and restores a former revision', 
     method: 'PUT', headers, body: JSON.stringify({ data: file, base_version: '' }),
   })
   assert.equal(created.status, 200)
+  assert.ok((await created.json()).data.pages.some(page => page.slug === 'Antes-da-Imagem'))
+  assert.equal(await db.prepare("SELECT COUNT(*) n FROM page_pending_images WHERE identifier = 'inexistente'").first('n'), 0)
   assert.equal((await request('/media/image/Inexistente')).headers.get('content-type'), 'image/png')
   assert.equal((await (await request('/v1/pages/Antes-da-Imagem')).json()).data.html, articleHtml)
 })
