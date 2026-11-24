@@ -169,3 +169,9 @@ não está no R2. Ao apresentar artigos já salvos, a API converte as
 imagens vinculadas a `/i/` ou `/imagem@` que usavam endereços antigos.
 Esse caminho não depende do cron de reprocessamento nem cria uma
 imagem no catálogo só porque ela foi mencionada no artigo.
+
+A migração `0009_pending_page_images.sql` registra referências cujo arquivo
+ainda não aparece no catálogo. Depois que uma imagem pública é cadastrada,
+o D1 move os vínculos pendentes para `page_media` na mesma operação. A
+migração também recupera referências anteriores já gravadas em
+`page_templates` quando o nome normalizado ou legado encontra a imagem.
