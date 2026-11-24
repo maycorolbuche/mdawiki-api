@@ -157,3 +157,15 @@ A alteração de e-mail envia um código para o novo endereço. O usuário
 digita esse código no formulário aberto. O código vale por 30 minutos,
 é armazenado como hash e só pode ser usado uma vez. Um novo pedido
 substitui o código pendente. A troca só ocorre após a confirmação.
+
+### Imagens dentro de artigos
+
+As referências de imagem do wiki usam `GET /media/image/:slug`, que
+consulta o arquivo público atual no D1 e no R2. A resposta não é
+armazenada em cache, para que substituições, remoções, restaurações e
+primeiros envios apareçam no próximo carregamento da imagem. Uma
+referência ausente recebe o SVG «Sem imagem», inclusive quando o objeto
+não está no R2. Ao apresentar artigos já salvos, a API converte as
+imagens vinculadas a `/i/` ou `/imagem@` que usavam endereços antigos.
+Esse caminho não depende do cron de reprocessamento nem cria uma
+imagem no catálogo só porque ela foi mencionada no artigo.

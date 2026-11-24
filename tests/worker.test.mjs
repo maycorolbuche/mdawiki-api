@@ -188,21 +188,53 @@ test('writes R2 images, queues linked articles and restores a former revision', 
   const update = body => runtime.dispatchFetch('http://localhost/v1/images/Public', {
     method: 'PUT', headers, body: JSON.stringify(body),
   })
+  // Reutiliza o HTML salvo antes do deploy, inclusive o fallback inválido do Worker antigo.
+  await db.prepare('UPDATE pages SET rendered_html = ? WHERE id = 41').bind(
+    '<a href="https://mda.wiki.br/imagem@Public"><img src="{{{url_diretorio}}}articles/public.png" alt="Public"></a>' +
+    '<a href="https://mda.wiki.br/i/Inexistente"><img src="https://mda.wiki.br/favicon.svg" alt="Inexistente"></a>' +
+    '<img src="{{{url_diretorio}}}@imgs/img_nao_encontrada.png">').run()
+  const rendered = (await (await request('/v1/pages/C%C3%A3es')).json()).data.html
+  assert.match(rendered, /src="http:\/\/localhost\/media\/image\/Public"/)
+  assert.match(rendered, /src="http:\/\/localhost\/media\/image\/Inexistente"/)
+  assert.match(rendered, /src="http:\/\/localhost\/media\/assets\/img_nao_encontrada.svg"/)
+  const currentImage = () => request('/media/image/Public')
+  const missing = await request('/media/image/Inexistente')
+  assert.equal(missing.headers.get('content-type'), 'image/svg+xml')
+  assert.equal(missing.headers.get('cache-control'), 'no-store')
+  assert.match(await missing.text(), /Sem imagem/)
+  assert.match(await (await request('/media/image/Private')).text(), /Sem imagem/)
+  assert.equal(await (await currentImage()).text(), 'png')
   const file = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j8NgAAAAASUVORK5CYII='
   const uploaded = await update({ base_version: '1', data: file })
   assert.equal(uploaded.status, 200, await uploaded.clone().text())
   const image = (await uploaded.json()).data
   assert.notEqual(image.version, '1')
   assert.equal(image.meta.width, 1)
+  assert.equal((await currentImage()).headers.get('content-type'), 'image/png')
+  assert.deepEqual(new Uint8Array(await (await currentImage()).arrayBuffer()), Uint8Array.from(Buffer.from(file.split(',')[1], 'base64')))
   assert.equal(await db.prepare('SELECT page_id FROM page_rebuild_queue WHERE page_id = 41').first('page_id'), 41)
   assert.equal((await request(new URL(image.url).pathname)).status, 200)
   assert.equal((await update({ base_version: '1', clear: true })).status, 409)
   const cleared = await update({ base_version: image.version, clear: true })
   assert.equal(cleared.status, 200)
   assert.equal((await cleared.json()).data.url, null)
+  assert.match(await (await currentImage()).text(), /Sem imagem/)
   const restore = await update({ base_version: '', revision_id: image.history[0].id })
   assert.equal(restore.status, 200)
   assert.equal((await restore.json()).data.version, '1')
+  assert.equal(await (await currentImage()).text(), 'png')
+  const missingArticle = await runtime.dispatchFetch('http://localhost/v1/pages/Antes-da-Imagem', {
+    method: 'PUT', headers, body: JSON.stringify({ title: 'Antes da imagem', source: '{{Imagem:Inexistente}}', base_version: '' }),
+  })
+  assert.equal(missingArticle.status, 200, await missingArticle.clone().text())
+  const articleHtml = (await (await request('/v1/pages/Antes-da-Imagem')).json()).data.html
+  assert.match(articleHtml, /src="http:\/\/localhost\/media\/image\/Inexistente"/)
+  const created = await runtime.dispatchFetch('http://localhost/v1/images/Inexistente', {
+    method: 'PUT', headers, body: JSON.stringify({ data: file, base_version: '' }),
+  })
+  assert.equal(created.status, 200)
+  assert.equal((await request('/media/image/Inexistente')).headers.get('content-type'), 'image/png')
+  assert.equal((await (await request('/v1/pages/Antes-da-Imagem')).json()).data.html, articleHtml)
 })
 
 test('creates and updates an article atomically, validates edits and restores a revision', async () => {

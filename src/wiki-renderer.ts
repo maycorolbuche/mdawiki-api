@@ -1,3 +1,4 @@
+import { articleImagePath } from './article-images'
 import sanitizeHtml from 'sanitize-html'
 import { decodeHTML } from 'entities'
 import { identifier, legacyIdentifier } from './pages'
@@ -82,12 +83,14 @@ export async function renderWiki(db: D1Database, source: string, slug: string, f
   const parts = html.split(/\{\{Imagem:([^{}]+)\}\}/gi)
   if (parts.length > 51) throw new WikiError('invalid_page', 'Limite de imagens por edição excedido.')
   for (let i = 1; i < parts.length; i += 2) {
-    const name = parts[i].split('|')[0].trim()
-    const key = identifier(name.replace(/!tmpl$/i, ''))
-    const image = await query(db, `SELECT i.id, i.slug, f.storage_key FROM images i LEFT JOIN files f ON f.id = i.file_id
-      WHERE i.identifier = ? AND i.access_level_id <= 1`, key).first<{ id: number; slug: string; storage_key: string | null }>()
-    images.push({ id: image?.id ?? null, template: /!tmpl$/i.test(name) })
-    const url = image?.storage_key ? '{{{url_diretorio}}}' + image.storage_key : frontend + '/favicon.svg'
+    const reference = parts[i].split('|')[0].trim()
+    const name = reference.replace(/!tmpl$/i, '').trim()
+    const key = identifier(name)
+    const image = await query(db, `SELECT id, slug FROM images
+      WHERE (identifier = ? OR legacy_identifier = ?) AND access_level_id <= 1
+      ORDER BY identifier = ? DESC LIMIT 1`, key, 'imagem@' + legacyIdentifier(name), key).first<{ id: number; slug: string }>()
+    images.push({ id: image?.id ?? null, template: /!tmpl$/i.test(reference) })
+    const url = '{{{url_diretorio}}}' + articleImagePath(image?.slug ?? name).slice('/media/'.length)
     parts[i] = '<a href="' + frontend + '/i/' + encodeURIComponent(image?.slug ?? name) + '"><img src="' + escape(url) +
       '" alt="' + escape(name) + '"></a>'
   }
