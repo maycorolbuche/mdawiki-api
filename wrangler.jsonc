@@ -30,6 +30,7 @@
   ],
   "vars": {
     "FRONTEND_URL": "https://mda.wiki.br",
-    "ALLOWED_ORIGINS": "http://localhost:5173"
+    "ALLOWED_ORIGINS": "http://localhost:5173",
+    "ARTICLE_WRITES_ENABLED": "true"
   }
 }

@@ -4,6 +4,7 @@ import { after, before, test } from 'node:test'
 import { build } from 'esbuild'
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare'
 
+const { vars } = JSON.parse(await readFile('wrangler.jsonc', 'utf8'))
 const appKey = 'test-key-for-php-compatible-password-hashes'
 const origin = 'https://dev.mda.wiki.br'
 const legacyPassword = 'test-password-123'
@@ -16,7 +17,7 @@ before(async () => {
   runtime = new Miniflare(convertV4MiniflareOptions({
     modules: true, script: built.outputFiles[0].text, compatibilityDate: '2026-11-23',
     d1Databases: ['DB'], r2Buckets: ['MEDIA'],
-    bindings: { FRONTEND_URL: 'https://mda.wiki.br', ALLOWED_ORIGINS: origin, APP_KEY: appKey, ARTICLE_WRITES_ENABLED: 'true' },
+    bindings: { ...vars, ALLOWED_ORIGINS: origin, APP_KEY: appKey },
   }))
   db = await runtime.getD1Database('DB')
   const schema = (await Promise.all(['0001_schema.sql', '0002_sessions.sql', '0003_visit_windows.sql', '0004_image_history.sql', '0005_page_edit_token.sql'].map(name => readFile('migrations/' + name, 'utf8')))).join('\n')

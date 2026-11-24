@@ -5,6 +5,7 @@ export type Env = {
   ALLOWED_ORIGINS: string
   APP_KEY?: string
   ARTICLE_WRITES_ENABLED?: string
+  ARTICLE_REBUILD_CRON_ENABLED?: string
 }
 
 export type SqlValue = string | number | null

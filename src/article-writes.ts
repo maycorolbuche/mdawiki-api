@@ -217,7 +217,7 @@ routes.on(['PUT', 'POST'], ['/pages/:slug', '/pages/:slug/:action{preview|restor
 
 /** Reprocessa em lotes pequenos e mantém uma página com erro na fila para diagnóstico. */
 export async function rebuildQueuedArticles(env: Env) {
-  if (env.ARTICLE_WRITES_ENABLED !== 'true') return
+  if (env.ARTICLE_WRITES_ENABLED !== 'true' || env.ARTICLE_REBUILD_CRON_ENABLED !== 'true') return
   const db = env.DB
   const rows = await query(db, `SELECT p.* FROM page_rebuild_queue q JOIN pages p ON p.id = q.page_id
     WHERE p.kind <> 'image' AND p.legacy_identifier NOT LIKE 'page@%' ORDER BY q.queued_at, q.page_id LIMIT 5`).all<Page>()
