@@ -1,6 +1,3 @@
-import { pbkdf2 } from 'node:crypto'
-import { pbkdf2 as portablePbkdf2 } from '@noble/hashes/pbkdf2.js'
-import { sha256 } from '@noble/hashes/sha2.js'
 import { Hono, type Context } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { getCookie, setCookie } from 'hono/cookie'
@@ -26,7 +23,7 @@ export const same = (a: string, b: string) => a.length === b.length && (crypto.s
 const failure = (code: string, message: string) => ({ error: { code, message } })
 const csrfFailure = failure('csrf_failed', 'Sessão expirada. Atualize a página e tente novamente.')
 const loginRequired = failure('login_required', 'Entre na sua conta para continuar.')
-const invalidCredentials = failure('invalid_credentials', 'E-mail ou senha inválidos.')
+const invalidCredentials = failure('invalid_credentials', 'E-mail ou senha inválidos. Se ainda usa a senha antiga, clique em Esqueci minha senha.')
 
 function profile(user: Account, url: string) {
   const { SENHA, FOTO, ...data } = user
@@ -61,26 +58,21 @@ export async function allowedAttempt(c: RequestContext, scope: string, max: numb
   return result !== null
 }
 
-/** Reproduz o formato PBKDF2 do PHP, incluindo o sal HMAC representado em hexadecimal. */
-export async function passwordHash(password: string, id: number, appKey: string) {
+const passwordPrefix = 'pbkdf2-sha256:100000:'
+
+async function derivePassword(password: string, salt: string, appKey: string) {
   const key = await crypto.subtle.importKey('raw', encoder.encode(appKey), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
-  const salt = hex(await crypto.subtle.sign('HMAC', key, encoder.encode(String(id))))
-  const iterations = 600_000
-  const keyLength = 16
-  let derived: Uint8Array
-  try {
-    derived = await new Promise<Uint8Array>((resolve, reject) => {
-      pbkdf2(password, salt, iterations, keyLength, 'sha256', (error, digest) => {
-        if (error) reject(error)
-        else resolve(digest)
-      })
-    })
-  } catch (error) {
-    if (!(error instanceof DOMException) || error.name !== 'NotSupportedError') throw error
-    // O Worker hospedado pode aplicar um teto também à API node:crypto.
-    derived = portablePbkdf2(sha256, password, salt, { c: iterations, dkLen: keyLength })
-  }
-  return 'p2$' + hex(derived).slice(0, 29)
+  const input = await crypto.subtle.sign('HMAC', key, encoder.encode('password:v1:' + password))
+  const material = await crypto.subtle.importKey('raw', input, 'PBKDF2', false, ['deriveBits'])
+  return hex(await crypto.subtle.deriveBits({
+    name: 'PBKDF2', hash: 'SHA-256', salt: encoder.encode(salt), iterations: 100_000,
+  }, material, 256))
+}
+
+/** Usa o teto suportado pelo Worker, com salt aleatório e APP_KEY como pepper. */
+export async function passwordHash(password: string, appKey: string) {
+  const salt = token()
+  return passwordPrefix + salt + ':' + await derivePassword(password, salt, appKey)
 }
 
 export const accounts = new Hono<Api>()
@@ -133,10 +125,11 @@ accounts.post('/auth/login', async c => {
   const { results } = await query(c.env.DB, `SELECT ${accountFields} FROM users WHERE email = ? LIMIT 2`, email).all<Account>()
   const user = results.length === 1 ? results[0] : null
   const stored = user?.SENHA ?? ''
-  const legacy = /^[a-f0-9]{32}$/.test(stored)
-  const derived = await passwordHash(password, user?.ID ?? 0, appKey)
-  const valid = legacy ? same(await digest(password, 'MD5'), stored) : same(derived, stored)
-  if (!user || !valid) return c.json(invalidCredentials, 401)
+  const encoded = /^pbkdf2-sha256:100000:([a-f0-9]{64}):([a-f0-9]{64})$/.exec(stored)
+  const derived = await derivePassword(password, encoded?.[1] ?? '0'.repeat(64), appKey)
+  if (!user || !encoded || !same(derived, encoded[2])) {
+    return c.json(invalidCredentials, 401)
+  }
   if (user.ATIVO !== 'S') return c.json(failure('inactive_account', 'Ative sua conta pelo código enviado por e-mail.'), 403)
 
   const value = token()
@@ -149,12 +142,12 @@ accounts.post('/auth/login', async c => {
     query(db, `INSERT INTO worker_sessions(token_hash, csrf_token, user_id, password_fingerprint, expires_at)
       SELECT ?, ?, id, ?, ? FROM users WHERE id = ? AND is_active = 1 AND password_hash = ?
       AND EXISTS (SELECT 1 FROM worker_sessions WHERE token_hash = ? AND expires_at > ?)`,
-    hash, csrf, await digest(derived), now() + lifetime, user.ID, stored, session.token_hash, now()),
-    query(db, `UPDATE users SET password_hash = ?, has_logged_in = 1, last_seen_at = CURRENT_TIMESTAMP
+    hash, csrf, await digest(stored), now() + lifetime, user.ID, stored, session.token_hash, now()),
+    query(db, `UPDATE users SET has_logged_in = 1, last_seen_at = CURRENT_TIMESTAMP
       WHERE id = ? AND COALESCE(has_logged_in, 0) = 0 AND EXISTS (SELECT 1 FROM worker_sessions WHERE token_hash = ?)`,
-    derived, user.ID, hash),
-    query(db, `UPDATE users SET password_hash = ?, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?
-      AND EXISTS (SELECT 1 FROM worker_sessions WHERE token_hash = ?)`, derived, user.ID, hash),
+    user.ID, hash),
+    query(db, `UPDATE users SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?
+      AND EXISTS (SELECT 1 FROM worker_sessions WHERE token_hash = ?)`, user.ID, hash),
     query(db, `DELETE FROM worker_sessions WHERE token_hash = ?
       AND EXISTS (SELECT 1 FROM worker_sessions WHERE token_hash = ?)`, session.token_hash, hash),
   ])
@@ -220,6 +213,7 @@ accounts.post('/visits', bodyLimit({ maxSize: 4096, onError: c => c.json(failure
 export async function purgeExpiredData(db: D1Database, timestamp: number) {
   await db.batch([
     query(db, 'DELETE FROM worker_sessions WHERE expires_at <= ?', timestamp),
+    query(db, 'DELETE FROM worker_password_resets WHERE expires_at <= ?', timestamp),
     query(db, 'DELETE FROM worker_rate_limits WHERE window < ?', Math.floor(timestamp / 3600)),
     query(db, 'DELETE FROM page_visits WHERE visited_at < ?', timestamp - 31 * 86400),
   ])
