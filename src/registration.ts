@@ -104,6 +104,9 @@ registration.on('POST', ['/auth/register', '/auth/activate', '/auth/resend', '/a
       query(db, `DELETE FROM worker_password_resets WHERE user_id = ? AND token_hash = ?
         AND EXISTS (SELECT 1 FROM users WHERE id = ? AND password_hash = ?)`,
       account.user_id, tokenHash, account.user_id, hash),
+      query(db, `DELETE FROM worker_email_changes WHERE user_id = ?
+        AND EXISTS (SELECT 1 FROM users WHERE id = ? AND password_hash = ?)`,
+      account.user_id, account.user_id, hash),
     ])
     if (updated.meta.changes) notifyProfile(c, account.user_id, 'update')
     return updated.meta.changes ? c.json({ data: { message: 'Senha redefinida. Você já pode entrar.' } }) : c.json(invalidCode, 422)
