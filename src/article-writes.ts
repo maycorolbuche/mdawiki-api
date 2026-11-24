@@ -51,13 +51,19 @@ function relations(db: D1Database, edit: string, wiki: RenderedWiki) {
     UNION ALL SELECT id FROM pages WHERE legacy_identifier = ${get('legacy')}
       AND NOT EXISTS (SELECT 1 FROM pages WHERE identifier = ${get('id')}) LIMIT 1)`
   const links = targets(wiki.links)
+  const images = indexed(wiki.images.map(image => ({ ...image, template: Number(image.template) })))
+  // Resolve na gravação para cobrir uma imagem criada depois da renderização do artigo.
+  const imageId = `COALESCE(
+    (SELECT id FROM images WHERE identifier = ${get('identifier')} AND access_level_id <= 1),
+    (SELECT id FROM images WHERE legacy_identifier = ${get('legacy')} AND access_level_id <= 1)
+  )`
   const values = (table: string, cols: string[], json: string) => query(db,
     `INSERT INTO ${table}(page_id, position, ${cols.join(', ')})
     SELECT ${page}, ${get('position')}, ${cols.map(get).join(', ')} ${from}
     WHERE EXISTS (SELECT 1 FROM pages WHERE worker_edit_token = ?)`, edit, json, edit)
   return [
     ...['page_categories', 'page_links', 'page_missing_links', 'page_external_links', 'page_redirects', 'page_includes',
-      'page_templates', 'page_headings', 'page_media', 'page_videos'].map(table =>
+      'page_templates', 'page_headings', 'page_media', 'page_pending_images', 'page_videos'].map(table =>
       query(db, `DELETE FROM ${table} WHERE page_id = ${page}`, edit)),
     query(db, `INSERT INTO pages (legacy_identifier, identifier, slug, title, kind, source, rendered_html, plain_text,
        is_searchable, view_count, created_at, updated_at, rebuilt_at)
@@ -90,8 +96,13 @@ function relations(db: D1Database, edit: string, wiki: RenderedWiki) {
       title: trimField(heading.title), heading_key: trimField(heading.key), anchor: trimField(heading.key), heading_level: heading.level,
     })))),
     values('page_videos', ['url'], indexed(wiki.videos.map(url => ({ url: trimField(url) })))),
-    values('page_media', ['image_id', 'is_template'], indexed(wiki.images.filter(image => image.id !== null)
-      .map(image => ({ image_id: image.id, is_template: Number(image.template) })))),
+    query(db, `INSERT INTO page_media (page_id, image_id, position, is_template)
+      SELECT ${page}, ${imageId}, ${get('position')}, ${get('template')} ${from}
+      WHERE ${imageId} IS NOT NULL AND EXISTS (SELECT 1 FROM pages WHERE worker_edit_token = ?)`, edit, images, edit),
+    query(db, `INSERT INTO page_pending_images (page_id, position, identifier, legacy_identifier, is_template)
+      SELECT ${page}, ${get('position')}, ${get('identifier')}, ${get('legacy')}, ${get('template')} ${from}
+      WHERE ${imageId} IS NULL AND ${get('identifier')} <> ''
+        AND EXISTS (SELECT 1 FROM pages WHERE worker_edit_token = ?)`, edit, images, edit),
     query(db, `INSERT INTO page_links (page_id, target_page_id, position, fragment, link_text)
       SELECT m.page_id, p.id, m.position, m.fragment, m.link_text FROM page_missing_links m
       JOIN pages p ON m.href = '/' || p.identifier
