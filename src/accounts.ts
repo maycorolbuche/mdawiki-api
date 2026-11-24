@@ -1,3 +1,4 @@
+import { pbkdf2 } from 'node:crypto'
 import { Hono, type Context } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { getCookie, setCookie } from 'hono/cookie'
@@ -62,9 +63,14 @@ export async function allowedAttempt(c: RequestContext, scope: string, max: numb
 export async function passwordHash(password: string, id: number, appKey: string) {
   const key = await crypto.subtle.importKey('raw', encoder.encode(appKey), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
   const salt = hex(await crypto.subtle.sign('HMAC', key, encoder.encode(String(id))))
-  const passwordKey = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits'])
-  const derived = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: encoder.encode(salt), iterations: 600000 }, passwordKey, 128)
-  return 'p2$' + hex(derived).slice(0, 29)
+  // A API de Node.js preserva as 600 mil iterações exigidas pelo formato legado.
+  const derived = await new Promise<string>((resolve, reject) => {
+    pbkdf2(password, salt, 600_000, 16, 'sha256', (error, digest) => {
+      if (error) reject(error)
+      else resolve(digest.toString('hex'))
+    })
+  })
+  return 'p2$' + derived.slice(0, 29)
 }
 
 export const accounts = new Hono<Api>()

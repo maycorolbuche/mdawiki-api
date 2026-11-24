@@ -3,6 +3,7 @@
   "name": "mdawiki-api",
   "main": "src/index.ts",
   "compatibility_date": "2026-11-23",
+  "compatibility_flags": ["nodejs_compat"],
   "observability": {
     "enabled": true,
     "traces": {
