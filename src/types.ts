@@ -12,7 +12,6 @@ export type Env = {
   SMTP_FROM?: string
   MAIL_USER_COPY_TO?: string
   MAIL_ADMIN_TO?: string
-  ARTICLE_REBUILD_CRON_ENABLED?: string
 }
 
 export type SqlValue = string | number | null
