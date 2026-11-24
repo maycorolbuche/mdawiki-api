@@ -1,4 +1,6 @@
 import { Hono } from 'hono'
+import { editorHistory } from './editor-history'
+import { imageEdits } from './image-edits'
 import { accounts, purgeExpiredData } from './accounts'
 import { publicImage, publicUser } from './directory'
 import { serveMedia } from './media'
@@ -25,7 +27,7 @@ app.use('*', async (c, next) => {
     c.header('Access-Control-Allow-Credentials', 'true')
   }
   if (c.req.method === 'OPTIONS') {
-    c.header('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS')
+    c.header('Access-Control-Allow-Methods', 'GET, HEAD, POST, PUT, OPTIONS')
     c.header('Access-Control-Allow-Headers', 'Accept, Content-Type, X-CSRF-Token')
     return c.body(null, 204)
   }
@@ -33,7 +35,9 @@ app.use('*', async (c, next) => {
 })
 
 app.route('/v1', accounts)
-app.get('/', c => c.json({ ...info, mode: 'read_only' }))
+app.route('/v1', imageEdits)
+app.route('/v1', editorHistory)
+app.get('/', c => c.json({ ...info, mode: 'preview' }))
 app.get('/health', c => c.json(info))
 app.get('/v1/pages', async c => {
   const limit = c.req.query('limit') ?? '100'
@@ -74,7 +78,7 @@ app.on(['GET', 'HEAD'], '/media/:group/:file', async c =>
     ?? c.json(error('not_found', 'Arquivo não encontrado.'), 404))
 
 app.notFound(c => c.req.path.startsWith('/v1/') && !['GET', 'HEAD'].includes(c.req.method)
-  ? c.json(error('read_only_preview', 'Homologação disponível para leitura.'), 501)
+  ? c.json(error('read_only_preview', 'Esta operação ainda não está disponível no Worker.'), 501)
   : c.json(error('route_not_found', 'Rota da API não encontrada.'), 404))
 app.onError((_failure, c) => {
   const request_id = crypto.randomUUID()
