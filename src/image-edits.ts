@@ -1,9 +1,10 @@
+import { mailRecipients, notifyEvent } from './wiki-mail'
 import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { imageSize } from 'image-size'
 import { activeAccount, readSession, same, allowedAttempt } from './accounts'
 import { publicImage } from './directory'
-import { identifier, legacyIdentifier } from './pages'
+import { identifier, legacyIdentifier, mediaUrl } from './pages'
 import { query, validSlug, type Env } from './types'
 
 const maxBytes = 5_000_000
@@ -61,9 +62,9 @@ imageEdits.put('/images/:slug', bodyLimit({ maxSize: 6_700_000 }), async c => {
   }
   const body = await c.req.json<{ data?: unknown; clear?: boolean; revision_id?: unknown; base_version?: unknown }>().catch(() => null)
   const db = c.env.DB
-  const image = await query(db, `SELECT id, slug, file_id, access_level_id FROM images
+  const image = await query(db, `SELECT id, slug, file_id, access_level_id, meta FROM images
     WHERE identifier = ? OR legacy_identifier = ? ORDER BY identifier = ? DESC LIMIT 1`,
-    key, 'imagem@' + legacyIdentifier(name), key).first<Image>()
+    key, 'imagem@' + legacyIdentifier(name), key).first<Image & { meta: string }>()
   if (image && image.access_level_id > 1) {
     return c.json(error('permission_denied', 'Você não pode alterar esta imagem.'), 403)
   }
@@ -119,5 +120,20 @@ imageEdits.put('/images/:slug', bodyLimit({ maxSize: 6_700_000 }), async c => {
       key, canonical, canonical.replaceAll('-', ' '), meta, fileId, user.ID, user.ID).first()
     if (!inserted) return c.json(conflict, 409)
   }
-  return c.json({ data: await publicImage(db, new URL(c.req.url).origin, image?.slug ?? canonical) })
+  const api = new URL(c.req.url).origin
+  const data = await publicImage(db, api, image?.slug ?? canonical)
+  if (data && (!image || image.file_id !== fileId)) {
+    const action = fileId === null ? 'delete' : image?.file_id == null ? 'new' : 'update'
+    const previous = action === 'delete' && mailRecipients(c.env.MAIL_ADMIN_TO).length > 0
+      ? await query(db, 'SELECT storage_key FROM files WHERE id = ?', image?.file_id ?? null)
+        .first<{ storage_key: string }>().catch(() => null)
+      : null
+    const url = data.url ?? mediaUrl(api, previous?.storage_key ?? null)
+    const properties = action === 'delete' && image ? JSON.parse(image.meta) : data.meta
+    notifyEvent(c, 'img', action, data.title || data.slug, user.NOME || user.EMAIL, {
+      Endereço: data.slug, Arquivo: url, Formato: properties?.extension,
+      Largura: properties?.width, Altura: properties?.height, 'Tamanho em bytes': properties?.size_bytes,
+    }, '/i/' + encodeURIComponent(data.slug), url)
+  }
+  return c.json({ data })
 })
