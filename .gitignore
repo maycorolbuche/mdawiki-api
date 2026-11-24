@@ -5,6 +5,11 @@
 vendor/
 var/
 
-/worker/node_modules/
+/node_modules/
+/.wrangler/
+/.dev.vars*
+
+# Estado local da estrutura anterior.
 /worker/.wrangler/
+/worker/node_modules/
 /worker/.dev.vars*

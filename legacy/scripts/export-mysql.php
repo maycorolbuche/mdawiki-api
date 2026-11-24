@@ -27,7 +27,7 @@ try {
     }
     $target = new PDO('sqlite:' . $sqlitePath);
     $target->exec('PRAGMA foreign_keys = ON');
-    $target->exec(file_get_contents(__DIR__ . '/../migrations/0001_schema.sql'));
+    $target->exec(file_get_contents(dirname(__DIR__, 2) . '/migrations/0001_schema.sql'));
 
     $source = new PDO(getenv('MYSQL_DSN'), getenv('MYSQL_USER'), getenv('MYSQL_PASSWORD') ?: '', [
         PDO::MYSQL_ATTR_USE_BUFFERED_QUERY => false,
