@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { allowedAttempt, passwordHash, readSession, same } from './accounts'
+import { failureReason, type RegistrationStage } from './diagnostics'
 import { sendSmtp, smtpConfigured } from './smtp'
 import { query, type Env } from './types'
 
@@ -32,10 +33,11 @@ async function deliverCode(env: Env, email: string, code: string, subject: strin
   await sendSmtp(env, email, subject, 'Use este código para ativar sua conta MDAWiki: ' + code + '\n\n' + activation.href)
 }
 
-export const registration = new Hono<{ Bindings: Env }>()
+export const registration = new Hono<{ Bindings: Env; Variables: { registrationStage: RegistrationStage } }>()
 registration.on('POST', ['/auth/register', '/auth/activate', '/auth/resend'], bodyLimit({ maxSize: 8192 }), async c => {
   c.header('Cache-Control', 'no-store')
   if (!c.req.header('Origin')) return c.json(error('origin_required', 'Origem da solicitação ausente.'), 403)
+  c.set('registrationStage', 'session')
   const session = await readSession(c)
   if (!session || !same(c.req.header('X-CSRF-Token') ?? '', session.csrf_token)) {
     return c.json(error('csrf_failed', 'Sessão expirada. Atualize a página e tente novamente.'), 403)
@@ -49,12 +51,14 @@ registration.on('POST', ['/auth/register', '/auth/activate', '/auth/resend'], bo
   if (encoder.encode(key).length < 32) return c.json(error('auth_not_configured', 'Cadastro indisponível.'), 503)
   const action = c.req.path.split('/').pop()
   const ip = c.req.header('CF-Connecting-IP') ?? 'local'
+  c.set('registrationStage', 'rate_limit')
   if (!await allowedAttempt(c, 'registration:' + action + ':ip:' + ip, 20) ||
       !await allowedAttempt(c, 'registration:' + action + ':email:' + email, 10)) {
     return c.json(error('rate_limited', 'Muitas tentativas. Tente novamente mais tarde.'), 429)
   }
   const db = c.env.DB
   if (action === 'activate') {
+    c.set('registrationStage', 'activate')
     const code = body?.code
     if (typeof code !== 'string' || !/^\d{6}$/.test(code)) return c.json(invalidCode, 422)
     const hash = await activationHash(key, email, code)
@@ -73,6 +77,7 @@ registration.on('POST', ['/auth/register', '/auth/activate', '/auth/resend'], bo
 
   if (!smtpConfigured(c.env)) return c.json(mailUnavailable, 503)
   if (action === 'resend') {
+    c.set('registrationStage', 'resend')
     const rows = await query(db, 'SELECT id, email, is_active FROM users WHERE email = ? LIMIT 2', email).all<Account>()
     const account = rows.results.length === 1 ? rows.results[0] : null
     if (!account || account.is_active !== 0) return c.json(generic)
@@ -104,15 +109,19 @@ registration.on('POST', ['/auth/register', '/auth/activate', '/auth/resend'], bo
 
   // O sal legado depende do ID. A inserção só aceita o ID candidato e um e-mail ainda livre.
   for (let attempt = 0; attempt < 3; attempt++) {
+    c.set('registrationStage', 'find_account')
     if (await query(db, 'SELECT id FROM users WHERE email = ? LIMIT 1', email).first()) {
       return c.json(error('email_exists', 'Este e-mail já possui cadastro.'), 409)
     }
+    c.set('registrationStage', 'allocate_user_id')
     const id = await query(db, `SELECT MAX(COALESCE(MAX(id), 0),
       COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'users'), 0)) + 1 AS id FROM users`).first<number>('id')
     if (!Number.isSafeInteger(id) || id === null) throw new Error('ID inválido.')
     const publicId = crypto.randomUUID().replaceAll('-', '')
     const activation = await newCode(key, email)
+    c.set('registrationStage', 'hash_password')
     const passwordDigest = await passwordHash(password, id, key)
+    c.set('registrationStage', 'save_account')
     const results = await db.batch([
       query(db, `INSERT INTO users (id, email, name, password_hash, display_name, public_id, is_active, created_at)
         SELECT ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = ?)
@@ -123,8 +132,17 @@ registration.on('POST', ['/auth/register', '/auth/activate', '/auth/resend'], bo
     if (!results[0].results.length) continue
     try {
       await deliverCode(c.env, email, activation.code, 'Ative sua conta MDAWiki')
-    } catch {
-      return c.json(error('activation_delivery_failed', 'Cadastro criado. Solicite um novo código na tela de ativação.'), 503)
+    } catch (failure) {
+      const request_id = crypto.randomUUID()
+      console.error(JSON.stringify({
+        request_id, event: 'request_failed', stage: 'send_activation',
+        reason: failure instanceof Error ? failureReason(failure) : 'unexpected_error',
+      }))
+      return c.json({ error: {
+        code: 'activation_delivery_failed',
+        message: 'Cadastro criado. Solicite um novo código na tela de ativação.',
+        request_id,
+      } }, 503)
     }
     return c.json({ data: { message: 'Cadastro criado. Confira seu e-mail para ativar a conta.' } })
   }
