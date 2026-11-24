@@ -1,14 +1,14 @@
 import { Hono } from 'hono'
+import { accounts, purgeExpiredData } from './accounts'
 import { publicImage, publicUser } from './directory'
 import { serveMedia } from './media'
 import { findPage, home, listPages, searchPages, statistics } from './pages'
-import type { Env } from './types'
+import { validSlug, type Env } from './types'
 
 const app = new Hono<{ Bindings: Env }>()
 const error = (code: string, message: string) => ({ error: { code, message } })
 const integer = (value: string, min: number, max: number) =>
   /^\d+$/.test(value) && Number(value) >= min && Number(value) <= max
-const validSlug = (slug: string) => slug.length > 0 && [...slug].length <= 250 && !/[\/\\\x00-\x1f\x7f]/.test(slug)
 const origin = (url: string) => new URL(url).origin
 const info = { status: 'ok', service: 'mdawiki-api', version: '1', database: 'not_checked' }
 
@@ -32,6 +32,7 @@ app.use('*', async (c, next) => {
   await next()
 })
 
+app.route('/v1', accounts)
 app.get('/', c => c.json({ ...info, mode: 'read_only' }))
 app.get('/health', c => c.json(info))
 app.get('/v1/pages', async c => {
@@ -81,4 +82,9 @@ app.onError((_failure, c) => {
   return c.json({ error: { code: 'service_unavailable', message: 'Falha ao processar a solicitação.', request_id } }, 503)
 })
 
-export default app
+export default {
+  fetch: app.fetch,
+  scheduled: (event: ScheduledController, env: Env, ctx: ExecutionContext) => {
+    ctx.waitUntil(purgeExpiredData(env.DB, Math.floor(event.scheduledTime / 1000)))
+  },
+}
