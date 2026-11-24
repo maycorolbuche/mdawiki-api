@@ -13,16 +13,6 @@ const request = path => runtime.dispatchFetch('http://localhost' + path)
 
 before(async () => {
   const built = await build({ entryPoints: ['src/index.ts'], bundle: true, format: 'esm', write: false, plugins: [{
-    name: 'simulate-hosted-pbkdf2-limit',
-    setup(plugin) {
-      plugin.onResolve({ filter: /^node:crypto$/ }, () => ({ path: 'crypto', namespace: 'test' }))
-      plugin.onLoad({ filter: /^crypto$/, namespace: 'test' }, () => ({
-        contents: `export const pbkdf2 = (...args) => {
-          args.at(-1)(new DOMException('Maximum PBKDF2 iterations exceeded', 'NotSupportedError'));
-        };`,
-      }))
-    },
-  }, {
     name: 'capture-smtp',
     setup(plugin) {
       plugin.onResolve({ filter: /^\.\/smtp$/ }, () => ({ path: 'smtp', namespace: 'test' }))
@@ -39,7 +29,7 @@ before(async () => {
     bindings: { FRONTEND_URL: 'https://mda.wiki.br', ALLOWED_ORIGINS: origin, APP_KEY: appKey, SMTP_HOST: 'smtp.example.test' },
   }))
   db = await runtime.getD1Database('DB')
-  const schema = (await Promise.all(['0001_schema.sql', '0002_sessions.sql', '0003_visit_windows.sql', '0004_image_history.sql', '0005_page_edit_token.sql'].map(name => readFile('migrations/' + name, 'utf8')))).join('\n')
+  const schema = (await Promise.all(['0001_schema.sql', '0002_sessions.sql', '0003_visit_windows.sql', '0004_image_history.sql', '0005_page_edit_token.sql', '0006_password_resets.sql'].map(name => readFile('migrations/' + name, 'utf8')))).join('\n')
   const ddl = schema.replace(/^--.*$/gm, '')
   const triggers = ddl.match(/CREATE TRIGGER[\s\S]*?\nEND;/g) ?? []
   const statements = ddl.replace(/CREATE TRIGGER[\s\S]*?\nEND;/g, '').split(';').map(sql => sql.trim()).filter(Boolean)
@@ -109,12 +99,8 @@ test('allows only configured cross-origin requests and blocks writes in the prev
   assert.equal((await runtime.dispatchFetch('http://localhost/v1/unsupported', { method: 'PUT' })).status, 501)
 })
 
-test('migrates a PHP password, rotates the session and protects the private profile', async () => {
-  const { createHash, createHmac, pbkdf2Sync } = await import('node:crypto')
-  const expected = 'p2$' + pbkdf2Sync(legacyPassword,
-    createHmac('sha256', appKey).update('1').digest('hex'), 600000, 16, 'sha256').toString('hex').slice(0, 29)
-  await db.prepare('UPDATE users SET password_hash = ? WHERE id = 1')
-    .bind(createHash('md5').update(legacyPassword).digest('hex')).run()
+test('resets a legacy password, rotates the session and protects the private profile', async () => {
+  await db.prepare('UPDATE users SET password_hash = ? WHERE id = 1').bind('p2$legacy').run()
   const initial = await request('/v1/auth/session')
   const anonymous = initial.headers.get('set-cookie').split(';')[0]
   const session = (await initial.json()).data
@@ -124,6 +110,15 @@ test('migrates a PHP password, rotates the session and protects the private prof
   })
   const credentials = { email: 'private@example.test', password: legacyPassword, remember: true }
   assert.equal((await call('/v1/auth/login', anonymous, 'invalid', credentials)).status, 403)
+  assert.equal((await call('/v1/auth/login', anonymous, session.csrf_token, credentials)).status, 401)
+  assert.equal((await call('/v1/auth/forgot', anonymous, session.csrf_token, { email: credentials.email })).status, 200)
+  const mail = await (await (await runtime.getR2Bucket('MEDIA')).get('test-mail/' + credentials.email)).json()
+  const link = new URL(mail.text.split('\n').at(-1))
+  assert.equal(link.pathname, '/p/redefinir-senha')
+  credentials.password = legacyPassword
+  const reset = { ...credentials, password_confirmation: credentials.password, token: link.searchParams.get('token') }
+  assert.equal((await call('/v1/auth/reset', anonymous, session.csrf_token, reset)).status, 200)
+  assert.equal((await call('/v1/auth/reset', anonymous, session.csrf_token, reset)).status, 422)
   const login = await call('/v1/auth/login', anonymous, session.csrf_token, credentials)
   assert.equal(login.status, 200, await login.clone().text())
   const active = login.headers.get('set-cookie')
@@ -135,7 +130,7 @@ test('migrates a PHP password, rotates the session and protects the private prof
   assert.equal(data.first_login, true)
   assert.equal(data.user.EMAIL, credentials.email)
   assert.equal(data.user.SENHA, undefined)
-  assert.equal(await db.prepare('SELECT password_hash FROM users WHERE id = 1').first('password_hash'), expected)
+  assert.match(await db.prepare('SELECT password_hash FROM users WHERE id = 1').first('password_hash'), /^pbkdf2-sha256:100000:[a-f0-9]{64}:[a-f0-9]{64}$/)
   const profile = cookie => runtime.dispatchFetch('http://localhost/v1/profile', { headers: { Cookie: cookie } })
   assert.equal((await profile(anonymous)).status, 401)
   assert.equal((await profile(authenticated)).status, 200)

@@ -88,3 +88,20 @@ Para rollback dessa etapa, publique a versão anterior do Worker. A coluna de co
 O Worker implementa `POST /v1/auth/register`, `POST /v1/auth/activate` e `POST /v1/auth/resend`. A conta é criada inativa. Um código de seis dígitos vence em 24 horas e só pode ser consumido uma vez. O reenvio substitui o código anterior. Em caso de falha SMTP após a gravação, a conta permanece inativa e admite reenvio.
 
 Configure `APP_KEY` e os valores `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_FROM`, `SMTP_USERNAME` e `SMTP_PASSWORD` no Worker. Use TLS explícito (`tls`, normalmente porta 587) ou TLS implícito (`ssl`, normalmente porta 465). Mantenha credenciais nos secrets da Cloudflare. As rotas usam a tabela existente `user_activations`.
+
+### Redefinição das senhas importadas
+
+A API usa PBKDF2-SHA256 com 100 mil iterações, salt por senha e a
+`APP_KEY` existente como segredo de aplicação. Senhas no formato PHP
+precisam ser redefinidas pela tela **Esqueci minha senha**. O usuário
+recebe um link válido por 30 minutos e pode escolher uma senha a partir
+de dez caracteres. O cadastro aceita seis. A redefinição mantém o cadastro e invalida as sessões
+que usavam o hash anterior.
+
+Antes de publicar o Worker, aplique a migração de redefinição de senha no
+banco do ambiente de teste e confirme a configuração do SMTP e de
+`FRONTEND_URL`. No ambiente configurado neste projeto:
+
+```sh
+npx wrangler d1 migrations apply mdawiki --remote
+```
