@@ -7,7 +7,8 @@ import { editorHistory } from './editor-history'
 import { imageEdits } from './image-edits'
 import { accounts, purgeExpiredData } from './accounts'
 import { publicImage, publicUser } from './directory'
-import { serveMedia } from './media'
+import { missingImagePath } from './article-images'
+import { missingArticleImage, serveArticleImage, serveMedia } from './media'
 import { findPage, home, listPages, searchPages, statistics } from './pages'
 import { validSlug, type Env } from './types'
 
@@ -79,6 +80,12 @@ app.get('/v1/images/:slug', async c => {
   const slug = c.req.param('slug')
   const data = validSlug(slug) ? await publicImage(c.env.DB, origin(c.req.url), slug) : null
   return data ? c.json({ data }) : c.json(error('image_not_found', 'Imagem não encontrada.'), 404)
+})
+app.on(['GET', 'HEAD'], missingImagePath, c => missingArticleImage(c.req.method === 'HEAD'))
+app.on(['GET', 'HEAD'], '/media/image/:slug', c => {
+  const slug = c.req.param('slug')
+  return validSlug(slug) ? serveArticleImage(c.env, slug, c.req.method === 'HEAD')
+    : c.json(error('not_found', 'Imagem não encontrada.'), 404)
 })
 app.on(['GET', 'HEAD'], '/media/:group/:file', async c =>
   await serveMedia(c.env, c.req.param('group'), c.req.param('file'), c.req.method === 'HEAD')
