@@ -4,7 +4,7 @@ import { mediaUrl } from './pages'
 import { sendSmtp } from './smtp'
 import { query, type Env } from './types'
 
-type MailContext = Context<{ Bindings: Env }>
+type MailContext = Pick<Context<{ Bindings: Env }>, 'env' | 'req' | 'executionCtx'>
 type Action = 'new' | 'update' | 'delete'
 type Category = 'user' | 'page' | 'img'
 type Detail = string | number | null | undefined
