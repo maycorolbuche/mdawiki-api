@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { registration } from './registration'
 import { articleWrites, rebuildQueuedArticles } from './article-writes'
 import { editorHistory } from './editor-history'
 import { imageEdits } from './image-edits'
@@ -36,6 +37,7 @@ app.use('*', async (c, next) => {
 })
 
 app.route('/v1', accounts)
+app.route('/v1', registration)
 app.route('/v1', imageEdits)
 app.route('/v1', editorHistory)
 app.route('/v1', articleWrites)

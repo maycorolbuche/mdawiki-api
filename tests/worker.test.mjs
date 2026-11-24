@@ -12,11 +12,21 @@ let db
 const request = path => runtime.dispatchFetch('http://localhost' + path)
 
 before(async () => {
-  const built = await build({ entryPoints: ['src/index.ts'], bundle: true, format: 'esm', write: false })
+  const built = await build({ entryPoints: ['src/index.ts'], bundle: true, format: 'esm', write: false, plugins: [{
+    name: 'capture-smtp',
+    setup(plugin) {
+      plugin.onResolve({ filter: /^\.\/smtp$/ }, () => ({ path: 'smtp', namespace: 'test' }))
+      plugin.onLoad({ filter: /.*/, namespace: 'test' }, () => ({
+        contents: `export const smtpConfigured = env => Boolean(env.SMTP_HOST);
+          export const sendSmtp = (env, to, subject, text) =>
+            env.MEDIA.put('test-mail/' + to, JSON.stringify({ subject, text }));`,
+      }))
+    },
+  }] })
   runtime = new Miniflare(convertV4MiniflareOptions({
     modules: true, script: built.outputFiles[0].text, compatibilityDate: '2026-11-23',
     d1Databases: ['DB'], r2Buckets: ['MEDIA'],
-    bindings: { FRONTEND_URL: 'https://mda.wiki.br', ALLOWED_ORIGINS: origin, APP_KEY: appKey },
+    bindings: { FRONTEND_URL: 'https://mda.wiki.br', ALLOWED_ORIGINS: origin, APP_KEY: appKey, SMTP_HOST: 'smtp.example.test' },
   }))
   db = await runtime.getD1Database('DB')
   const schema = (await Promise.all(['0001_schema.sql', '0002_sessions.sql', '0003_visit_windows.sql', '0004_image_history.sql', '0005_page_edit_token.sql'].map(name => readFile('migrations/' + name, 'utf8')))).join('\n')
@@ -222,4 +232,37 @@ test('creates and updates an article atomically, validates edits and restores a 
   const restored = await call('/restore', 'POST', { revision: 1, base_version: next.base_version })
   assert.equal(restored.status, 200, await restored.clone().text())
   assert.equal((await restored.json()).data.revision, 3)
+})
+
+
+test('registers an inactive account, resends and activates with a one-use code', async () => {
+  const session = await request('/v1/auth/session')
+  const csrf = (await session.json()).data.csrf_token
+  const headers = { Origin: origin, Cookie: session.headers.get('set-cookie').split(';')[0],
+    'X-CSRF-Token': csrf, 'Content-Type': 'application/json' }
+  const call = (action, body, override = headers) => runtime.dispatchFetch('http://localhost/v1/auth/' + action, {
+    method: 'POST', headers: override, body: JSON.stringify(body),
+  })
+  const email = 'registration@example.test'
+  const password = 'test-password-42'
+  const account = { email, name: 'Conta teste', password, password_confirmation: password }
+  assert.equal((await call('register', account, { ...headers, 'X-CSRF-Token': 'invalid' })).status, 403)
+  const created = await call('register', account)
+  assert.equal(created.status, 200, await created.clone().text())
+  assert.equal((await call('register', account)).status, 409)
+  assert.equal((await call('login', { email, password })).status, 403)
+  const bucket = await runtime.getR2Bucket('MEDIA')
+  const getCode = async () => {
+    const message = await (await bucket.get('test-mail/' + email)).json()
+    return new URL(message.text.split('\n').at(-1)).searchParams.get('code')
+  }
+  const first = await getCode()
+  assert.match(first, /^\d{6}$/)
+  assert.equal((await call('resend', { email })).status, 200)
+  const second = await getCode()
+  assert.notEqual(first, second)
+  assert.equal((await call('activate', { email, code: first })).status, 422)
+  assert.equal((await call('activate', { email, code: second })).status, 200)
+  assert.equal((await call('activate', { email, code: second })).status, 422)
+  assert.equal((await call('login', { email, password })).status, 200)
 })

@@ -59,7 +59,7 @@ export async function allowedAttempt(c: RequestContext, scope: string, max: numb
 }
 
 /** Reproduz o formato PBKDF2 do PHP, incluindo o sal HMAC representado em hexadecimal. */
-async function passwordHash(password: string, id: number, appKey: string) {
+export async function passwordHash(password: string, id: number, appKey: string) {
   const key = await crypto.subtle.importKey('raw', encoder.encode(appKey), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
   const salt = hex(await crypto.subtle.sign('HMAC', key, encoder.encode(String(id))))
   const passwordKey = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits'])

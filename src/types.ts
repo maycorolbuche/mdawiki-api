@@ -4,6 +4,12 @@ export type Env = {
   FRONTEND_URL: string
   ALLOWED_ORIGINS: string
   APP_KEY?: string
+  SMTP_HOST?: string
+  SMTP_PORT?: string
+  SMTP_SECURE?: string
+  SMTP_USERNAME?: string
+  SMTP_PASSWORD?: string
+  SMTP_FROM?: string
   ARTICLE_REBUILD_CRON_ENABLED?: string
 }
 
