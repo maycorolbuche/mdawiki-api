@@ -1,3 +1,4 @@
+import { retryOptionalMail } from './wiki-mail'
 import { Hono } from 'hono'
 import { failureReason, type RegistrationStage } from './diagnostics'
 import { registration } from './registration'
@@ -100,5 +101,6 @@ export default {
   scheduled: (event: ScheduledController, env: Env, ctx: ExecutionContext) => {
     ctx.waitUntil(purgeExpiredData(env.DB, Math.floor(event.scheduledTime / 1000)))
     ctx.waitUntil(rebuildQueuedArticles(env))
+    if (env.MAIL_ADMIN_TO || env.MAIL_USER_COPY_TO) ctx.waitUntil(retryOptionalMail(env))
   },
 }
