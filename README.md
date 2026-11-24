@@ -127,7 +127,7 @@ tentativa pode gerar duplicata.
 | --- | --- |
 | Cadastro, reenvio de código e recuperação | E-mail ao usuário com HTML e texto, mais cópia oculta sem segredos quando configurada. |
 | Cadastro, ativação e redefinição concluída | `[user][new]` no cadastro e `[user][update]` após ativação ou troca da senha por recuperação. Perfil, foto e link incluídos quando disponíveis. O perfil público só abre após a ativação. |
-| Edição de perfil, foto, senha autenticada e troca de e-mail | Pendentes. O Worker tem leitura do perfil, mas ainda não tem as rotas de escrita correspondentes. A confirmação do novo endereço e os avisos dessas operações dependem dessas rotas. |
+| Edição de perfil, foto, senha autenticada e troca de e-mail | Disponíveis no Worker com aviso `[user][update]` após a gravação. A confirmação do endereço usa código por e-mail. |
 | Criação, edição e restauração de página | `[page][new]` ou `[page][update]`. Prévia, reprocessamento e alterações sem diferença não geram aviso. |
 | Esvaziamento de página existente | `[page][delete]` com o conteúdo anterior. A gravação de uma página vazia continua usando o fluxo existente de edição. |
 | Envio, substituição, remoção e restauração de imagem | `[img][new]`, `[img][update]` ou `[img][delete]`, conforme a mudança do arquivo. |
@@ -144,3 +144,16 @@ páginas, além da edição e histórico de imagens. O PHP ainda tem
 O catálogo do Worker cobre a lista de atualização. Esta comparação é
 de rotas e eventos, sem afirmar equivalência de renderização ou de
 regras internas em todas as operações.
+
+### Edição de conta no Worker
+
+Aplique `0008_email_changes.sql` ao D1 antes de publicar. As telas atuais
+enviam os dados para `PUT /v1/profile`, `POST /v1/profile/photo`,
+`POST /v1/profile/password` e `POST /v1/profile/email`.
+
+A alteração de senha exige a senha atual e uma nova senha de pelo menos
+dez caracteres. A API renova a sessão atual e invalida as demais.
+A alteração de e-mail envia um código para o novo endereço. O usuário
+digita esse código no formulário aberto. O código vale por 30 minutos,
+é armazenado como hash e só pode ser usado uma vez. Um novo pedido
+substitui o código pendente. A troca só ocorre após a confirmação.
