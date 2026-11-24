@@ -1,3 +1,4 @@
+import { notifyEvent } from './wiki-mail'
 import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { activeAccount, allowedAttempt, readSession, same } from './accounts'
@@ -205,6 +206,11 @@ routes.on(['PUT', 'POST'], ['/pages/:slug', '/pages/:slug/:action{preview|restor
       const wiki = await renderWiki(db, source, slug, c.env.FRONTEND_URL.replace(/\/$/, ''))
       if (action === 'preview') return c.json({ data: { html: wiki.html.replaceAll('{{{url_diretorio}}}', new URL(c.req.url).origin + '/media/') } })
       const result = await save(db, page, slug, cleanTitle, source, user.ID, wiki, rebuild)
+      if (result && !rebuild && (!page || page.title !== cleanTitle || (page.source ?? '') !== source)) {
+        const change = !page ? 'new' : page.source?.trim() && !source.trim() ? 'delete' : 'update'
+        notifyEvent(c, 'page', change, cleanTitle, user.NOME || user.EMAIL,
+          { Endereço: result.slug, Conteúdo: change === 'delete' ? page?.source : source }, '/' + encodeURIComponent(result.slug))
+      }
       return result ? c.json({ data: result }) : c.json(conflict, 409)
     } catch (cause) {
       if (cause instanceof WikiError) return c.json(error(cause.code, cause.message), 422)
