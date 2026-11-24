@@ -4,6 +4,9 @@ import { after, before, test } from 'node:test'
 import { build } from 'esbuild'
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare'
 
+const appKey = 'test-key-for-php-compatible-password-hashes'
+const origin = 'https://dev.mda.wiki.br'
+const legacyPassword = 'test-password-123'
 let runtime
 let db
 const request = path => runtime.dispatchFetch('http://localhost' + path)
@@ -13,11 +16,14 @@ before(async () => {
   runtime = new Miniflare(convertV4MiniflareOptions({
     modules: true, script: built.outputFiles[0].text, compatibilityDate: '2026-11-23',
     d1Databases: ['DB'], r2Buckets: ['MEDIA'],
-    bindings: { FRONTEND_URL: 'https://mda.wiki.br', ALLOWED_ORIGINS: 'https://dev.mda.wiki.br' },
+    bindings: { FRONTEND_URL: 'https://mda.wiki.br', ALLOWED_ORIGINS: origin, APP_KEY: appKey },
   }))
   db = await runtime.getD1Database('DB')
-  const schema = await readFile('migrations/0001_schema.sql', 'utf8')
-  const statements = schema.replace(/^--.*$/gm, '').split(';').map(sql => sql.trim()).filter(Boolean)
+  const schema = (await Promise.all(['0001_schema.sql', '0002_sessions.sql', '0003_visit_windows.sql'].map(name => readFile('migrations/' + name, 'utf8')))).join('\n')
+  const ddl = schema.replace(/^--.*$/gm, '')
+  const triggers = ddl.match(/CREATE TRIGGER[\s\S]*?\nEND;/g) ?? []
+  const statements = ddl.replace(/CREATE TRIGGER[\s\S]*?\nEND;/g, '').split(';').map(sql => sql.trim()).filter(Boolean)
+  statements.push(...triggers)
   await db.batch(statements.map(sql => db.prepare(sql)))
   await db.batch([
     db.prepare("INSERT INTO pages (id, slug, title, identifier, legacy_identifier, kind, source, plain_text, rendered_html, is_searchable) VALUES (41, 'Cães', 'Cães', 'caes', 'caes', 'article', 'Wiki', 'Conteúdo', '<p>Conteúdo</p>', 1), (42, 'Privado', 'Privado', 'privado', 'privado', 'article', 'Wiki', 'Privado', '', 0)"),
@@ -81,4 +87,60 @@ test('allows only configured cross-origin requests and blocks writes in the prev
   assert.equal(cors.headers.get('access-control-allow-origin'), 'https://dev.mda.wiki.br')
   assert.equal((await runtime.dispatchFetch('http://localhost/v1/pages', { headers: { Origin: 'https://other.test' } })).status, 403)
   assert.equal((await runtime.dispatchFetch('http://localhost/v1/pages/cães', { method: 'PUT' })).status, 501)
+})
+
+test('migrates a PHP password, rotates the session and protects the private profile', async () => {
+  const { createHash, createHmac, pbkdf2Sync } = await import('node:crypto')
+  const expected = 'p2$' + pbkdf2Sync(legacyPassword,
+    createHmac('sha256', appKey).update('1').digest('hex'), 600000, 16, 'sha256').toString('hex').slice(0, 29)
+  await db.prepare('UPDATE users SET password_hash = ? WHERE id = 1')
+    .bind(createHash('md5').update(legacyPassword).digest('hex')).run()
+  const initial = await request('/v1/auth/session')
+  const anonymous = initial.headers.get('set-cookie').split(';')[0]
+  const session = (await initial.json()).data
+  const call = (path, cookie, csrf, body) => runtime.dispatchFetch('http://localhost' + path, {
+    method: 'POST', headers: { Origin: origin, Cookie: cookie, 'X-CSRF-Token': csrf, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const credentials = { email: 'private@example.test', password: legacyPassword, remember: true }
+  assert.equal((await call('/v1/auth/login', anonymous, 'invalid', credentials)).status, 403)
+  const login = await call('/v1/auth/login', anonymous, session.csrf_token, credentials)
+  assert.equal(login.status, 200, await login.clone().text())
+  const active = login.headers.get('set-cookie')
+  assert.match(active, /HttpOnly/i)
+  assert.match(active, /Max-Age=2592000/i)
+  const authenticated = active.split(';')[0]
+  assert.notEqual(authenticated, anonymous)
+  const { data } = await login.json()
+  assert.equal(data.first_login, true)
+  assert.equal(data.user.EMAIL, credentials.email)
+  assert.equal(data.user.SENHA, undefined)
+  assert.equal(await db.prepare('SELECT password_hash FROM users WHERE id = 1').first('password_hash'), expected)
+  const profile = cookie => runtime.dispatchFetch('http://localhost/v1/profile', { headers: { Cookie: cookie } })
+  assert.equal((await profile(anonymous)).status, 401)
+  assert.equal((await profile(authenticated)).status, 200)
+  const logout = await call('/v1/auth/logout', authenticated, data.csrf_token, {})
+  assert.equal(logout.status, 200)
+  assert.equal((await profile(authenticated)).status, 401)
+  const retry = await call('/v1/auth/login', logout.headers.get('set-cookie').split(';')[0],
+    (await logout.json()).data.csrf_token, credentials)
+  assert.equal(retry.status, 200, await retry.clone().text())
+  assert.equal((await retry.json()).data.first_login, false)
+})
+
+test('deduplicates visits across concurrent requests and updates the counter once', async () => {
+  const session = await request('/v1/auth/session')
+  const { data } = await session.json()
+  const options = {
+    method: 'POST', headers: { Origin: origin, Cookie: session.headers.get('set-cookie').split(';')[0],
+      'X-CSRF-Token': data.csrf_token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug: 'Cães' }),
+  }
+  const before = await db.prepare('SELECT COUNT(*) AS count FROM page_visits').first('count')
+  const responses = await Promise.all([1, 2].map(() => runtime.dispatchFetch('http://localhost/v1/visits', options)))
+  assert.deepEqual(responses.map(response => response.status), [200, 200])
+  const results = await Promise.all(responses.map(response => response.json()))
+  assert.equal(results.filter(result => result.data.counted).length, 1)
+  assert.equal(await db.prepare('SELECT COUNT(*) AS count FROM page_visits').first('count'), before + 1)
+  assert.equal(await db.prepare('SELECT view_count FROM pages WHERE id = 41').first('view_count'), 1)
 })

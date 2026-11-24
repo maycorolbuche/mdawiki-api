@@ -4,6 +4,7 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-11-23",
   "observability": { "enabled": true, "traces": { "enabled": true } },
+  "triggers": { "crons": ["13 * * * *"] },
   "d1_databases": [
     {
       "binding": "DB",

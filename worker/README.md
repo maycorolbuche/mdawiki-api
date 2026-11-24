@@ -1,6 +1,6 @@
 # API MDAWiki no Cloudflare
 
-Worker de homologação na branch `dev` do repositório da API. Esta etapa cobre a leitura pública e usa o HTML armazenado no banco. O Worker ainda carece de paridade com o PHP para autenticação, edição, registro de visitas, e-mails e tarefas agendadas. Use um domínio de homologação.
+Worker de homologação na branch `dev` do repositório da API. Esta etapa cobre leitura pública, sessão, login, logout, consulta do próprio perfil e contagem de visitas. Os artigos usam o HTML armazenado no banco. Edição, fluxos de conta por e-mail e escrita de mídia ainda dependem do PHP. Use um domínio de homologação.
 
 ## Organização
 
@@ -9,8 +9,9 @@ Worker de homologação na branch `dev` do repositório da API. Esta etapa cobre
 | `src/index.ts` | Roteamento Hono, validação HTTP, CORS e erros no formato da API. |
 | `src/pages.ts` | Exportação paginada, relações, busca, home e apresentação de artigos. |
 | `src/directory.ts` | Perfis públicos e histórico público de imagens. |
+| `src/accounts.ts` | Sessões, login, consultas autenticadas, CSRF, limites, visitas e limpeza programada. |
 | `src/media.ts` | Autoriza a chave no D1 antes de ler ou entregar um objeto do R2 privado. |
-| `migrations/0001_schema.sql` | Schema D1 das tabelas normalizadas. |
+| `migrations/` | Estrutura normalizada e tabelas de sessão, limites e deduplicação de visitas. |
 | `scripts/export-mysql.php` | Exportação consistente do MySQL, validada contra SQLite antes da importação no D1. |
 
 ## Desenvolvimento local
@@ -32,7 +33,8 @@ O banco local começa vazio. Use registros fictícios para desenvolvimento. A co
 1. Crie o banco D1 `mdawiki-dev` e o bucket privado `mdawiki-media-dev`. Preencha o ID do D1 em `wrangler.jsonc` e ajuste `ALLOWED_ORIGINS` à origem do front de teste.
 2. Aplique as migrations com `npx wrangler d1 migrations apply mdawiki-dev --remote` a partir de `worker/`.
 3. Conecte um Worker de teste ao repositório com branch de deploy `dev`, diretório raiz `worker` e comando de deploy `npm run deploy`. Para deploy manual, use o mesmo comando em `worker/` depois de autenticar o Wrangler.
-4. Copie os objetos de teste para o bucket nas chaves existentes, como `articles/<nome>` e `users/<nome>`. Verifique `GET /health`, `GET /v1/statistics` e `GET /media/...` no endereço do Worker de homologação.
+4. Configure `APP_KEY` como secret com `npx wrangler secret put APP_KEY`. Use uma chave exclusiva de homologação com pelo menos 32 bytes e contas de teste geradas com essa chave.
+5. Copie os objetos de teste para o bucket nas chaves existentes, como `articles/<nome>` e `users/<nome>`. Verifique `GET /health`, `GET /v1/statistics` e `GET /media/...` no endereço do Worker de homologação.
 
 ## Importação
 
@@ -53,4 +55,12 @@ O exportador preserva IDs e vínculos, valida as restrições no SQLite e imprim
 - A busca usa a comparação nativa do SQLite. A equivalência completa de acentos e maiúsculas com o MySQL ainda precisa de validação.
 - A leitura usa HTML importado, com substituição dos marcadores de URL e do domínio antigo da API nas referências de mídia. A decoração dinâmica de links de artigos e a integração com material de estudo ainda precisam de portabilidade.
 - A entrega R2 cobre as chaves normalizadas de artigos públicos e fotos associadas a contas ativas. O sistema antigo continua responsável pelos fluxos de edição e compatibilidade com outras chaves de mídia.
-- A autenticação, a edição, a restauração, os uploads, a gravação de visitas e o processamento agendado são etapas seguintes da migração.
+- Cadastro, recuperação de senha, edição de perfil e de artigos, restauração, uploads e e-mails são etapas seguintes da migração.
+
+## Sessões e visitas
+
+O cliente chama `GET /v1/auth/session` e envia o `csrf_token` no cabeçalho `X-CSRF-Token` das escritas. O cookie HTTP-only identifica a sessão. Login e logout renovam o cookie e o token. O D1 armazena o hash do identificador e invalida sessões autenticadas se a senha ou a situação da conta mudar. As respostas de sessão, perfil e leitura autenticada usam `Cache-Control: no-store`.
+
+Contas legadas com MD5 recebem um hash PBKDF2 após o login. O formato PBKDF2 existente depende da mesma `APP_KEY` usada para gerar o hash. Valide o tempo de CPU do PBKDF2 no plano Cloudflare antes de uma virada. Em homologação, use credenciais fictícias. Sessões do PHP e do Worker têm cookies próprios.
+
+`POST /v1/visits` aceita sessões anônimas e autenticadas. O D1 deduplica por sessão e artigo em 30 segundos. Um único cron remove sessões expiradas, janelas antigas de rate limiting e visitas com mais de 31 dias. Aplicar as migrations desta etapa adiciona estruturas com prefixo `worker_`. Para voltar à versão anterior, publique o Worker anterior mantendo essas tabelas e os dados históricos de visitas.

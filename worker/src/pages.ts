@@ -1,7 +1,7 @@
 import { decodeHTML } from 'entities'
 import { query } from './types'
 
-const publicPage = "p.is_searchable = 1 AND length(p.identifier) > 1 AND p.legacy_identifier NOT LIKE 'page@%'"
+export const publicPage = "p.is_searchable = 1 AND length(p.identifier) > 1 AND p.legacy_identifier NOT LIKE 'page@%'"
 const card = 'CAST(p.id AS TEXT) AS id, p.slug, COALESCE(p.title, p.slug) AS title'
 const cover = `(SELECT f.storage_key FROM page_media m
   JOIN images i ON i.id = m.image_id JOIN files f ON f.id = i.file_id
