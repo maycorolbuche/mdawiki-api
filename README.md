@@ -86,3 +86,31 @@ Em `dev`, aponte `DB_*` para a base importada. A API reconhece a estrutura pelo 
 A home da base migrada usa visitas com horário para calcular os rankings móveis de 24 horas, 7 e 30 dias. A coleta começa após a implantação, pois os contadores históricos não têm horário individual. O cron de manutenção remove registros com mais de 31 dias.
 
 O card **Nos ajude com esses conteúdos** sorteia até dez destinos internos inexistentes de páginas públicas buscáveis. Execute `php bin/rebuild-normalized-pages.php` para preencher os vínculos dos artigos existentes. Novas gravações mantêm a tabela atualizada.
+
+### Armazenamento de mídia na API PHP
+
+`MEDIA_STORAGE_DRIVER=local` (padrão) grava novos arquivos no diretório
+`MEDIA_ROOT` (`var/media` por padrão). `MEDIA_STORAGE_DRIVER=r2` grava no
+bucket R2 privado, com as mesmas chaves, como `articles/<arquivo>` e
+`users/<arquivo>`. Configure no servidor:
+
+```dotenv
+MEDIA_STORAGE_DRIVER=r2
+R2_ACCOUNT_ID=
+R2_BUCKET=mdawiki
+R2_ACCESS_KEY_ID=
+R2_SECRET_ACCESS_KEY=
+```
+
+Use credenciais S3 com acesso de leitura e gravação restrito ao bucket.
+O driver usa a extensão PHP cURL com suporte a AWS SigV4 (libcurl 7.75+).
+As URLs continuam sob `MEDIA_PUBLIC_URL`, e a API aplica as permissões de
+mídia antes de servir os arquivos.
+
+A leitura procura primeiro no armazenamento selecionado e consulta o outro
+quando o objeto está ausente. Mantenha as credenciais R2 no ambiente após
+voltar a `local` se ainda houver arquivos somente no bucket. A troca de
+driver não copia arquivos. Se a mesma chave existir nos dois destinos,
+a cópia do armazenamento selecionado tem prioridade. Isso é relevante para
+as variantes legadas gravadas sempre sob o mesmo nome. Antes de alternar o
+driver, sincronize essas variantes se já existirem cópias diferentes.

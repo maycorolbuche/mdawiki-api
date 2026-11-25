@@ -9,12 +9,10 @@ final class NormalizedImages
     {
     }
 
-    public static function properties(string $root, string $key): array
+    private static function properties(string $key, string $bytes, array|false $dimensions): array
     {
-        $path = $root . '/' . $key;
-        $dimensions = @getimagesize($path);
         return ['extension' => pathinfo($key, PATHINFO_EXTENSION), 'width' => $dimensions[0] ?? null,
-            'height' => $dimensions[1] ?? null, 'size_bytes' => filesize($path)];
+            'height' => $dimensions[1] ?? null, 'size_bytes' => strlen($bytes)];
     }
 
     public function lookup(string $name, bool $lock = false): ?array
@@ -90,31 +88,11 @@ final class NormalizedImages
             }
             $hash = hash('sha256', $bytes);
             $key = 'articles/' . $hash . '.' . $extension;
-            $path = $this->config['media_root'] . '/' . $key;
-            $directory = dirname($path);
-            if (!is_dir($directory) && !@mkdir($directory, 0770, true) && !is_dir($directory)) {
-                throw new \RuntimeException('Não foi possível preparar o diretório de imagens.');
-            }
-            if (!is_file($path)) {
-                $temp = tempnam($directory, '.upload-');
-                if ($temp === false) {
-                    throw new \RuntimeException('Não foi possível preparar o arquivo de upload.');
-                }
-                try {
-                    if (file_put_contents($temp, $bytes) !== strlen($bytes) || !chmod($temp, 0640) || !rename($temp, $path)) {
-                        throw new \RuntimeException('Não foi possível salvar o arquivo de upload.');
-                    }
-                } finally {
-                    if (is_file($temp)) unlink($temp);
-                }
-            }
-            if (hash_file('sha256', $path) !== $hash) {
-                throw new \RuntimeException('O arquivo salvo diverge da imagem enviada.');
-            }
+            (new MediaStorage($this->config))->write($key, $bytes);
             $this->db->run('INSERT INTO files (sha256, storage_key, mime_type, size_bytes) VALUES (?, ?, ?, ?)
                 ON DUPLICATE KEY UPDATE id = id', [$hash, $key, $size['mime'], strlen($bytes)]);
             $file = $this->db->one('SELECT id FROM files WHERE storage_key = ? FOR UPDATE', [$key])['id'];
-            $meta = json_encode(self::properties($this->config['media_root'], $key), JSON_THROW_ON_ERROR);
+            $meta = json_encode(self::properties($key, $bytes, $size), JSON_THROW_ON_ERROR);
             if (!$image) {
                 $this->db->run('INSERT INTO images (identifier, slug, title, meta, file_id, access_level_id, created_by, created_at, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?, NOW())',
                     [$identifier, $slug, str_replace(['-', '_'], ' ', $slug), $meta, $file, $level, $user['ID'], $user['ID']]);
@@ -179,11 +157,12 @@ final class NormalizedImages
             }
             $revision = $this->db->one('SELECT r.file_id, f.storage_key FROM image_revisions r JOIN files f ON r.file_id = f.id
                 WHERE r.image_id = ? AND r.id = ? AND r.access_level_id <= ?', [$image['id'], $revisionId, $level]);
-            if (!$revision || !is_file($this->config['media_root'] . '/' . $revision['storage_key'])) {
+            $bytes = $revision ? (new MediaStorage($this->config))->read($revision['storage_key']) : null;
+            if ($bytes === null) {
                 throw new HttpError(404, 'revision_not_found', 'O arquivo desta revisão não está disponível.');
             }
             if ((string) $image['file_id'] !== (string) $revision['file_id']) {
-                $meta = json_encode(self::properties($this->config['media_root'], $revision['storage_key']), JSON_THROW_ON_ERROR);
+                $meta = json_encode(self::properties($revision['storage_key'], $bytes, @getimagesizefromstring($bytes)), JSON_THROW_ON_ERROR);
                 $this->replace($image, $revision['file_id'], $meta, (int) $user['ID']);
             }
             $pdo->commit();

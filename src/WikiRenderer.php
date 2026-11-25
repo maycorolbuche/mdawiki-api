@@ -19,7 +19,9 @@ final class WikiRenderer
                 $this->config['media_public_url'], $this->config['frontend_url']))
                 ->image('imagem@' . preg_replace('/!tmpl$/', '', $name));
             $key = $file['storage_key'] ?? Media::MISSING_IMAGE;
-            $size = isset($this->config['media_root']) ? @getimagesize($this->config['media_root'] . '/' . $key) : false;
+            $bytes = isset($file['storage_key'], $this->config['media_root'])
+                ? (new MediaStorage($this->config))->read($key) : null;
+            $size = $bytes === null ? false : @getimagesizefromstring($bytes);
             return ['IMAGEM' => json_encode(array_fill_keys(['url', 'url_mini', 'url_cp'], $key)
                 + ['w' => $size[0] ?? 100, 'h' => $size[1] ?? 100], JSON_THROW_ON_ERROR), 'image_id' => $file['image_id'] ?? null];
         }
