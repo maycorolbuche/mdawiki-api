@@ -95,7 +95,106 @@ final class MediaStorage
         }
     }
 
-    private function request(string $method, string $key, ?string $bytes = null): ?string
+    public static function withWriteLock(string $directory, callable $action): mixed
+    {
+        if (!is_dir($directory) && !@mkdir($directory, 0770, true) && !is_dir($directory)) {
+            throw new \RuntimeException('Armazenamento de mídia indisponível.');
+        }
+        $lock = fopen($directory . '/media-write.lock', 'c');
+        if ($lock === false) throw new \RuntimeException('Bloqueio de mídia indisponível.');
+        try {
+            if (!flock($lock, LOCK_EX)) throw new \RuntimeException('Bloqueio de mídia indisponível.');
+            return $action();
+        } finally {
+            fclose($lock);
+        }
+    }
+
+    public function inventory(): array
+    {
+        $locations = ['local' => []];
+        $root = $this->config['media_root'];
+        if (is_dir($root)) {
+            $root = realpath($root);
+            if ($root === false || !is_readable($root)) throw new \RuntimeException('Diretório de mídia indisponível.');
+            $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS));
+            foreach ($iterator as $file) {
+                if (!$file->isFile() || $file->isLink()) continue;
+                $key = str_replace(DIRECTORY_SEPARATOR, '/', substr($file->getPathname(), strlen($root) + 1));
+                if (self::managedKey($key)) $locations['local'][$key] = $file->getSize();
+            }
+        } elseif (file_exists($root)) {
+            throw new \RuntimeException('Diretório de mídia indisponível.');
+        }
+        if ($this->hasRemote()) {
+            $locations['r2'] = [];
+            $token = null;
+            do {
+                $query = ['list-type' => '2', 'encoding-type' => 'url'];
+                if ($token !== null) $query['continuation-token'] = $token;
+                $doc = new \DOMDocument();
+                if (!@$doc->loadXML($this->request('GET', '', null, $query), LIBXML_NONET)
+                    || $doc->doctype || $doc->documentElement->localName !== 'ListBucketResult') {
+                    throw new \RuntimeException('Resposta de inventário inválida no R2.');
+                }
+                foreach ($doc->getElementsByTagName('Contents') as $object) {
+                    $key = rawurldecode($object->getElementsByTagName('Key')->item(0)->textContent);
+                    if (self::managedKey($key)) $locations['r2'][$key] = (int) $object->getElementsByTagName('Size')->item(0)->textContent;
+                }
+                $truncated = $doc->getElementsByTagName('IsTruncated')->item(0)?->textContent;
+                if (!in_array($truncated, ['true', 'false'], true)) throw new \RuntimeException('Inventário incompleto no R2.');
+                $more = $truncated === 'true';
+                $next = $doc->getElementsByTagName('NextContinuationToken')->item(0)?->textContent;
+                if ($more && (!$next || $next === $token)) throw new \RuntimeException('Paginação incompleta no R2.');
+                $token = $next;
+            } while ($more);
+        }
+        return $locations;
+    }
+
+    public static function managedKey(string $key): bool
+    {
+        return self::validKey($key) && substr_count($key, '/') === 1
+            && preg_match('~^(articles|users|wiki|wiki_mini|wiki_cp)/~D', $key)
+            && self::contentType($key) !== null;
+    }
+
+    private function hasRemote(): bool
+    {
+        return $this->driver === 'r2' || !empty($this->r2['bucket']);
+    }
+
+    public function locations(string $key): array
+    {
+        $locations = $this->localPath($key) === null ? [] : ['local'];
+        if ($this->hasRemote() && $this->request('GET', $key) !== null) $locations[] = 'r2';
+        return $locations;
+    }
+
+    public function readAt(string $key, ?string $location): ?string
+    {
+        return match ($location) {
+            null => $this->read($key),
+            'local' => $this->readLocal($key),
+            'r2' => $this->hasRemote() ? $this->request('GET', $key) : null,
+            default => null,
+        };
+    }
+
+    public function deleteAt(string $key, string $location): void
+    {
+        if (!self::managedKey($key)) throw new \RuntimeException('Chave de mídia inválida.');
+        if ($location === 'r2' && $this->hasRemote()) {
+            $this->request('DELETE', $key);
+        } elseif ($location === 'local') {
+            $path = $this->localPath($key);
+            if ($path !== null && !unlink($path)) throw new \RuntimeException('Falha ao excluir a mídia local.');
+        } else {
+            throw new \RuntimeException('Armazenamento indisponível.');
+        }
+    }
+
+    private function request(string $method, string $key, ?string $bytes = null, array $query = []): ?string
     {
         ['account_id' => $account, 'bucket' => $bucket, 'access_key' => $access, 'secret_key' => $secret] =
             $this->r2 + ['account_id' => '', 'bucket' => '', 'access_key' => '', 'secret_key' => ''];
@@ -104,7 +203,9 @@ final class MediaStorage
             throw new \RuntimeException('O R2 requer credenciais S3 e PHP cURL com suporte a AWS SigV4.');
         }
         $path = implode('/', array_map('rawurlencode', explode('/', $key)));
-        $curl = curl_init("https://$account.r2.cloudflarestorage.com/$bucket/$path");
+        $url = "https://$account.r2.cloudflarestorage.com/$bucket/$path";
+        if ($query) $url .= '?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
+        $curl = curl_init($url);
         $headers = ['x-amz-content-sha256: ' . hash('sha256', $bytes ?? '')];
         if ($method === 'PUT') {
             $headers[] = 'Content-Type: ' . (self::contentType($key) ?? 'application/octet-stream');

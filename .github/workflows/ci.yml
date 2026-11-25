@@ -21,6 +21,7 @@ jobs:
           extensions: pdo_mysql, pdo_sqlite, mbstring, dom, gd, intl
       - run: find config src public tests bin -name '*.php' -print0 | xargs -0 -n1 php -l
       - run: php tests/run.php
+      - run: php tests/admin-files.php
       - run: php tests/features.php
       - run: php tests/mail.php
       - run: php tests/features.php

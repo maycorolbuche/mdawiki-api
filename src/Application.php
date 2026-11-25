@@ -59,14 +59,18 @@ final class Application
             || ($normalized && $method === 'GET' && preg_match('~^/v1/public-users/[a-f0-9]{32}$~D', $path))
             || ($normalized && $method === 'POST' && in_array($path, ['/v1/profile/photo', '/v1/visits'], true))
             || ($normalized && in_array($method, ['GET', 'PUT'], true) && preg_match('~^/v1/images/[^/]+$~D', $path));
+        $adminFiles = ($this->config['normalized_editor'] ?? false) && $path === '/v1/admin/files';
+        $previewAccountRoute = $previewAccountRoute || $adminFiles;
         if ($normalized && !$previewAccountRoute
             && ($method !== 'GET' || !preg_match('~^/(?:health|v1/(?:home|search|statistics)|v1/pages(?:/[^/]+)?|media/.*)?$~D', $path))) {
             return new Response(501, ['error' => ['code' => 'read_only_preview', 'message' => 'A base migrada está em prévia de leitura pública.']], $headers);
         }
-        if ($this->features !== null && ($normalized ? $previewAccountRoute : (preg_match('~^/v1/(auth/|profile(?:/|$)|media$|search$|catalog$|statistics$|home$|visits$|view/|users(?:/|$))~', $path) || preg_match('~^/v1/pages/[^/]+/(editor|history|preview|restore|rebuild)$~D', $path) || ($method === 'PUT' && str_starts_with($path, '/v1/pages/'))))) {
+        if ($this->features !== null && ($adminFiles || ($normalized ? $previewAccountRoute : (preg_match('~^/v1/(auth/|profile(?:/|$)|media$|search$|catalog$|statistics$|home$|visits$|view/|users(?:/|$))~', $path) || preg_match('~^/v1/pages/[^/]+/(editor|history|preview|restore|rebuild)$~D', $path) || ($method === 'PUT' && str_starts_with($path, '/v1/pages/')))))) {
             if ($method !== 'GET' && $origin === '') return new Response(403, ['error'=>['code'=>'origin_required','message'=>'Origem da solicitação ausente.']], $headers);
             try {
-                $response = (($this->features)())->handle($method,$path,$query,$body,$csrf,$ip);
+                $dispatch = fn () => (($this->features)())->handle($method, $path, $query, $body, $csrf, $ip);
+                $mediaWrite = $method !== 'GET' && preg_match('~^/v1/(admin/files$|media$|profile/photo$|pages/|images/)~', $path);
+                $response = $mediaWrite ? MediaStorage::withWriteLock($this->config['storage_dir'], $dispatch) : $dispatch();
                 return new Response($response->status,$response->body,$headers+$response->headers);
             } catch (Throwable $error) {
                 $id=bin2hex(random_bytes(8));error_log('['.$id.'] '.$error);
