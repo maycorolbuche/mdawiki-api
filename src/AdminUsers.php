@@ -32,6 +32,9 @@ final class AdminUsers
             $filters[] = 'role = ?';
             $parameters[] = $role;
         }
+        $status = $query['status'] ?? null;
+        if ($status === 'active') $filters[] = 'is_active = 1';
+        if ($status === 'inactive') $filters[] = 'COALESCE(is_active, 0) <> 1';
         $where = $filters ? ' WHERE ' . implode(' AND ', $filters) : '';
         $total = (int) $this->db->one('SELECT COUNT(*) AS total FROM users' . $where, $parameters)['total'];
         $page = min($page, max(1, (int) ceil($total / self::PAGE_SIZE)));
