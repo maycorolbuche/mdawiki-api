@@ -36,8 +36,8 @@ final class MediaStorage
     {
         if (!self::validKey($key)) return null;
         return $this->driver === 'r2'
-            ? $this->request('GET', $key) ?? $this->readLocal($key)
-            : $this->readLocal($key) ?? (empty($this->r2['bucket']) ? null : $this->request('GET', $key));
+            ? $this->request('GET', $key)
+            : $this->readLocal($key);
     }
 
     private function localPath(string $key): ?string
@@ -91,7 +91,7 @@ final class MediaStorage
         if ($this->driver === 'r2') {
             $this->request('DELETE', $key);
         } elseif (($path = $this->localPath($key)) !== null) {
-            unlink($path);
+            if (!unlink($path)) throw new \RuntimeException('Falha ao excluir a mídia local.');
         }
     }
 
@@ -112,6 +112,11 @@ final class MediaStorage
 
     public function inventory(): array
     {
+        return $this->driver === 'r2' ? $this->remoteInventory() : $this->localInventory();
+    }
+
+    private function localInventory(): array
+    {
         $locations = ['local' => []];
         $root = $this->config['media_root'];
         if (is_dir($root)) {
@@ -126,29 +131,32 @@ final class MediaStorage
         } elseif (file_exists($root)) {
             throw new \RuntimeException('Diretório de mídia indisponível.');
         }
-        if ($this->hasRemote()) {
-            $locations['r2'] = [];
-            $token = null;
-            do {
-                $query = ['list-type' => '2', 'encoding-type' => 'url'];
-                if ($token !== null) $query['continuation-token'] = $token;
-                $doc = new \DOMDocument();
-                if (!@$doc->loadXML($this->request('GET', '', null, $query), LIBXML_NONET)
-                    || $doc->doctype || $doc->documentElement->localName !== 'ListBucketResult') {
-                    throw new \RuntimeException('Resposta de inventário inválida no R2.');
-                }
-                foreach ($doc->getElementsByTagName('Contents') as $object) {
-                    $key = rawurldecode($object->getElementsByTagName('Key')->item(0)->textContent);
-                    if (self::managedKey($key)) $locations['r2'][$key] = (int) $object->getElementsByTagName('Size')->item(0)->textContent;
-                }
-                $truncated = $doc->getElementsByTagName('IsTruncated')->item(0)?->textContent;
-                if (!in_array($truncated, ['true', 'false'], true)) throw new \RuntimeException('Inventário incompleto no R2.');
-                $more = $truncated === 'true';
-                $next = $doc->getElementsByTagName('NextContinuationToken')->item(0)?->textContent;
-                if ($more && (!$next || $next === $token)) throw new \RuntimeException('Paginação incompleta no R2.');
-                $token = $next;
-            } while ($more);
-        }
+        return $locations;
+    }
+
+    private function remoteInventory(): array
+    {
+        $locations['r2'] = [];
+        $token = null;
+        do {
+            $query = ['list-type' => '2', 'encoding-type' => 'url'];
+            if ($token !== null) $query['continuation-token'] = $token;
+            $doc = new \DOMDocument();
+            if (!@$doc->loadXML($this->request('GET', '', null, $query), LIBXML_NONET)
+                || $doc->doctype || $doc->documentElement->localName !== 'ListBucketResult') {
+                throw new \RuntimeException('Resposta de inventário inválida no R2.');
+            }
+            foreach ($doc->getElementsByTagName('Contents') as $object) {
+                $key = rawurldecode($object->getElementsByTagName('Key')->item(0)->textContent);
+                if (self::managedKey($key)) $locations['r2'][$key] = (int) $object->getElementsByTagName('Size')->item(0)->textContent;
+            }
+            $truncated = $doc->getElementsByTagName('IsTruncated')->item(0)?->textContent;
+            if (!in_array($truncated, ['true', 'false'], true)) throw new \RuntimeException('Inventário incompleto no R2.');
+            $more = $truncated === 'true';
+            $next = $doc->getElementsByTagName('NextContinuationToken')->item(0)?->textContent;
+            if ($more && (!$next || $next === $token)) throw new \RuntimeException('Paginação incompleta no R2.');
+            $token = $next;
+        } while ($more);
         return $locations;
     }
 
@@ -159,39 +167,23 @@ final class MediaStorage
             && self::contentType($key) !== null;
     }
 
-    private function hasRemote(): bool
-    {
-        return $this->driver === 'r2' || !empty($this->r2['bucket']);
-    }
-
     public function locations(string $key): array
     {
-        $locations = $this->localPath($key) === null ? [] : ['local'];
-        if ($this->hasRemote() && $this->request('GET', $key) !== null) $locations[] = 'r2';
-        return $locations;
+        $exists = $this->driver === 'local' ? $this->localPath($key) !== null : $this->read($key) !== null;
+        return $exists ? [$this->driver] : [];
     }
 
     public function readAt(string $key, ?string $location): ?string
     {
-        return match ($location) {
-            null => $this->read($key),
-            'local' => $this->readLocal($key),
-            'r2' => $this->hasRemote() ? $this->request('GET', $key) : null,
-            default => null,
-        };
+        return $location === null || $location === $this->driver ? $this->read($key) : null;
     }
 
     public function deleteAt(string $key, string $location): void
     {
-        if (!self::managedKey($key)) throw new \RuntimeException('Chave de mídia inválida.');
-        if ($location === 'r2' && $this->hasRemote()) {
-            $this->request('DELETE', $key);
-        } elseif ($location === 'local') {
-            $path = $this->localPath($key);
-            if ($path !== null && !unlink($path)) throw new \RuntimeException('Falha ao excluir a mídia local.');
-        } else {
-            throw new \RuntimeException('Armazenamento indisponível.');
+        if (!self::managedKey($key) || $location !== $this->driver) {
+            throw new \RuntimeException('Chave ou armazenamento inválido.');
         }
+        $this->delete($key);
     }
 
     private function request(string $method, string $key, ?string $bytes = null, array $query = []): ?string

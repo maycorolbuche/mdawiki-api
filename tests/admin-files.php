@@ -24,7 +24,7 @@ $db->pdo->exec('CREATE TABLE files (id INTEGER PRIMARY KEY, storage_key TEXT, si
     INSERT INTO page_media VALUES (1, 1);
     INSERT INTO users VALUES (1, "missing.png"), (2, "profile.png");');
 $root = sys_get_temp_dir() . '/mdawiki-admin-files-' . bin2hex(random_bytes(8));
-$config = ['media_root' => $root];
+$config = ['media_root' => $root, 'media_driver' => 'local', 'media_r2' => ['bucket' => 'unused-r2']];
 $media = new MediaStorage($config);
 $pages = (new ReflectionClass(NormalizedPages::class))->newInstanceWithoutConstructor();
 $admin = new AdminFiles($db, $config, $pages);
@@ -32,7 +32,10 @@ try {
     foreach (['articles/linked.png', 'articles/unused.png', 'articles/orphan.png', 'users/profile.png', 'users/orphan.png'] as $key) {
         $media->write($key, 'image');
     }
+    check($media->read('articles/missing.png') === null, 'A local miss must not consult R2.');
+    check($media->readAt('articles/linked.png', 'r2') === null, 'An explicit location must not bypass the selected driver.');
     $audit = $admin->audit();
+    check($audit['locations'] === ['local'], 'Audit must only inventory the selected storage.');
     check(array_column($audit['unlinked'], 'media_key') === ['articles/unused.png'], 'Only unused images should be classified as unlinked.');
     check(count($audit['orphan']) === 2 && count($audit['missing']) === 2, 'Audit must distinguish orphan and missing media.');
     check($admin->preview(['media_key' => 'articles/orphan.png'])['image'] === 'data:image/png;base64,aW1hZ2U=', 'Preview reads the original object.');
