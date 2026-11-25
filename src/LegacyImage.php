@@ -13,10 +13,10 @@ final class LegacyImage
         if (strpbrk($id,"/\\\0") !== false || strlen($id)>250) throw new HttpError(422,'invalid_media','Identificador de imagem inválido.');
         // Compatibility with uploads already submitted as a URL by the previous front.
         if (!str_starts_with($source,'data:image/')) {
-            $path = $this->localPath($source);
-            if (!$path || !is_file($path)) throw new HttpError(422,'media_not_found','Imagem não encontrada no armazenamento da API.');
-            if (filesize($path)>5000000) throw new HttpError(422,'invalid_upload','Envie uma imagem de até 5 MB.');
-            $bytes = file_get_contents($path);
+            $path = $this->storageKey($source);
+            $bytes = $path === null ? null : (new MediaStorage($this->config))->read($path);
+            if ($bytes === null) throw new HttpError(422,'media_not_found','Imagem não encontrada no armazenamento da API.');
+            if (strlen($bytes)>5000000) throw new HttpError(422,'invalid_upload','Envie uma imagem de até 5 MB.');
             $mime = strtolower(pathinfo($path,PATHINFO_EXTENSION))==='svg' ? 'image/svg+xml' : (@getimagesizefromstring($bytes)['mime'] ?? '');
             $source = 'data:'.$mime.';base64,'.base64_encode($bytes);
         }
@@ -91,12 +91,9 @@ final class LegacyImage
 
     public function publish(array $files): void
     {
-        foreach ($files as $relative=>$bytes) {
-            $target=$this->config['media_root'].'/'.$relative;$dir=dirname($target);
-            if (!is_dir($dir) && !mkdir($dir,0755,true) && !is_dir($dir)) throw new \RuntimeException('Não foi possível criar o diretório de imagens.');
-            $temp=tempnam($dir,'.image-');
-            try { if ($temp===false || file_put_contents($temp,$bytes,LOCK_EX)===false || !rename($temp,$target)) throw new \RuntimeException('Não foi possível gravar a imagem.');chmod($target,0644); }
-            finally { if ($temp && is_file($temp)) unlink($temp); }
+        $storage = new MediaStorage($this->config);
+        foreach ($files as $relative => $bytes) {
+            $storage->write($relative, $bytes);
         }
     }
 
@@ -104,19 +101,18 @@ final class LegacyImage
     {
         $old=json_decode($oldJson ?? '',true) ?: [];$new=json_decode($newJson,true) ?: [];
         foreach (['url','url_mini','url_cp'] as $key) {
-            $path=$this->localPath($old[$key] ?? '');
+            $path=$this->storageKey($old[$key] ?? '');
             // Delete only this article's legacy files, never a shared upload or an external URL.
-            if ($path && $path!==$this->localPath($new[$key] ?? '') && str_starts_with(basename($path),$id.'.') && is_file($path)) unlink($path);
+            if ($path && $path!==$this->storageKey($new[$key] ?? '') && str_starts_with(basename($path),$id.'.')) (new MediaStorage($this->config))->delete($path);
         }
     }
 
-    private function localPath(string $url): ?string
+    private function storageKey(string $url): ?string
     {
         $url=Media::rewrite($url,$this->config);$base=rtrim($this->config['media_public_url'],'/').'/';
         if (!str_starts_with($url,$base)) return null;
         $relative=rawurldecode(explode('?',substr($url,strlen($base)),2)[0]);
         if (!preg_match('~^(wiki|wiki_mini|wiki_cp)/[^/\\\\\x00]+$~D',$relative) || in_array(basename($relative),['.','..'],true)) return null;
-        $root=realpath($this->config['media_root']);$path=$root?realpath($root.'/'.$relative):false;
-        return $path && str_starts_with($path,$root.DIRECTORY_SEPARATOR)?$path:null;
+        return $relative;
     }
 }
