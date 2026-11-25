@@ -26,13 +26,18 @@ final class Features
                 $this->rate->check(($auth?'auth:':'write:').$ip,$auth?20:100);
                 if ($auth) $this->rate->check('account:'.hash('sha256',strtolower(is_string($body['email'] ?? null)?$body['email']:$ip)),20);
             }
-            if ($path === '/v1/admin/files' && ($this->config['normalized_editor'] ?? false)) {
+            if (in_array($path, ['/v1/admin/files', '/v1/admin/users'], true) && ($this->config['normalized_editor'] ?? false)) {
                 $user = $this->accounts->current(true);
                 if (($user['role'] ?? null) !== 'admin') throw new HttpError(403, 'permission_denied', 'Acesso restrito a administradores.');
-                $files = new AdminFiles($this->db, $this->config, $this->normalizedPages());
                 if ($method === 'PUT') throw new HttpError(405, 'method_not_allowed', 'Método não permitido.');
-                $data = $method === 'POST' ? $files->remove($body)
-                    : (isset($query['media_key']) ? $files->preview($query) : $files->audit());
+                if ($path === '/v1/admin/users') {
+                    $users = new AdminUsers($this->db, $this->config);
+                    $data = $method === 'POST' ? $users->change((int) $user['ID'], $body) : $users->list($query);
+                } else {
+                    $files = new AdminFiles($this->db, $this->config, $this->normalizedPages());
+                    $data = $method === 'POST' ? $files->remove($body)
+                        : (isset($query['media_key']) ? $files->preview($query) : $files->audit());
+                }
                 return new Response(200, ['data' => $data],
                     ['Cache-Control' => 'private, no-store']);
             }
