@@ -26,7 +26,7 @@ umask(0077);
 $output = null;
 $sqlitePath = null;
 $created = false;
-$table = 'setup';
+$table = 'arquivo de saída';
 $count = 0;
 $status = 0;
 try {
@@ -35,6 +35,10 @@ try {
         throw new RuntimeException('Cannot create output file (it may already exist).');
     }
     $created = true;
+    $table = 'validação SQLite';
+    if (!class_exists(PDO::class) || !in_array('sqlite', PDO::getAvailableDrivers(), true)) {
+        throw new DomainException('Driver pdo_sqlite ausente no PHP CLI. Confira php --ini e php -m.');
+    }
     $sqlitePath = tempnam(sys_get_temp_dir(), 'mdawiki-d1-');
     if ($sqlitePath === false) {
         throw new RuntimeException('Cannot create temporary SQLite database.');
@@ -43,16 +47,21 @@ try {
     $target->exec('PRAGMA foreign_keys = ON');
     $target->exec(file_get_contents(dirname(__DIR__, 2) . '/migrations/0001_schema.sql'));
 
+    $table = 'conexão MySQL';
+    if (!in_array('mysql', PDO::getAvailableDrivers(), true)) {
+        throw new DomainException('Driver pdo_mysql ausente no PHP CLI. Confira php --ini e php -m.');
+    }
     $source = new PDO($dsn, getenv('MYSQL_USER'), (string) getenv('MYSQL_PASSWORD'), [
         PDO::MYSQL_ATTR_USE_BUFFERED_QUERY => false,
         PDO::ATTR_STRINGIFY_FETCHES => true,
     ]);
-    $table = 'schema';
+    $table = 'schema MySQL';
     $normalized = $source->query("SELECT COUNT(*) FROM information_schema.TABLES
         WHERE TABLE_SCHEMA = DATABASE() AND BINARY TABLE_NAME IN ('pages', 'users', 'images', 'files')")->fetchColumn();
     if ((int) $normalized !== 4) {
         throw new DomainException('A origem precisa ser o MySQL normalizado do MDAWiki, com pages, users, images e files.');
     }
+    $table = 'transação MySQL';
     $source->exec('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
     $source->exec('START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY');
     $target->beginTransaction();
@@ -92,6 +101,27 @@ try {
 } catch (Throwable $failure) {
     // Driver errors may include data values or connection parameters.
     $reason = $failure instanceof DomainException ? $failure->getMessage() : get_class($failure);
+    if ($failure instanceof PDOException) {
+        $info = $failure->errorInfo ?? [];
+        $state = (string) ($info[0] ?? $failure->getCode());
+        $native = (string) ($info[1] ?? '');
+        if ($native === '' && preg_match('/^SQLSTATE\[([A-Z0-9]{5})\]\s*\[(\d+)\]/', $failure->getMessage(), $match)) {
+            [, $state, $native] = $match;
+        }
+        $hint = match ($native) {
+            '1045' => 'Login recusado. Confira o usuário, a senha e a liberação do IP no MySQL.',
+            '1044', '1142' => 'Permissão insuficiente. Confira o acesso de leitura ao banco.',
+            '1049' => 'Banco não encontrado. Confira MYSQL_DATABASE.',
+            '2002', '2003', '2005' => 'Conexão indisponível. Confira host, porta e acesso remoto ao MySQL.',
+            '2026' => 'Falha TLS na conexão MySQL.',
+            default => 'Erro retornado pelo driver PDO.',
+        };
+        $reason = trim(implode(' ', array_filter([
+            preg_match('/^[A-Z0-9]{5}$/D', $state) ? 'SQLSTATE=' . $state : '',
+            preg_match('/^\d{1,6}$/D', $native) ? 'driver=' . $native : '',
+            $hint,
+        ])));
+    }
     fwrite(STDERR, "Export failed in $table after $count rows ($reason).\n");
     if (is_resource($output)) fclose($output);
     if ($created) unlink($argv[1]);
