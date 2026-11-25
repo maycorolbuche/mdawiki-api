@@ -39,6 +39,10 @@ try {
     check($filtered['total'] === 1 && $filtered['items'][0]['photo'] === 'https://api.example.test/media/users/beta.png', 'Combine search, role and photo filters and return the avatar URL.');
     check($service->list(['photo' => 'no', 'role' => 'admin'])['total'] === 1, 'List administrators without a photo.');
     check($service->list(['photo' => 'yes', 'role' => 'reader'])['total'] === 1, 'List readers with a photo.');
+    $db->run('UPDATE users SET is_active = NULL WHERE id = 4');
+    check(array_column($service->list(['status' => 'active'])['items'], 'id') === [1, 2], 'Filter active accounts.');
+    check(array_column($service->list(['status' => 'inactive', 'photo' => 'yes'])['items'], 'id') === [3, 4],
+        'Treat null status as inactive and combine filters.');
     foreach ([['action' => 'delete', 'id' => 1], ['action' => 'role', 'id' => 1, 'role' => 'reader']] as $request) {
         try {
             $service->change(1, $request);
