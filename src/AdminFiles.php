@@ -23,21 +23,23 @@ final class AdminFiles
         $inventory = $this->storage->inventory();
         $result = ['unlinked' => [], 'orphan' => [], 'missing' => [], 'locations' => array_keys($inventory)];
         $known = [];
+        $avatars = [];
+        foreach ($this->db->rows("SELECT id, avatar_filename FROM users WHERE avatar_filename IS NOT NULL AND avatar_filename <> ''") as $user) {
+            $key = 'users/' . $user['avatar_filename'];
+            $known[$key] = true;
+            $avatars[$key] = true;
+            if (MediaStorage::managedKey($key) && !$this->findIn($inventory, $key)) {
+                $result['missing'][] = ['kind' => 'avatar', 'id' => $user['id'], 'media_key' => $key];
+            }
+        }
         foreach ($this->db->rows(self::FILES . ' ORDER BY f.id') as $file) {
             $key = $file['media_key'];
             $known[$key] = true;
             if (!MediaStorage::managedKey($key)) continue;
             $locations = $this->findIn($inventory, $key);
-            $row = $file + ['kind' => 'file', 'locations' => $locations];
+            $row = $file + ['kind' => 'file', 'locations' => $locations, 'avatar_in_use' => isset($avatars[$key])];
             if (!$locations) $result['missing'][] = $row;
             elseif (!(int) $file['pages']) $result['unlinked'][] = $row;
-        }
-        foreach ($this->db->rows("SELECT id, avatar_filename FROM users WHERE avatar_filename IS NOT NULL AND avatar_filename <> ''") as $user) {
-            $key = 'users/' . $user['avatar_filename'];
-            $known[$key] = true;
-            if (MediaStorage::managedKey($key) && !$this->findIn($inventory, $key)) {
-                $result['missing'][] = ['kind' => 'avatar', 'id' => $user['id'], 'media_key' => $key];
-            }
         }
         foreach ($inventory as $location => $objects) {
             foreach ($objects as $key => $size) {
@@ -74,7 +76,7 @@ final class AdminFiles
         $key = $body['media_key'] ?? null;
         $id = filter_var($body['id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
         if (!is_string($key) || !MediaStorage::managedKey($key)
-            || !in_array($action, ['unlinked', 'orphan', 'missing_file', 'missing_avatar'], true)
+            || !in_array($action, ['unlinked', 'orphan', 'missing_file', 'missing_avatar', 'avatar_record'], true)
             || ($action !== 'orphan' && $id === false)) {
             throw new HttpError(422, 'invalid_media', 'Selecione um arquivo válido.');
         }
@@ -92,6 +94,13 @@ final class AdminFiles
                     $this->conflict();
                 }
                 $this->storage->deleteAt($key, $location);
+            } elseif ($action === 'avatar_record') {
+                if (!$file || (string) $file['id'] !== (string) $id || !$users || !$locations
+                    || $this->db->one('SELECT id FROM images WHERE file_id = ?' . $lock, [$id])
+                    || $this->db->one('SELECT id FROM image_revisions WHERE file_id = ?' . $lock, [$id])) {
+                    $this->conflict();
+                }
+                $this->db->run('DELETE FROM files WHERE id = ?', [$id]);
             } elseif ($action === 'missing_avatar') {
                 if ($locations || !in_array((string) $id, array_map('strval', array_column($users, 'id')), true)) $this->conflict();
                 $this->db->run('UPDATE users SET avatar_filename = NULL WHERE id = ? AND avatar_filename = ?', [$id, $avatar]);
