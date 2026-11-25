@@ -1,3 +1,4 @@
+import type { SessionStage } from './diagnostics'
 import { decodeUpload, formats, readImage } from './image-upload'
 import { notifyProfile, securityMail } from './wiki-mail'
 import { smtpConfigured } from './smtp'
@@ -7,7 +8,7 @@ import { getCookie, setCookie } from 'hono/cookie'
 import { findPage, identifier, legacyIdentifier, mediaUrl, publicPage } from './pages'
 import { query, validSlug, type Env } from './types'
 
-type Api = { Bindings: Env; Variables: { profileSession: Session; profileAccount: Account } }
+type Api = { Bindings: Env; Variables: { sessionStage: SessionStage; profileSession: Session; profileAccount: Account } }
 type RequestContext = Pick<Context<{ Bindings: Env }>, 'env' | 'req'>
 type Session = { token_hash: string; csrf_token: string; user_id: number | null; password_fingerprint: string | null; expires_at: number }
 type Account = { ID: number; NOME: string | null; EMAIL: string; SENHA: string; FOTO: string | null; ATIVO: 'S' | 'N'; role: 'reader' | 'user' | 'admin'; NIVEL: number }
@@ -94,16 +95,20 @@ for (const path of ['/auth/*', '/profile', '/profile/*', '/view/*', '/visits']) 
 accounts.use('/auth/login', bodyLimit({ maxSize: 8192, onError: c => c.json(failure('body_too_large', 'Solicitação muito grande.'), 413) }))
 
 accounts.get('/auth/session', async c => {
+  c.set('sessionStage', 'read_session')
   const session = await readSession(c)
+  c.set('sessionStage', 'read_account')
   const user = await activeAccount(c, session)
   if (session && (session.user_id === null || user)) {
     return c.json({ data: { user: user ? profile(user, c.req.url) : null, csrf_token: session.csrf_token } })
   }
+  c.set('sessionStage', 'rate_limit_session')
   if (!await allowedAttempt(c, 'session:' + (c.req.header('CF-Connecting-IP') ?? 'local'), 150)) {
     return c.json(failure('rate_limited', 'Muitas tentativas. Tente novamente mais tarde.'), 429)
   }
   const value = token()
   const csrf = token()
+  c.set('sessionStage', 'create_session')
   await query(c.env.DB, 'INSERT INTO worker_sessions(token_hash, csrf_token, expires_at) VALUES (?, ?, ?)',
     await digest(value), csrf, now() + 3600).run()
   writeCookie(c, value)
