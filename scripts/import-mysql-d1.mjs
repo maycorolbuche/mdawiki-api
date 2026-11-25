@@ -57,7 +57,14 @@ function databaseClient(database, mode) {
   }
   function counts(tables) {
     if (!tables.length) return []
-    return query(tables.map(table => `SELECT '${table}' AS name, COUNT(*) AS total FROM "${table}"`).join(' UNION ALL '))
+    // Os nomes vêm do manifesto do exportador e já foram filtrados para [a-z0-9_].
+    // O D1 limita os termos de um SELECT composto, mesmo para contagens simples.
+    const [row] = query('SELECT ' + tables.map(table =>
+      `(SELECT COUNT(*) FROM ${table}) AS ${table}`).join(', '))
+    if (!row || tables.some(table => !Number.isSafeInteger(row[table]) || row[table] < 0)) {
+      throw new Error('O D1 não retornou uma contagem válida para cada tabela.')
+    }
+    return tables.map(name => ({ name, total: row[name] }))
   }
   return {
     counts,
