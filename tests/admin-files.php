@@ -13,15 +13,15 @@ function check(bool $condition, string $message): void
 $db = new Database(new PDO('sqlite::memory:'));
 $db->pdo->exec('CREATE TABLE files (id INTEGER PRIMARY KEY, storage_key TEXT, size_bytes INTEGER);
     CREATE TABLE users (id INTEGER PRIMARY KEY, avatar_filename TEXT);
-    CREATE TABLE images (id INTEGER PRIMARY KEY, file_id INTEGER, meta TEXT);
-    CREATE TABLE image_revisions (id INTEGER PRIMARY KEY, file_id INTEGER);
+    CREATE TABLE images (id INTEGER PRIMARY KEY, file_id INTEGER, meta TEXT, slug TEXT, title TEXT, access_level_id INTEGER);
+    CREATE TABLE image_revisions (id INTEGER PRIMARY KEY, file_id INTEGER, image_id INTEGER, access_level_id INTEGER);
     CREATE TABLE page_media (page_id INTEGER, image_id INTEGER);
     CREATE TABLE pages (id INTEGER PRIMARY KEY, slug TEXT, kind TEXT, legacy_identifier TEXT, source TEXT, rendered_html TEXT);
     CREATE TABLE page_revisions (id INTEGER PRIMARY KEY, source TEXT, rendered_html TEXT);
     INSERT INTO files VALUES (1, "articles/linked.png", 5), (2, "articles/unused.png", 5), (3, "articles/missing.png", 5);
     INSERT INTO files VALUES (4, "users/profile.png", 5);
-    INSERT INTO images VALUES (1, 1, "{}"), (2, 2, "{}"), (3, 3, "{}");
-    INSERT INTO image_revisions VALUES (1, 2), (2, 3), (3, 1);
+    INSERT INTO images VALUES (1, 1, "{}", "linked", "Linked", 1), (2, 2, "{}", "unused", "Unused", 1), (3, 3, "{}", "missing", "Missing", 1), (4, NULL, "{}", "historical", "Historical", 1), (5, NULL, "{}", "private", "Private", 5);
+    INSERT INTO image_revisions VALUES (1, 2, 2, 1), (2, 3, 3, 1), (3, 1, 1, 1), (4, 2, 4, 1), (5, 2, 5, 1);
     INSERT INTO page_media VALUES (1, 1);
     INSERT INTO users VALUES (1, "missing.png"), (2, "profile.png");');
 $root = sys_get_temp_dir() . '/mdawiki-admin-files-' . bin2hex(random_bytes(8));
@@ -52,6 +52,7 @@ try {
             check($error->status === 409, 'Unsafe removal must return a conflict.');
         }
     }
+    check(array_column($audit['unlinked'][0]['public_images'], 'slug') === ['historical', 'unused'], 'Include public current and historical image links once each.');
     check($audit['unlinked'][1]['avatar_in_use'], 'Audit must identify an avatar that is still in use.');
     $admin->remove(['action' => 'avatar_record', 'id' => 4, 'media_key' => 'users/profile.png']);
     check($media->read('users/profile.png') === 'image', 'Removing the record must preserve the avatar bytes.');

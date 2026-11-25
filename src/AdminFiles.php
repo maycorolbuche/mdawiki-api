@@ -6,10 +6,12 @@ namespace MDAWiki;
 final class AdminFiles
 {
     private MediaStorage $storage;
+    private int $publicLevel;
 
     public function __construct(private Database $db, array $config, private NormalizedPages $pages)
     {
         $this->storage = new MediaStorage($config);
+        $this->publicLevel = (int) ($config['public_max_level'] ?? 1);
     }
 
     private const FILES = 'SELECT f.id, f.storage_key AS media_key, f.size_bytes,
@@ -22,6 +24,15 @@ final class AdminFiles
     {
         $inventory = $this->storage->inventory();
         $result = ['unlinked' => [], 'orphan' => [], 'missing' => [], 'locations' => array_keys($inventory)];
+        $imageLinks = [];
+        foreach ($this->db->rows('SELECT i.file_id, i.slug, i.title FROM images i
+            WHERE i.file_id IS NOT NULL AND i.access_level_id <= ?
+            UNION
+            SELECT r.file_id, i.slug, i.title FROM image_revisions r JOIN images i ON i.id = r.image_id
+            WHERE i.access_level_id <= ? AND r.access_level_id <= ?
+            ORDER BY title, slug', [$this->publicLevel, $this->publicLevel, $this->publicLevel]) as $image) {
+            $imageLinks[$image['file_id']][] = ['slug' => $image['slug'], 'title' => $image['title']];
+        }
         $known = [];
         $avatars = [];
         foreach ($this->db->rows("SELECT id, avatar_filename FROM users WHERE avatar_filename IS NOT NULL AND avatar_filename <> ''") as $user) {
@@ -39,7 +50,7 @@ final class AdminFiles
             $locations = $this->findIn($inventory, $key);
             $row = $file + ['kind' => 'file', 'locations' => $locations, 'avatar_in_use' => isset($avatars[$key])];
             if (!$locations) $result['missing'][] = $row;
-            elseif (!(int) $file['pages']) $result['unlinked'][] = $row;
+            elseif (!(int) $file['pages']) $result['unlinked'][] = $row + ['public_images' => $imageLinks[$file['id']] ?? []];
         }
         foreach ($inventory as $location => $objects) {
             foreach ($objects as $key => $size) {
