@@ -319,6 +319,17 @@ $article = $auth->handle('GET', $missingArticle, [], $origin)->body['data'];
 check(str_contains($article['html'], '/assets/img_nao_encontrada.svg') && !str_contains($article['html'], 'img_nao_encontrada.png'),
     'O artigo processado anteriormente deve trocar o marcador antigo na leitura.');
 
+$newImage = $auth->handle('PUT', '/v1/images/' . $missingName, [], $origin,
+    ['data' => $originalData, 'base_version' => ''], $csrf);
+check($newImage->status === 200, 'A imagem criada depois do artigo deve ser salva.');
+check(in_array('Teste-Imagem-Ausente', array_column($newImage->body['data']['pages'], 'slug'), true),
+    'O artigo deve aparecer entre as páginas vinculadas logo após criar a imagem.');
+$article = $auth->handle('GET', $missingArticle, [], $origin)->body['data'];
+check(str_contains($article['html'], $newImage->body['data']['url']) && !str_contains($article['html'], 'img_nao_encontrada'),
+    'O HTML armazenado deve trocar o marcador pela imagem nova.');
+$history = $auth->handle('GET', $missingArticle . '/history', [], $origin);
+check(count($history->body['data']['revisions']) === 1, 'Vincular a imagem nova não deve gerar uma revisão do artigo.');
+
 $csrf = $auth->handle('GET', '/v1/auth/session', [], $origin)->body['data']['csrf_token'];
 $registration = ['name' => 'Conta Nova', 'email' => 'new-normalized@example.test',
     'password' => 'abc123', 'password_confirmation' => 'abc123'];

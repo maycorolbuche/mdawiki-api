@@ -96,6 +96,7 @@ final class NormalizedImages
             if (!$image) {
                 $this->db->run('INSERT INTO images (identifier, slug, title, meta, file_id, access_level_id, created_by, created_at, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?, NOW())',
                     [$identifier, $slug, str_replace(['-', '_'], ' ', $slug), $meta, $file, $level, $user['ID'], $user['ID']]);
+                $this->rebuildWaitingPages($identifier);
             } elseif ((string) $image['file_id'] !== (string) $file) {
                 $this->replace($image, $file, $meta, (int) $user['ID']);
             }
@@ -186,6 +187,36 @@ final class NormalizedImages
             'Largura' => $properties['width'] ?? null, 'Altura' => $properties['height'] ?? null,
             'Tamanho em bytes' => $properties['size_bytes'] ?? null,
         ], $url, '/i/' . rawurlencode($slug));
+    }
+
+    /** Rebuilds articles that already stored this image template before its upload. */
+    private function rebuildWaitingPages(string $identifier): void
+    {
+        if ($this->pages === null) {
+            throw new \LogicException('O reprocessador de páginas é obrigatório para criar imagens.');
+        }
+        require_once __DIR__ . '/wiki-presentation.php';
+        $templates = $this->db->rows("SELECT p.id, p.slug, t.template_source, t.template_key
+            FROM page_templates t JOIN pages p ON p.id = t.page_id
+            WHERE t.template_key LIKE 'imagem:%' AND p.kind <> 'image'
+            AND p.legacy_identifier NOT LIKE 'page@%' ORDER BY p.id, t.position");
+        $waiting = [];
+        foreach ($templates as $template) {
+            if (isset($waiting[$template['id']])) continue;
+            $body = preg_match('~^\{\{Imagem:(.*?)\}\}$~isD', $template['template_source'] ?? '', $match)
+                ? $match[1] : substr($template['template_key'], strlen('imagem:'));
+            $options = \MDAWiki\Wiki\image_template_options($body);
+            $name = preg_replace('/!tmpl$/', '', \MDAWiki\Wiki\str_to_url($options['url'] ?? '', false));
+            try {
+                [, $target] = PageSlugs::fromTitle($name, '');
+            } catch (\RuntimeException) {
+                continue;
+            }
+            if ($target === $identifier) $waiting[$template['id']] = $template['slug'];
+        }
+        foreach ($waiting as $slug) {
+            $this->pages->rebuildCache($slug);
+        }
     }
 
     private function replace(array $image, int|string|null $file, string $meta, int $author): void
