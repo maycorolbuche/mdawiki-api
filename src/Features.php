@@ -43,7 +43,7 @@ final class Features
             }
             $data=match (true) {
                 ($this->config['normalized_read_only'] ?? false) && $method === 'GET'
-                    && preg_match('~^/v1/public-users/([a-f0-9]{32})$~D', $path, $m) === 1 => $this->accounts->publicProfile($m[1]),
+                    && preg_match('~^/v1/public-users/([a-f0-9]{32})$~D', $path, $m) === 1 => $this->accounts->publicProfile($m[1], max(0, (int) (filter_var($query['edits_offset'] ?? 0, FILTER_VALIDATE_INT) ?: 0))),
                 ($this->config['normalized_editor'] ?? false) && in_array($method, ['GET', 'PUT'], true) && preg_match('~^/v1/images/([^/]+)$~D', $path, $m) === 1
                     => $this->image($method, $this->slug(rawurldecode($m[1])), $body),
                 $method==='GET' && $path==='/v1/auth/session' => $this->accounts->session(),

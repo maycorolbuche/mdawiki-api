@@ -88,7 +88,7 @@ $origin = 'http://localhost:5173';
 $publicUser = $auth->handle('GET', '/v1/public-users/' . $publicId, [], $origin);
 check($publicUser->status === 200 && str_contains($publicUser->body['data']['photo'], '/media/users/')
     && array_keys($publicUser->body['data']) === ['name', 'display_name', 'birth_date', 'city', 'state_code', 'club',
-        'association', 'club_type', 'biography', 'photo'], 'Perfil público expôs campos privados ou perdeu o avatar.');
+        'association', 'club_type', 'biography', 'photo', 'edited_pages', 'next_edits_offset'], 'Perfil público expôs campos privados ou perdeu o avatar.');
 $initial = $auth->handle('GET', '/v1/auth/session', [], $origin);
 $credentials = ['email' => 'migrated@example.test', 'password' => 'legacy-password'];
 check($auth->handle('POST', '/v1/auth/login', [], $origin, $credentials, 'wrong')->status === 403, 'Login ignorou CSRF.');
@@ -128,6 +128,9 @@ $change = [
 ];
 $saved = $auth->handle('PUT', $slug, [], $origin, $change, $csrf);
 check($saved->status === 200, 'Salvamento com vínculos falhou.');
+$contributions = $auth->handle('GET', '/v1/public-users/' . $publicId, [], $origin)->body['data']['edited_pages'];
+check(count(array_filter($contributions, static fn ($page) => $page['slug'] === 'EspéciAlidade-Teste')) === 1,
+    'O perfil deve listar uma única vez o artigo público com várias revisões do usuário.');
 $categoryIds = $db->query("SELECT id FROM pages WHERE identifier IN ('estudos-da-natureza', 'abc') ORDER BY id")->fetchAll(PDO::FETCH_COLUMN);
 check(count($categoryIds) === 2, 'Categorias ausentes não foram criadas uma vez por identificador.');
 $targetId = $db->query("SELECT id FROM pages WHERE identifier = 'imagem'")->fetchColumn();
