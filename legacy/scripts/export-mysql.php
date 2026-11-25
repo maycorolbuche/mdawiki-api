@@ -127,7 +127,7 @@ try {
     if ($created) unlink($argv[1]);
     $status = 1;
 } finally {
-    unset($target);
+    unset($emit, $target);
     if (is_string($sqlitePath)) unlink($sqlitePath);
     if (is_resource($output)) fclose($output);
 }
