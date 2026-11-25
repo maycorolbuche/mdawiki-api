@@ -67,6 +67,28 @@ function page_tabelas($conteudo)
 	}
 	return $conteudo;
 }
+/** Parses image template parameters for rendering and dependency resolution. */
+function image_template_options(string $valor): array
+{
+	preg_match_all("/\[\[(.*?)\]\]/is", $valor, $valor_tmpl);
+	foreach ($valor_tmpl[1] as $chave_v => $valor_v) {
+		$valor_r = str_replace("|", " &vert; ", $valor_v);
+		$valor = str_replace($valor_v, $valor_r, $valor);
+	}
+	$tmp_p = explode("|", $valor);
+	$vls = array();
+	for ($i = 0; $i <= count($tmp_p) - 1; $i++) {
+		list($key, $value) = explode("=", $tmp_p[$i] . "=");
+		if ($value == "") {
+			$value = $key;
+			$key = "url";
+		}
+		$key = ident($key);
+		$vls[$key] = $value;
+	}
+	return $vls;
+}
+
 function page_templates($conteudo, $page)
 {
 	global $conn;
@@ -600,23 +622,7 @@ function page_templates($conteudo, $page)
 	preg_match_all("/{{Imagem:(.*?)}}/is", $conteudo, $tmpl);
 	foreach ($tmpl[1] as $chave => $valor) {
 		$template = $tmpl[0][$chave];
-		preg_match_all("/\[\[(.*?)\]\]/is", $valor, $valor_tmpl);
-		foreach ($valor_tmpl[1] as $chave_v => $valor_v) {
-			$valor_r = str_replace("|", " &vert; ", $valor_v);
-			$valor = str_replace($valor_v, $valor_r, $valor);
-		}
-		//echo $valor;exit;
-		$tmp_p = explode("|", $valor);
-		$vls = array();
-		for ($i = 0; $i <= count($tmp_p) - 1; $i++) {
-			list($key, $value) = explode("=", $tmp_p[$i] . "=");
-			if ($value == "") {
-				$value = $key;
-				$key = "url";
-			}
-			$key = ident($key);
-			$vls[$key] = $value;
-		}
+		$vls = image_template_options($valor);
 		$vls["link"] = (@$vls["link"] == "" ? "imagem@" . str_to_url(@$vls["url"], false) : str_to_url($vls["link"], false));
 		$vls["max_largura"] = (@$vls["largura"] == "" ? 150 : $vls["largura"]);
 
