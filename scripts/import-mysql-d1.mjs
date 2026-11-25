@@ -33,7 +33,22 @@ function databaseClient(database, mode) {
   }
   function query(sql) {
     const result = command(['execute'], ['--json', '--command', sql])
-    if (result.error || result.status !== 0) throw new Error('Não foi possível consultar o D1. Confira a autenticação e o nome do banco.')
+    if (result.error || result.status !== 0) {
+      // A consulta só lê metadados ou contagens. Registra códigos, sem imprimir a saída bruta do Wrangler.
+      const output = (result.stderr ?? '') + '\n' + (result.stdout ?? '')
+      const apiCode = /\[code:\s*(\d{1,8})\]/i.exec(output)?.[1]
+      const status = /\b(?:HTTP\s+|status(?:Code)?[ :=]+)([45]\d{2})\b/i.exec(output)?.[1]
+      let hint = 'Confira o acesso ao D1 com npx wrangler d1 info.'
+      if (/not logged in|not authenticated|authentication error|CLOUDFLARE_API_TOKEN|not authorized/i.test(output)) {
+        hint = 'Confira a conta e as permissões com npx wrangler whoami.'
+      } else if (/couldn.t find|not found|no database|no d1 database/i.test(output)) {
+        hint = 'Confira o nome, o ID e a conta do D1 no wrangler.jsonc.'
+      }
+      const codes = [result.error?.code && /^[A-Z0-9_]+$/.test(result.error.code) ? result.error.code : null,
+        apiCode && 'Cloudflare ' + apiCode, status && 'HTTP ' + status].filter(Boolean)
+      const detail = codes.length ? ' (' + codes.join(', ') + ')' : ''
+      throw new Error('Não foi possível consultar o D1' + detail + '. ' + hint)
+    }
     const response = JSON.parse(result.stdout)
     if (!Array.isArray(response) || response.some(item => item.success !== true || !Array.isArray(item.results))) {
       throw new Error('O D1 retornou uma resposta inesperada.')
