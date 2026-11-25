@@ -107,10 +107,7 @@ O driver usa a extensão PHP cURL com suporte a AWS SigV4 (libcurl 7.75+).
 As URLs continuam sob `MEDIA_PUBLIC_URL`, e a API aplica as permissões de
 mídia antes de servir os arquivos.
 
-A leitura procura primeiro no armazenamento selecionado e consulta o outro
-quando o objeto está ausente. Mantenha as credenciais R2 no ambiente após
-voltar a `local` se ainda houver arquivos somente no bucket. A troca de
-driver não copia arquivos. Se a mesma chave existir nos dois destinos,
-a cópia do armazenamento selecionado tem prioridade. Isso é relevante para
-as variantes legadas gravadas sempre sob o mesmo nome. Antes de alternar o
-driver, sincronize essas variantes se já existirem cópias diferentes.
+A API lê, grava e verifica arquivos apenas no armazenamento selecionado.
+Se um arquivo faltar nesse destino, ele é considerado ausente.
+A troca de driver não copia arquivos. Antes de alternar, copie a mídia
+necessária para o novo destino, mantendo as mesmas chaves.

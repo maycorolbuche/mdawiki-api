@@ -26,6 +26,16 @@ final class Features
                 $this->rate->check(($auth?'auth:':'write:').$ip,$auth?20:100);
                 if ($auth) $this->rate->check('account:'.hash('sha256',strtolower(is_string($body['email'] ?? null)?$body['email']:$ip)),20);
             }
+            if ($path === '/v1/admin/files' && ($this->config['normalized_editor'] ?? false)) {
+                $user = $this->accounts->current(true);
+                if (($user['role'] ?? null) !== 'admin') throw new HttpError(403, 'permission_denied', 'Acesso restrito a administradores.');
+                $files = new AdminFiles($this->db, $this->config, $this->normalizedPages());
+                if ($method === 'PUT') throw new HttpError(405, 'method_not_allowed', 'Método não permitido.');
+                $data = $method === 'POST' ? $files->remove($body)
+                    : (isset($query['media_key']) ? $files->preview($query) : $files->audit());
+                return new Response(200, ['data' => $data],
+                    ['Cache-Control' => 'private, no-store']);
+            }
             $data=match (true) {
                 ($this->config['normalized_read_only'] ?? false) && $method === 'GET'
                     && preg_match('~^/v1/public-users/([a-f0-9]{32})$~D', $path, $m) === 1 => $this->accounts->publicProfile($m[1]),
