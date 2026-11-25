@@ -17,18 +17,32 @@ final class AdminUsers
         $sort = ($query['sort'] ?? null) === 'created_at' ? 'created_at' : "COALESCE(NULLIF(name, ''), display_name, email)";
         $direction = ($query['direction'] ?? null) === 'desc' ? 'DESC' : 'ASC';
         $page = max(1, min(100000, (int) (filter_var($query['page'] ?? 1, FILTER_VALIDATE_INT) ?: 1)));
-        $where = '';
+        $filters = [];
         $parameters = [];
         if ($search !== '') {
             $pattern = '%' . strtr($search, ['!' => '!!', '%' => '!%', '_' => '!_']) . '%';
-            $where = " WHERE name LIKE ? ESCAPE '!' OR display_name LIKE ? ESCAPE '!' OR email LIKE ? ESCAPE '!'";
+            $filters[] = "(name LIKE ? ESCAPE '!' OR display_name LIKE ? ESCAPE '!' OR email LIKE ? ESCAPE '!')";
             $parameters = [$pattern, $pattern, $pattern];
         }
+        $photoFilter = $query['photo'] ?? null;
+        if ($photoFilter === 'yes') $filters[] = "NULLIF(TRIM(avatar_filename), '') IS NOT NULL";
+        if ($photoFilter === 'no') $filters[] = "NULLIF(TRIM(avatar_filename), '') IS NULL";
+        $role = $query['role'] ?? null;
+        if (in_array($role, ['admin', 'reader', 'user'], true)) {
+            $filters[] = 'role = ?';
+            $parameters[] = $role;
+        }
+        $where = $filters ? ' WHERE ' . implode(' AND ', $filters) : '';
         $total = (int) $this->db->one('SELECT COUNT(*) AS total FROM users' . $where, $parameters)['total'];
         $page = min($page, max(1, (int) ceil($total / self::PAGE_SIZE)));
-        $items = $this->db->rows("SELECT id, name, display_name, email, created_at, public_id, is_active, role
+        $items = $this->db->rows("SELECT id, name, display_name, email, created_at, public_id, is_active, role, NULLIF(TRIM(avatar_filename), '') AS FOTO
             FROM users" . $where . " ORDER BY $sort $direction, id $direction LIMIT ? OFFSET ?",
             [...$parameters, self::PAGE_SIZE, ($page - 1) * self::PAGE_SIZE]);
+        foreach ($items as &$item) {
+            $item['photo'] = Accounts::photoUrl($item, $this->config);
+            unset($item['FOTO']);
+        }
+        unset($item);
         return ['items' => $items, 'total' => $total, 'page' => $page, 'page_size' => self::PAGE_SIZE];
     }
 

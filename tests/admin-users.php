@@ -25,7 +25,7 @@ $db->pdo->exec("PRAGMA foreign_keys = ON;
     INSERT INTO files VALUES (1, 'users/beta.png');
     INSERT INTO images VALUES (1, NULL, 2);");
 $root = sys_get_temp_dir() . '/mdawiki-admin-users-' . bin2hex(random_bytes(8));
-$config = ['media_root' => $root];
+$config = ['media_root' => $root, 'media_public_url' => 'https://api.example.test/media'];
 $service = new AdminUsers($db, $config);
 $storage = new MediaStorage($config);
 
@@ -35,6 +35,10 @@ try {
     check(array_column($service->list([])['items'], 'id') === [1, 3, 2, 4], 'Sort by name and include inactive users.');
     check(array_column($service->list(['sort' => 'created_at', 'direction' => 'desc'])['items'], 'id') === [2, 4, 3, 1], 'Sort by registration date.');
     check($service->list(['q' => 'Beto'])['total'] === 1 && $service->list(['q' => '%'])['total'] === 0, 'Search by display name and escape wildcards.');
+    $filtered = $service->list(['photo' => 'yes', 'role' => 'user', 'q' => 'beta']);
+    check($filtered['total'] === 1 && $filtered['items'][0]['photo'] === 'https://api.example.test/media/users/beta.png', 'Combine search, role and photo filters and return the avatar URL.');
+    check($service->list(['photo' => 'no', 'role' => 'admin'])['total'] === 1, 'List administrators without a photo.');
+    check($service->list(['photo' => 'yes', 'role' => 'reader'])['total'] === 1, 'List readers with a photo.');
     foreach ([['action' => 'delete', 'id' => 1], ['action' => 'role', 'id' => 1, 'role' => 'reader']] as $request) {
         try {
             $service->change(1, $request);
