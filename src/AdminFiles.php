@@ -17,8 +17,9 @@ final class AdminFiles
     private const FILES = 'SELECT f.id, f.storage_key AS media_key, f.size_bytes,
         (SELECT COUNT(*) FROM image_revisions r WHERE r.file_id = f.id) AS revisions,
         (SELECT COUNT(*) FROM images i WHERE i.file_id = f.id) AS images,
-        (SELECT COUNT(DISTINCT m.page_id) FROM page_media m JOIN images i ON i.id = m.image_id
-            WHERE i.file_id = f.id) AS pages FROM files f';
+        (SELECT COUNT(DISTINCT m.page_id) FROM page_media m
+            WHERE m.image_id IN (SELECT i.id FROM images i WHERE i.file_id = f.id)
+               OR m.image_id IN (SELECT r.image_id FROM image_revisions r WHERE r.file_id = f.id)) AS pages FROM files f';
 
     public function audit(): array
     {
@@ -118,14 +119,13 @@ final class AdminFiles
             } else {
                 if (!$file || (string) $file['id'] !== (string) $id
                     || ($action === 'missing_file' && $locations)
-                    || ($action === 'unlinked' && (!$locations || $users || $this->directReference($key)))) {
+                    || ($action === 'unlinked' && (!$locations || $users || $this->hasArticleLinks($id) || $this->directReference($key)))) {
                     $this->conflict();
                 }
                 $images = $this->db->rows('SELECT id FROM images WHERE file_id = ?' . $lock, [$id]);
                 $linked = [];
                 foreach ($images as $image) {
                     $references = $this->db->rows('SELECT page_id FROM page_media WHERE image_id = ?' . $lock, [$image['id']]);
-                    if ($references && $action === 'unlinked') $this->conflict();
                     foreach ($references as $reference) $linked[$reference['page_id']] = true;
                 }
                 if ($action === 'missing_file') {
@@ -149,6 +149,14 @@ final class AdminFiles
             throw $error;
         }
         return ['removed' => true];
+    }
+
+    private function hasArticleLinks(int $fileId): bool
+    {
+        return (bool) $this->db->one('SELECT m.page_id FROM page_media m
+            WHERE m.image_id IN (SELECT i.id FROM images i WHERE i.file_id = ?)
+               OR m.image_id IN (SELECT r.image_id FROM image_revisions r WHERE r.file_id = ?) LIMIT 1',
+            [$fileId, $fileId]);
     }
 
     private function directReference(string $key): bool
