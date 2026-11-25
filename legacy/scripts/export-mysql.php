@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/d1-export-sql.php';
+
 // Read a consistent, read-only MySQL snapshot and emit data-only SQL for a fresh D1 database.
 if (PHP_SAPI !== 'cli' || $argc !== 2 || getenv('MYSQL_USER') === false || getenv('MYSQL_USER') === '') {
     fwrite(STDERR, "Uso: informe MYSQL_USER, MYSQL_PASSWORD e MYSQL_HOST/MYSQL_DATABASE ou MYSQL_DSN.\n");
@@ -57,6 +59,16 @@ try {
     // sqlite_schema rowid retains the migration's table creation order and therefore FK order.
     $tables = $target->query("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY rowid")
         ->fetchAll(PDO::FETCH_COLUMN);
+    $staging = false;
+    $emit = static function (string $statement) use ($target, $output): void {
+        if (strlen($statement) > 100000) {
+            throw new DomainException('Row exceeds the D1 statement limit.');
+        }
+        $target->exec($statement);
+        if (fwrite($output, $statement) !== strlen($statement)) {
+            throw new RuntimeException('Incomplete write.');
+        }
+    };
     foreach ($tables as $table) {
         $count = 0;
         $columns = $target->query("PRAGMA table_info(`$table`)")->fetchAll(PDO::FETCH_ASSOC);
@@ -64,26 +76,14 @@ try {
         $rows = $source->query("SELECT $names FROM `$table`");
         foreach ($rows as $row) {
             ++$count;
-            $values = [];
-            foreach ($columns as $column) {
-                $value = $row[$column['name']];
-                $values[] = match (true) {
-                    $value === null => 'NULL',
-                    $column['type'] === 'INTEGER' => integerLiteral($value),
-                    str_contains($value, "\0") => "CAST(X'" . bin2hex($value) . "' AS TEXT)",
-                    default => $target->quote($value),
-                };
-            }
-            $statement = "INSERT INTO `$table` ($names) VALUES (" . implode(', ', $values) . ");\n";
-            if (strlen($statement) > 100000) {
-                throw new DomainException('Row exceeds the D1 statement limit.');
-            }
-            $target->exec($statement);
-            if (fwrite($output, $statement) !== strlen($statement)) {
-                throw new RuntimeException('Incomplete write.');
+            foreach (d1RowStatements($target, $table, $names, $columns, $row, $staging) as $statement) {
+                $emit($statement);
             }
         }
         fwrite(STDOUT, "$table: $count\n");
+    }
+    if ($staging) {
+        $emit("DROP TABLE _mdawiki_export_chunks;\n");
     }
     $target->commit();
     $source->exec('COMMIT');
@@ -103,12 +103,3 @@ try {
 }
 
 exit($status);
-
-/** D1 bindings use JS numbers. Reject imported integers that the Worker cannot read exactly. */
-function integerLiteral(string $value): string
-{
-    if (!preg_match('/^-?(?:0|[1-9][0-9]*)$/D', $value) || abs((float) $value) > 9007199254740991) {
-        throw new DomainException('Integer outside the exact JavaScript range.');
-    }
-    return $value;
-}
