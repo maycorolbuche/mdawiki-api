@@ -1,6 +1,6 @@
 import { retryOptionalMail } from './wiki-mail'
 import { Hono } from 'hono'
-import { failureReason, type RegistrationStage } from './diagnostics'
+import { failureReason, type RegistrationStage, type SessionStage } from './diagnostics'
 import { registration } from './registration'
 import { articleWrites, rebuildQueuedArticles } from './article-writes'
 import { editorHistory } from './editor-history'
@@ -12,7 +12,7 @@ import { missingArticleImage, serveArticleImage, serveMedia } from './media'
 import { findPage, home, listPages, searchPages, statistics } from './pages'
 import { validSlug, type Env } from './types'
 
-const app = new Hono<{ Bindings: Env; Variables: { registrationStage: RegistrationStage } }>()
+const app = new Hono<{ Bindings: Env; Variables: { registrationStage: RegistrationStage; sessionStage: SessionStage } }>()
 const error = (code: string, message: string) => ({ error: { code, message } })
 const integer = (value: string, min: number, max: number) =>
   /^\d+$/.test(value) && Number(value) >= min && Number(value) <= max
@@ -98,7 +98,7 @@ app.onError((failure, c) => {
   const request_id = crypto.randomUUID()
   console.error(JSON.stringify({
     request_id, method: c.req.method, event: 'request_failed',
-    stage: c.get('registrationStage'), reason: failureReason(failure),
+    stage: c.get('sessionStage') ?? c.get('registrationStage'), reason: failureReason(failure),
   }))
   return c.json({ error: { code: 'service_unavailable', message: 'Falha ao processar a solicitação.', request_id } }, 503)
 })
