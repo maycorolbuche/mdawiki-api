@@ -196,7 +196,11 @@ final class MediaStorage
         }
         $path = implode('/', array_map('rawurlencode', explode('/', $key)));
         $url = "https://$account.r2.cloudflarestorage.com/$bucket/$path";
-        if ($query) $url .= '?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
+        if ($query) {
+            // Older libcurl releases sign query parameters in URL order.
+            ksort($query, SORT_STRING);
+            $url .= '?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
+        }
         $curl = curl_init($url);
         $headers = ['x-amz-content-sha256: ' . hash('sha256', $bytes ?? '')];
         if ($method === 'PUT') {
@@ -217,7 +221,10 @@ final class MediaStorage
         if ($method === 'GET' && $status === 404 && is_string($response)
             && str_contains($response, '<Code>NoSuchKey</Code>')) return null;
         if (!is_string($response) || $status < 200 || $status >= 300) {
-            throw new \RuntimeException('Falha de mídia no R2 (' . $method . ', HTTP ' . $status
+            $code = is_string($response)
+                && preg_match('~<Code>([A-Za-z][A-Za-z0-9]{0,63})</Code>~', $response, $match)
+                ? ', S3 ' . $match[1] : '';
+            throw new \RuntimeException('Falha de mídia no R2 (' . $method . ', HTTP ' . $status . $code
                 . ', cURL ' . curl_errno($curl) . ').');
         }
         return $response;
