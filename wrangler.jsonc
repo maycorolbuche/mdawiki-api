@@ -32,6 +32,10 @@
   "vars": {
     "FRONTEND_URL": "https://mda.wiki.br",
     "ALLOWED_ORIGINS": "http://localhost:5006",
+    "SMTP_HOST": "smtp-relay.brevo.com",
+    "SMTP_PORT": "587",
+    "SMTP_SECURE": "tls",
+    "SMTP_FROM": "noreply@mda.wiki.br",
     "MAIL_USER_COPY_TO": "wiki@mda.wiki.br",
     "MAIL_ADMIN_TO": "wiki@mda.wiki.br"
   }
