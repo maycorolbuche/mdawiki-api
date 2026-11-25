@@ -81,13 +81,25 @@ final class Accounts
         $file=$thumbnail && !empty($user['FOTO_32X32']) ? $user['FOTO_32X32'] : ($user['FOTO'] ?? '');
         return $file!=='' && $file!==null ? rtrim($config['media_public_url'],'/').'/users/'.rawurlencode(basename($file)) : null;
     }
-    public function publicProfile(string $publicId): array
+    public function publicProfile(string $publicId, int $offset = 0): array
     {
-        $user = $this->db->one('SELECT name, display_name, birth_date, city, state_code, club, association,
+        $user = $this->db->one('SELECT id, name, display_name, birth_date, city, state_code, club, association,
             club_type, biography, avatar_filename AS FOTO FROM users WHERE public_id = ? AND is_active = 1', [$publicId]);
         if (!$user) throw new HttpError(404, 'user_not_found', 'Perfil não encontrado.');
         $user['photo'] = self::photoUrl($user, $this->config);
-        unset($user['FOTO']);
+        $limit = 20;
+        $edits = $this->db->rows("SELECT p.slug, COALESCE(NULLIF(p.title, ''), p.slug) AS title,
+                MAX(r.created_at) AS edited_at
+            FROM page_revisions r JOIN pages p ON p.id = r.page_id
+            WHERE r.created_by = ? AND COALESCE(r.access_level_id, 1) <= ?
+              AND COALESCE(r.is_expired, 0) = 0 AND p.is_searchable = 1
+              AND CHAR_LENGTH(p.identifier) > 1 AND p.kind <> 'image' AND p.legacy_identifier NOT LIKE 'page@%'
+            GROUP BY p.id, p.slug, p.title
+            ORDER BY edited_at DESC, p.id DESC LIMIT ? OFFSET ?",
+            [(int) $user['id'], (int) $this->config['public_max_level'], $limit + 1, $offset]);
+        $user['edited_pages'] = array_slice($edits, 0, $limit);
+        $user['next_edits_offset'] = count($edits) > $limit ? $offset + $limit : null;
+        unset($user['FOTO'], $user['id']);
         return $user;
     }
 
