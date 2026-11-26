@@ -410,3 +410,22 @@ check((int) $db->query("SELECT COUNT(*) FROM page_missing_links WHERE href = '/d
     'A criação do destino deve remover os vínculos pendentes.');
 check((int) $db->query("SELECT COUNT(*) FROM page_links l JOIN pages p ON p.id = l.target_page_id WHERE p.identifier = 'destino-ausente'")->fetchColumn() === 2,
     'Os vínculos pendentes devem migrar para page_links.');
+
+$adminRoute = '/v1/admin/pages';
+$destinationId = (int) $db->query("SELECT id FROM pages WHERE identifier = 'destino-ausente'")->fetchColumn();
+check($auth->handle('GET', $adminRoute, [], $origin)->status === 403, 'Admin pages must reject non-admin accounts.');
+$db->prepare("UPDATE users SET role = 'admin' WHERE id = ?")->execute([$secondLogin->body['data']['user']['ID']]);
+$adminPages = $auth->handle('GET', $adminRoute, ['q' => 'Destino Ausente', 'content' => 'yes'], $origin);
+check($adminPages->status === 200 && (int) $adminPages->body['data']['items'][0]['characters'] === 13,
+    'Administrative page search must count Unicode characters.');
+$emptyPages = $auth->handle('GET', $adminRoute, ['q' => 'Sem-Conteudo', 'content' => 'no'], $origin);
+check($emptyPages->status === 200 && $emptyPages->body['data']['total'] === 1, 'Whitespace-only pages must be empty.');
+check($auth->handle('POST', $adminRoute, [], $origin, ['id' => $destinationId], 'invalid')->status === 403,
+    'Hard deletion must require CSRF.');
+check($auth->handle('POST', $adminRoute, [], $origin, ['id' => $destinationId], $csrf)->status === 200,
+    'An administrator must be able to delete the page and its history.');
+check((int) $db->query("SELECT COUNT(*) FROM pages WHERE id = $destinationId")->fetchColumn() === 0
+    && (int) $db->query("SELECT COUNT(*) FROM page_revisions WHERE page_id = $destinationId")->fetchColumn() === 0,
+    'Hard deletion must remove the page and its revisions.');
+check((int) $db->query("SELECT COUNT(*) FROM page_missing_links WHERE href = '/destino-ausente'")->fetchColumn() === 2,
+    'Links from surviving pages must retain their missing destination.');
