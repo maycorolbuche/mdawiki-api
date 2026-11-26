@@ -144,7 +144,7 @@ final class Features
             }
             $rows = $this->db->rows("SELECT p.id, p.slug, COALESCE(p.title, p.slug) AS title
                 FROM page_rebuild_queue q JOIN pages p ON p.id = q.page_id
-                WHERE p.kind <> 'image' AND p.legacy_identifier NOT LIKE 'page@%'
+                WHERE p.kind <> 'image' AND p.kind <> 'system'
                 ORDER BY title, p.id LIMIT ? OFFSET ?", [$limit + 1, $offset]);
             return ['type' => $type, 'items' => array_slice($rows, 0, $limit),
                 'next_offset' => count($rows) > $limit ? $offset + $limit : null];

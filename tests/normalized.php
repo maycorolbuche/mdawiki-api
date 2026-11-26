@@ -44,8 +44,10 @@ check($db->query('SELECT role FROM users WHERE id = 100')->fetchColumn() === 'us
     'O schema deve preservar a conta existente e usar o papel user por padrão.');
 check($db->query('SELECT source FROM pages WHERE id = 1')->fetchColumn() === 'Editado',
     'Reaplicar o schema não deve apagar páginas.');
+$db->exec(file_get_contents(__DIR__ . '/../migrations/002_drop_pages_legacy_identifier.sql'));
 require dirname(__DIR__) . '/config/bootstrap.php';
 $normalized = new MDAWiki\NormalizedPageRepository(new MDAWiki\Database($db), 1, 'https://api.example.test/media');
+check($normalized->find('article') === null, 'Resolver páginas apenas pelo identificador atual.');
 $preview = new MDAWiki\Application(static fn () => $normalized, [
     'normalized_read_only' => true, 'origins' => [], 'frontend_url' => 'https://example.test',
     'media_url' => 'https://api.example.test/media',
@@ -57,7 +59,7 @@ $article = $preview->handle('GET', '/v1/pages/ESPECIALIDADE_Teste', []);
 check($article->status === 200 && $article->body['data']['slug'] === 'EspéciAlidade-Teste', 'Slug canônico da base migrada incorreto.');
 check($preview->handle('PUT', '/v1/pages/Especialidade-Teste', [])->status === 501, 'Prévia aceitou uma edição.');
 
-$db->exec("UPDATE pages SET is_searchable = 0 WHERE legacy_identifier = 'article'");
+$db->exec("UPDATE pages SET is_searchable = 0 WHERE id = 1");
 check($preview->handle('GET', '/v1/pages/Especialidade-Teste', [])->status === 404, 'Prévia expôs artigo fora da busca.');
 
 $search = $preview->handle('GET', '/v1/search', ['q' => 'Imagem']);
@@ -96,7 +98,7 @@ $login = $auth->handle('POST', '/v1/auth/login', [], $origin, $credentials, $ini
 check($login->status === 200 && (int) $login->body['data']['user']['ID'] === 100, 'Login do usuário migrado falhou.');
 check($login->body['data']['user']['photo'] === $publicUser->body['data']['photo'], 'Avatar migrado não apareceu na sessão.');
 check($auth->handle('GET', '/v1/images/Sample', [], $origin)->status === 200, 'Imagem migrada indisponível.');
-$db->exec("UPDATE pages SET is_searchable = 1 WHERE legacy_identifier = 'article'");
+$db->exec("UPDATE pages SET is_searchable = 1 WHERE id = 1");
 $slug = '/v1/pages/Especialidade_Teste';
 $public = $auth->handle('GET', $slug, [], $origin);
 check($public->status === 200 && $public->body['data']['read_only'] === false, 'Botões do artigo ficaram ocultos.');
@@ -217,15 +219,15 @@ $accountService->notifyProfile(100);
 check(str_contains($mailBody, 'href="https://example.test/u/' . $publicId . '"'), 'E-mail deve apontar para o perfil público do usuário.');
 check($auth->handle('POST', '/v1/auth/logout', [], $origin, [], $login->body['data']['csrf_token'])->status === 200, 'Logout migrado falhou.');
 
-$addRelated = $db->prepare("INSERT INTO pages (legacy_identifier, identifier, slug, title, kind, is_searchable)
-    VALUES (?, ?, ?, ?, 'article', ?)");
+$addRelated = $db->prepare("INSERT INTO pages (identifier, slug, title, kind, is_searchable)
+    VALUES (?, ?, ?, 'article', ?)");
 $relate = $db->prepare('INSERT INTO page_categories (page_id, category_id, position) VALUES (?, ?, ?)');
 $relate->execute([$articleId, $categoryIds[0], 1]);
 $relate->execute([$articleId, $categoryIds[1], 2]);
 $publicIds = [];
 for ($i = 1; $i <= 8; $i++) {
     $name = 'related-' . $i;
-    $addRelated->execute([$name, $name, $name, $name, $i === 8 ? 0 : 1]);
+    $addRelated->execute([$name, $name, $name, $i === 8 ? 0 : 1]);
     $id = $db->lastInsertId();
     $relate->execute([$id, $categoryIds[0], 1]);
     $relate->execute([$id, $categoryIds[1], 2]);
@@ -379,11 +381,11 @@ $home = $auth->handle('GET', '/v1/home', [], $origin)->body['data'];
 check($home['top_24h'][0]['image'] === null, 'O card público deve ocultar imagens restritas.');
 
 $db->prepare('UPDATE pages SET is_searchable = 0 WHERE id <> ?')->execute([$articleId]);
-$insert = $db->prepare("INSERT INTO pages (legacy_identifier, identifier, slug, title, kind, source, is_searchable, view_count)
-    VALUES (?, ?, ?, ?, 'article', ?, ?, 100)");
+$insert = $db->prepare("INSERT INTO pages (identifier, slug, title, kind, source, is_searchable, view_count)
+    VALUES (?, ?, ?, 'article', ?, ?, 100)");
 foreach ([['Sem-Conteudo', " \n\t ", 1], ['Fora-Da-Busca', 'Texto de teste', 0]] as [$title, $source, $searchable]) {
     $identifier = strtolower($title);
-    $insert->execute([$identifier, $identifier, $title, $title, $source, $searchable]);
+    $insert->execute([$identifier, $title, $title, $source, $searchable]);
     $db->prepare('INSERT INTO page_visits (page_id, visited_at) VALUES (?, ?)')->execute([$db->lastInsertId(), time()]);
 }
 $home = $auth->handle('GET', '/v1/home', [], $origin)->body['data'];

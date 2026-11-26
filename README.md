@@ -111,3 +111,5 @@ A API lê, grava e verifica arquivos apenas no armazenamento selecionado.
 Se um arquivo faltar nesse destino, ele é considerado ausente.
 A troca de driver não copia arquivos. Antes de alternar, copie a mídia
 necessária para o novo destino, mantendo as mesmas chaves.
+
+Aplique [a migration 002](migrations/002_drop_pages_legacy_identifier.sql) após a 001 em instalações novas, ou uma vez na base existente antes de publicar a versão correspondente da API. Em produção, pause o tráfego da API durante a troca, pois a versão anterior depende da coluna removida.

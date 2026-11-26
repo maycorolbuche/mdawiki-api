@@ -24,3 +24,5 @@ Uploads novos aceitam PNG, JPEG, GIF, WebP e SVG sanitizado até 5 MB (20 megapi
 ## Validação
 
 `php tests/run.php` verifica o contrato público. `php tests/features.php` usa SQLite em memória. O CI também executa os fluxos no MySQL 8 com as definições originais das tabelas (incluindo MyISAM, latin1 e SENHA varchar(32)), sem usar dados de produção. Os testes cobrem autenticação, CSRF, permissões, hashes, e-mail simulado, restauração, relações, templates e consultas das listas. Credenciais SMTP e bytes dos registros reais ainda precisam da validação na hospedagem.
+
+Aplique [a migration 002](../migrations/002_drop_pages_legacy_identifier.sql) após a 001 em instalações novas, ou uma vez na base existente antes de publicar a versão correspondente da API. Em produção, pause o tráfego da API durante a troca, pois a versão anterior depende da coluna removida.

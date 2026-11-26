@@ -15,7 +15,7 @@ final class NormalizedPages
         if (!$page && $allowMissing) {
             return null;
         }
-        if (!$page || str_starts_with($page['legacy_identifier'], 'page@')) {
+        if (!$page || $page['kind'] === 'system') {
             throw new HttpError(404, 'not_found', 'Página não encontrada.');
         }
         if ($page['kind'] === 'image') {
@@ -103,9 +103,9 @@ final class NormalizedPages
         [$canonical, $identifier] = $this->newPageAddress($slug);
         try {
             $this->db->run("INSERT INTO pages
-                (legacy_identifier, identifier, slug, kind, is_searchable, view_count, created_by, created_at)
-                VALUES (?, ?, ?, 'article', 1, 0, ?, ?)",
-                ['@article:' . hash('sha256', $identifier), $identifier, $canonical, $user['ID'], $now]);
+                (identifier, slug, kind, is_searchable, view_count, created_by, created_at)
+                VALUES (?, ?, 'article', 1, 0, ?, ?)",
+                [$identifier, $canonical, $user['ID'], $now]);
         } catch (\PDOException $error) {
             if ((int) ($error->errorInfo[1] ?? 0) !== 1062) {
                 throw $error;
