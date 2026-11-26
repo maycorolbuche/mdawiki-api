@@ -26,11 +26,16 @@ final class Features
                 $this->rate->check(($auth?'auth:':'write:').$ip,$auth?20:100);
                 if ($auth) $this->rate->check('account:'.hash('sha256',strtolower(is_string($body['email'] ?? null)?$body['email']:$ip)),20);
             }
-            if (in_array($path, ['/v1/admin/files', '/v1/admin/users', '/v1/admin/pages'], true) && ($this->config['normalized_editor'] ?? false)) {
+            if (in_array($path, ['/v1/admin/files', '/v1/admin/users', '/v1/admin/pages', '/v1/admin/images'], true) && ($this->config['normalized_editor'] ?? false)) {
                 $user = $this->accounts->current(true);
                 if (($user['role'] ?? null) !== 'admin') throw new HttpError(403, 'permission_denied', 'Acesso restrito a administradores.');
                 if ($method === 'PUT') throw new HttpError(405, 'method_not_allowed', 'Método não permitido.');
-                if ($path === '/v1/admin/pages') {
+                if ($path === '/v1/admin/images') {
+                    if ($method !== 'GET') throw new HttpError(405, 'method_not_allowed', 'Método não permitido.');
+                    $images = new AdminImages($this->db, $this->config);
+                    if (isset($query['original'])) return $images->original($query['original']);
+                    $data = $images->list($query);
+                } elseif ($path === '/v1/admin/pages') {
                     $pages = new AdminPages($this->db);
                     $data = $method === 'POST' ? $pages->remove($body) : $pages->list($query);
                 } elseif ($path === '/v1/admin/users') {

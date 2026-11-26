@@ -96,6 +96,7 @@ final class NormalizedImages
             if (!$image) {
                 $this->db->run('INSERT INTO images (identifier, slug, title, meta, file_id, access_level_id, created_by, created_at, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?, NOW())',
                     [$identifier, $slug, str_replace(['-', '_'], ' ', $slug), $meta, $file, $level, $user['ID'], $user['ID']]);
+                $this->recordRevision($pdo->lastInsertId(), $file, $level, $user['ID']);
                 $this->rebuildWaitingPages($identifier);
             } elseif ((string) $image['file_id'] !== (string) $file) {
                 $this->replace($image, $file, $meta, (int) $user['ID']);
@@ -219,14 +220,24 @@ final class NormalizedImages
         }
     }
 
+    private function recordRevision(int|string $image, int|string $file, int $level, int|string|null $author, ?string $date = null): void
+    {
+        $this->db->run('INSERT INTO image_revisions (image_id, file_id, created_at, access_level_id, created_by)
+            VALUES (?, ?, COALESCE(?, CURRENT_TIMESTAMP), ?, ?)', [$image, $file, $date, $level, $author]);
+    }
+
     private function replace(array $image, int|string|null $file, string $meta, int $author): void
     {
-        if ($image['file_id'] !== null) {
-            $this->db->run('INSERT INTO image_revisions (image_id, file_id, created_at, access_level_id, created_by)
-                VALUES (?, ?, ?, ?, ?)', [$image['id'], $image['file_id'], $image['updated_at'], $image['access_level_id'], $image['updated_by'] ?? $image['created_by']]);
+        // Older images may still have a current file that was never recorded in history.
+        $latest = $this->db->one('SELECT file_id FROM image_revisions WHERE image_id = ? ORDER BY created_at DESC, id DESC LIMIT 1', [$image['id']]);
+        $level = (int) $image['access_level_id'];
+        if ($image['file_id'] !== null && (string) $image['file_id'] !== (string) ($latest['file_id'] ?? '')) {
+            $this->recordRevision($image['id'], $image['file_id'], $level,
+                $image['updated_by'] ?? $image['created_by'], $image['updated_at'] ?? $image['created_at']);
         }
         $this->db->run('UPDATE images SET file_id = ?, meta = ?, updated_by = ?, updated_at = NOW() WHERE id = ?',
             [$file, $meta, $author, $image['id']]);
+        if ($file !== null) $this->recordRevision($image['id'], $file, $level, $author);
         if ($this->pages === null) {
             throw new \LogicException('O reprocessador de páginas é obrigatório para substituir imagens.');
         }
