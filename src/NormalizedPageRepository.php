@@ -36,9 +36,7 @@ final class NormalizedPageRepository implements PageRepository
         } catch (\RuntimeException) {
             return null;
         }
-        return $db->one('SELECT * FROM pages WHERE identifier = ? OR id = (SELECT page_id FROM page_aliases WHERE alias = ?)
-            ORDER BY identifier = ? DESC LIMIT 1' . ($lock ? ' FOR UPDATE' : ''),
-            [$identifier, Database::id($slug), $identifier]);
+        return $db->one('SELECT * FROM pages WHERE identifier = ?' . ($lock ? ' FOR UPDATE' : ''), [$identifier]);
     }
 
     public function find(string $slug): ?array
@@ -49,8 +47,7 @@ final class NormalizedPageRepository implements PageRepository
             return null;
         }
         $row = $this->db->one(self::SELECT_PAGE . ' WHERE ' . self::PUBLIC_PAGE
-            . ' AND (p.identifier = ? OR p.id = (SELECT page_id FROM page_aliases WHERE alias = ?)) ORDER BY p.identifier = ? DESC LIMIT 1',
-            [$this->maxLevel, $identifier, Database::id($slug), $identifier]);
+            . ' AND p.identifier = ?', [$this->maxLevel, $identifier]);
         if ($row === null) {
             return null;
         }

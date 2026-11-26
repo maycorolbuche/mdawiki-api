@@ -45,12 +45,9 @@ check($db->query('SELECT role FROM users WHERE id = 100')->fetchColumn() === 'us
 check($db->query('SELECT source FROM pages WHERE id = 1')->fetchColumn() === 'Editado',
     'Reaplicar o schema não deve apagar páginas.');
 $db->exec(file_get_contents(__DIR__ . '/../migrations/002_drop_pages_legacy_identifier.sql'));
-check($db->query("SELECT page_id FROM page_aliases WHERE alias = 'article'")->fetchColumn() == 1,
-    'A migration deve preservar o endereço antigo.');
 require dirname(__DIR__) . '/config/bootstrap.php';
 $normalized = new MDAWiki\NormalizedPageRepository(new MDAWiki\Database($db), 1, 'https://api.example.test/media');
-check($normalized->find('article')['slug'] === 'EspéciAlidade-Teste',
-    'O endereço antigo deve continuar resolvendo para a página canônica.');
+check($normalized->find('article') === null, 'Resolver páginas apenas pelo identificador atual.');
 $preview = new MDAWiki\Application(static fn () => $normalized, [
     'normalized_read_only' => true, 'origins' => [], 'frontend_url' => 'https://example.test',
     'media_url' => 'https://api.example.test/media',
