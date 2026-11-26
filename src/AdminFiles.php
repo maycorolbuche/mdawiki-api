@@ -136,7 +136,7 @@ final class AdminFiles
                 $this->db->run("UPDATE images SET file_id = NULL, meta = '{}' WHERE file_id = ?", [$id]);
                 foreach (array_keys($linked) as $pageId) {
                     $page = $this->db->one("SELECT slug FROM pages WHERE id = ? AND kind <> 'image'
-                        AND legacy_identifier NOT LIKE 'page@%'", [$pageId]);
+                        AND kind <> 'system'", [$pageId]);
                     if ($page) $this->pages->rebuildCache($page['slug']);
                 }
                 $this->db->run('DELETE FROM image_revisions WHERE file_id = ?', [$id]);

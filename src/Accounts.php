@@ -93,7 +93,7 @@ final class Accounts
             FROM page_revisions r JOIN pages p ON p.id = r.page_id
             WHERE r.created_by = ? AND COALESCE(r.access_level_id, 1) <= ?
               AND COALESCE(r.is_expired, 0) = 0 AND p.is_searchable = 1
-              AND CHAR_LENGTH(p.identifier) > 1 AND p.kind <> 'image' AND p.legacy_identifier NOT LIKE 'page@%'
+              AND CHAR_LENGTH(p.identifier) > 1 AND p.kind <> 'image' AND p.kind <> 'system'
             GROUP BY p.id, p.slug, p.title
             ORDER BY edited_at DESC, p.id DESC LIMIT ? OFFSET ?",
             [(int) $user['id'], (int) $this->config['public_max_level'], $limit + 1, $offset]);

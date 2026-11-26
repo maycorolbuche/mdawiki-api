@@ -10,7 +10,7 @@ final class NormalizedPageRebuild
         $config['normalized_editor'] = true;
         $config['normalized_read_only'] = true;
         $pages = new NormalizedPages($db, new Accounts($db, new Session(), $config, static fn () => null), new WikiRenderer($db, $config));
-        $filter = "kind <> 'image' AND legacy_identifier NOT LIKE 'page@%'";
+        $filter = "kind <> 'image' AND kind <> 'system'";
         $total = (int) $db->one("SELECT COUNT(*) AS total FROM pages WHERE $filter")['total'];
         fwrite(STDOUT, "Reprocessando {$total} páginas e seus vínculos..." . PHP_EOL);
         $after = 0;

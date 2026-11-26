@@ -16,7 +16,7 @@ $db->pdo->exec('CREATE TABLE files (id INTEGER PRIMARY KEY, storage_key TEXT, si
     CREATE TABLE images (id INTEGER PRIMARY KEY, file_id INTEGER, meta TEXT, slug TEXT, title TEXT, access_level_id INTEGER);
     CREATE TABLE image_revisions (id INTEGER PRIMARY KEY, file_id INTEGER, image_id INTEGER, access_level_id INTEGER);
     CREATE TABLE page_media (page_id INTEGER, image_id INTEGER);
-    CREATE TABLE pages (id INTEGER PRIMARY KEY, slug TEXT, kind TEXT, legacy_identifier TEXT, source TEXT, rendered_html TEXT);
+    CREATE TABLE pages (id INTEGER PRIMARY KEY, slug TEXT, kind TEXT, source TEXT, rendered_html TEXT);
     CREATE TABLE page_revisions (id INTEGER PRIMARY KEY, source TEXT, rendered_html TEXT);
     INSERT INTO files VALUES (1, "articles/linked.png", 5), (2, "articles/unused.png", 5), (3, "articles/missing.png", 5);
     INSERT INTO files VALUES (4, "users/profile.png", 5), (5, "articles/linked-history.png", 5);

@@ -5,7 +5,7 @@ namespace MDAWiki;
 
 final class NormalizedPageRepository implements PageRepository
 {
-    private const PUBLIC_PAGE = "p.is_searchable = 1 AND CHAR_LENGTH(p.identifier) > 1 AND p.legacy_identifier NOT LIKE 'page@%'";
+    private const PUBLIC_PAGE = "p.is_searchable = 1 AND CHAR_LENGTH(p.identifier) > 1 AND p.kind <> 'system'";
     private const COVER_IMAGE = '(SELECT f.storage_key FROM page_media m
             JOIN images i ON i.id = m.image_id JOIN files f ON f.id = i.file_id
             WHERE m.page_id = p.id AND COALESCE(m.is_template, 0) = 0 AND i.access_level_id <= ?
@@ -36,7 +36,7 @@ final class NormalizedPageRepository implements PageRepository
         } catch (\RuntimeException) {
             return null;
         }
-        return $db->one('SELECT * FROM pages WHERE identifier = ? OR legacy_identifier = ?
+        return $db->one('SELECT * FROM pages WHERE identifier = ? OR id = (SELECT page_id FROM page_aliases WHERE alias = ?)
             ORDER BY identifier = ? DESC LIMIT 1' . ($lock ? ' FOR UPDATE' : ''),
             [$identifier, Database::id($slug), $identifier]);
     }
@@ -49,7 +49,7 @@ final class NormalizedPageRepository implements PageRepository
             return null;
         }
         $row = $this->db->one(self::SELECT_PAGE . ' WHERE ' . self::PUBLIC_PAGE
-            . ' AND (p.identifier = ? OR p.legacy_identifier = ?) ORDER BY p.identifier = ? DESC LIMIT 1',
+            . ' AND (p.identifier = ? OR p.id = (SELECT page_id FROM page_aliases WHERE alias = ?)) ORDER BY p.identifier = ? DESC LIMIT 1',
             [$this->maxLevel, $identifier, Database::id($slug), $identifier]);
         if ($row === null) {
             return null;

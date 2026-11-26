@@ -36,7 +36,7 @@ final class NormalizedImages
         $members = $this->db->rows("SELECT DISTINCT p.id, p.slug, COALESCE(p.title, p.slug) AS title
             FROM page_media m JOIN pages p ON p.id = m.page_id
             WHERE m.image_id = ? AND p.is_searchable = 1
-            AND p.legacy_identifier NOT LIKE 'page@%' ORDER BY title, p.id", [$image['id']]);
+            AND p.kind <> 'system' ORDER BY title, p.id", [$image['id']]);
         $history = $this->db->rows("SELECT r.id, r.created_at, f.storage_key,
             COALESCE(NULLIF(u.display_name, ''), NULLIF(u.name, '')) AS author, CASE WHEN u.is_active = 1 THEN u.public_id END AS author_profile_id FROM image_revisions r
             JOIN files f ON f.id = r.file_id LEFT JOIN users u ON u.id = r.created_by
@@ -199,7 +199,7 @@ final class NormalizedImages
         $templates = $this->db->rows("SELECT p.id, p.slug, t.template_source, t.template_key
             FROM page_templates t JOIN pages p ON p.id = t.page_id
             WHERE t.template_key LIKE 'imagem:%' AND p.kind <> 'image'
-            AND p.legacy_identifier NOT LIKE 'page@%' ORDER BY p.id, t.position");
+            AND p.kind <> 'system' ORDER BY p.id, t.position");
         $waiting = [];
         foreach ($templates as $template) {
             if (isset($waiting[$template['id']])) continue;
@@ -231,7 +231,7 @@ final class NormalizedImages
             throw new \LogicException('O reprocessador de páginas é obrigatório para substituir imagens.');
         }
         $linked = $this->db->rows("SELECT p.slug FROM pages p
-            WHERE p.legacy_identifier NOT LIKE 'page@%' AND p.kind <> 'image'
+            WHERE p.kind <> 'system' AND p.kind <> 'image'
             AND EXISTS (SELECT 1 FROM page_media m WHERE m.page_id = p.id AND m.image_id = ?)
             ORDER BY p.id", [$image['id']]);
         foreach ($linked as $page) {
