@@ -19,9 +19,9 @@ $db->pdo->exec('CREATE TABLE files (id INTEGER PRIMARY KEY, storage_key TEXT, si
     CREATE TABLE pages (id INTEGER PRIMARY KEY, slug TEXT, kind TEXT, source TEXT, rendered_html TEXT);
     CREATE TABLE page_revisions (id INTEGER PRIMARY KEY, source TEXT, rendered_html TEXT);
     INSERT INTO files VALUES (1, "articles/linked.png", 5), (2, "articles/unused.png", 5), (3, "articles/missing.png", 5);
-    INSERT INTO files VALUES (4, "users/profile.png", 5), (5, "articles/linked-history.png", 5);
-    INSERT INTO images VALUES (1, 1, "{}", "linked", "Linked", 1), (2, 2, "{}", "unused", "Unused", 1), (3, 3, "{}", "missing", "Missing", 1), (4, NULL, "{}", "historical", "Historical", 1), (5, NULL, "{}", "private", "Private", 5);
-    INSERT INTO image_revisions VALUES (1, 2, 2, 1), (2, 3, 3, 1), (3, 1, 1, 1), (4, 2, 4, 1), (5, 2, 5, 1), (6, 5, 1, 1);
+    INSERT INTO files VALUES (4, "users/profile.png", 5), (5, "articles/linked-history.png", 5), (6, "articles/unused-history.png", 5);
+    INSERT INTO images VALUES (1, 1, "{}", "linked", "Linked", 1), (2, 2, "{}", "unused", "Unused", 1), (3, 3, "{}", "missing", "Missing", 1), (4, NULL, "{}", "historical", "Historical", 1), (5, NULL, "{}", "private", "Private", 5), (6, 1, "{}", "shared", "Shared", 1);
+    INSERT INTO image_revisions VALUES (1, 2, 2, 1), (2, 3, 3, 1), (3, 1, 1, 1), (4, 2, 4, 1), (5, 2, 5, 1), (6, 5, 1, 1), (7, 6, 2, 1);
     INSERT INTO page_media VALUES (1, 1);
     INSERT INTO users VALUES (1, "missing.png"), (2, "profile.png");');
 $root = sys_get_temp_dir() . '/mdawiki-admin-files-' . bin2hex(random_bytes(8));
@@ -30,19 +30,19 @@ $media = new MediaStorage($config);
 $pages = (new ReflectionClass(NormalizedPages::class))->newInstanceWithoutConstructor();
 $admin = new AdminFiles($db, $config, $pages);
 try {
-    foreach (['articles/linked.png', 'articles/linked-history.png', 'articles/unused.png', 'articles/orphan.png', 'users/profile.png', 'users/orphan.png'] as $key) {
+    foreach (['articles/linked.png', 'articles/linked-history.png', 'articles/unused.png', 'articles/unused-history.png', 'articles/orphan.png', 'users/profile.png', 'users/orphan.png'] as $key) {
         $media->write($key, 'image');
     }
     check($media->read('articles/missing.png') === null, 'A local miss must not consult R2.');
     check($media->readAt('articles/linked.png', 'r2') === null, 'An explicit location must not bypass the selected driver.');
     $audit = $admin->audit();
     check($audit['locations'] === ['local'], 'Audit must only inventory the selected storage.');
-    check(array_column($audit['unlinked'], 'media_key') === ['articles/unused.png', 'users/profile.png'], 'Only unused images should be classified as unlinked.');
+    check(array_column($audit['unlinked'], 'slug') === ['shared', 'unused'], 'Only unused images should be classified as unlinked.');
     check(count($audit['orphan']) === 2 && count($audit['missing']) === 2, 'Audit must distinguish orphan and missing media.');
     check($admin->preview(['media_key' => 'articles/orphan.png'])['image'] === 'data:image/png;base64,aW1hZ2U=', 'Preview reads the original object.');
     foreach ([
-        ['action' => 'unlinked', 'id' => 1, 'media_key' => 'articles/linked.png'],
-        ['action' => 'unlinked', 'id' => 5, 'media_key' => 'articles/linked-history.png'],
+        ['action' => 'unlinked_image', 'id' => 1, 'media_key' => 'articles/linked.png'],
+        ['action' => 'unlinked_image', 'id' => 5, 'media_key' => 'articles/linked-history.png'],
         ['action' => 'orphan', 'location' => 'local', 'media_key' => 'users/profile.png'],
         ['action' => 'missing_file', 'id' => 2, 'media_key' => 'articles/unused.png'],
     ] as $request) {
@@ -53,20 +53,22 @@ try {
             check($error->status === 409, 'Unsafe removal must return a conflict.');
         }
     }
-    check(array_column($audit['unlinked'][0]['public_images'], 'slug') === ['historical', 'unused'], 'Include public current and historical image links once each.');
-    check($audit['unlinked'][1]['avatar_in_use'], 'Audit must identify an avatar that is still in use.');
+    check(array_column($audit['unlinked'][1]['public_images'], 'slug') === ['unused'], 'Link only to the listed image.');
+    $admin->remove(['action' => 'unlinked_image', 'id' => 6, 'media_key' => 'articles/linked.png']);
+    check($media->read('articles/linked.png') === 'image', 'Preserve the current file shared with another image.');
     $admin->remove(['action' => 'avatar_record', 'id' => 4, 'media_key' => 'users/profile.png']);
     check($media->read('users/profile.png') === 'image', 'Removing the record must preserve the avatar bytes.');
     check($db->one('SELECT avatar_filename FROM users WHERE id = 2')['avatar_filename'] === 'profile.png', 'Preserve the users reference.');
-    $admin->remove(['action' => 'unlinked', 'id' => 2, 'media_key' => 'articles/unused.png']);
+    $admin->remove(['action' => 'unlinked_image', 'id' => 2, 'media_key' => 'articles/unused.png']);
     $admin->remove(['action' => 'missing_file', 'id' => 3, 'media_key' => 'articles/missing.png']);
     $admin->remove(['action' => 'missing_avatar', 'id' => 1, 'media_key' => 'users/missing.png']);
     $admin->remove(['action' => 'orphan', 'location' => 'local', 'media_key' => 'articles/orphan.png']);
-    check(array_column($db->rows('SELECT id FROM files ORDER BY id'), 'id') === [1, 5], 'The linked file and its historical file must remain.');
-    check(array_column($db->rows('SELECT file_id FROM image_revisions ORDER BY id'), 'file_id') === [1, 5], 'Only revisions tied to removed files must be deleted.');
+    check(array_column($db->rows('SELECT id FROM files ORDER BY id'), 'id') === [1, 2, 5], 'Keep linked files and files shared through other revisions.');
+    check(array_column($db->rows('SELECT file_id FROM image_revisions ORDER BY id'), 'file_id') === [1, 2, 2, 5], 'Only revisions of the selected image or missing file must be deleted.');
     check($db->one('SELECT file_id FROM images WHERE id = 3')['file_id'] === null, 'Missing file removal must clear images.file_id.');
     check($db->one('SELECT avatar_filename FROM users WHERE id = 1')['avatar_filename'] === null, 'Clear the missing avatar while preserving the account.');
-    check($media->read('articles/unused.png') === null && $media->read('articles/orphan.png') === null, 'The selected physical copies must be removed.');
+    check(!$db->one('SELECT id FROM images WHERE id = 2'), 'Delete the selected image itself.');
+    check($media->read('articles/unused.png') === 'image' && $media->read('articles/unused-history.png') === null && $media->read('articles/orphan.png') === null, 'The selected physical copies must be removed.');
 } finally {
     if (is_dir($root)) {
         $items = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);

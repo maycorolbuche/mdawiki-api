@@ -25,14 +25,18 @@ final class AdminFiles
     {
         $inventory = $this->storage->inventory();
         $result = ['unlinked' => [], 'orphan' => [], 'missing' => [], 'locations' => array_keys($inventory)];
-        $imageLinks = [];
-        foreach ($this->db->rows('SELECT i.file_id, i.slug, i.title FROM images i
-            WHERE i.file_id IS NOT NULL AND i.access_level_id <= ?
-            UNION
-            SELECT r.file_id, i.slug, i.title FROM image_revisions r JOIN images i ON i.id = r.image_id
-            WHERE i.access_level_id <= ? AND r.access_level_id <= ?
-            ORDER BY title, slug', [$this->publicLevel, $this->publicLevel, $this->publicLevel]) as $image) {
-            $imageLinks[$image['file_id']][] = ['slug' => $image['slug'], 'title' => $image['title']];
+        foreach ($this->db->rows("SELECT i.id, i.slug, i.title, i.access_level_id, f.storage_key AS media_key, f.size_bytes,
+                (SELECT COUNT(*) FROM image_revisions r WHERE r.image_id = i.id) AS revisions
+            FROM images i JOIN files f ON f.id = i.file_id
+            WHERE NOT EXISTS (SELECT 1 FROM page_media m WHERE m.image_id = i.id)
+            ORDER BY i.title, i.id") as $image) {
+            $key = $image['media_key'];
+            if (!MediaStorage::managedKey($key) || !($locations = $this->findIn($inventory, $key))) continue;
+            $result['unlinked'][] = $image + [
+                'kind' => 'image', 'locations' => $locations,
+                'public_images' => (int) $image['access_level_id'] <= $this->publicLevel
+                    ? [['slug' => $image['slug'], 'title' => $image['title']]] : [],
+            ];
         }
         $known = [];
         $avatars = [];
@@ -51,7 +55,6 @@ final class AdminFiles
             $locations = $this->findIn($inventory, $key);
             $row = $file + ['kind' => 'file', 'locations' => $locations, 'avatar_in_use' => isset($avatars[$key])];
             if (!$locations) $result['missing'][] = $row;
-            elseif (!(int) $file['pages']) $result['unlinked'][] = $row + ['public_images' => $imageLinks[$file['id']] ?? []];
         }
         foreach ($inventory as $location => $objects) {
             foreach ($objects as $key => $size) {
@@ -88,10 +91,12 @@ final class AdminFiles
         $key = $body['media_key'] ?? null;
         $id = filter_var($body['id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
         if (!is_string($key) || !MediaStorage::managedKey($key)
-            || !in_array($action, ['unlinked', 'orphan', 'missing_file', 'missing_avatar', 'avatar_record'], true)
+            || !in_array($action, ['unlinked_image', 'orphan', 'missing_file', 'missing_avatar', 'avatar_record'], true)
             || ($action !== 'orphan' && $id === false)) {
             throw new HttpError(422, 'invalid_media', 'Selecione um arquivo válido.');
         }
+        if ($action === 'unlinked_image') return $this->removeImage($id, $key);
+
         $pdo = $this->db->pdo;
         $pdo->beginTransaction();
         try {
@@ -118,8 +123,7 @@ final class AdminFiles
                 $this->db->run('UPDATE users SET avatar_filename = NULL WHERE id = ? AND avatar_filename = ?', [$id, $avatar]);
             } else {
                 if (!$file || (string) $file['id'] !== (string) $id
-                    || ($action === 'missing_file' && $locations)
-                    || ($action === 'unlinked' && (!$locations || $users || $this->hasArticleLinks($id) || $this->directReference($key)))) {
+                    || $locations) {
                     $this->conflict();
                 }
                 $images = $this->db->rows('SELECT id FROM images WHERE file_id = ?' . $lock, [$id]);
@@ -151,12 +155,54 @@ final class AdminFiles
         return ['removed' => true];
     }
 
-    private function hasArticleLinks(int $fileId): bool
+    private function removeImage(int $id, string $currentKey): array
     {
-        return (bool) $this->db->one('SELECT m.page_id FROM page_media m
-            WHERE m.image_id IN (SELECT i.id FROM images i WHERE i.file_id = ?)
-               OR m.image_id IN (SELECT r.image_id FROM image_revisions r WHERE r.file_id = ?) LIMIT 1',
-            [$fileId, $fileId]);
+        $pdo = $this->db->pdo;
+        $pdo->beginTransaction();
+        $objects = [];
+        try {
+            $lock = $pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'mysql' ? ' FOR UPDATE' : '';
+            $image = $this->db->one('SELECT i.file_id, f.storage_key FROM images i
+                JOIN files f ON f.id = i.file_id WHERE i.id = ?' . $lock, [$id]);
+            if (!$image || $image['storage_key'] !== $currentKey
+                || $this->db->one('SELECT page_id FROM page_media WHERE image_id = ? LIMIT 1' . $lock, [$id])) {
+                $this->conflict();
+            }
+            $fileIds = array_unique([$image['file_id'], ...array_column(
+                $this->db->rows('SELECT file_id FROM image_revisions WHERE image_id = ?' . $lock, [$id]), 'file_id')]);
+            $this->db->run('DELETE FROM image_revisions WHERE image_id = ?', [$id]);
+            $this->db->run('DELETE FROM images WHERE id = ?', [$id]);
+
+            // The same hash can belong to other images, revisions or an avatar.
+            foreach ($fileIds as $fileId) {
+                $file = $this->db->one('SELECT storage_key FROM files WHERE id = ?' . $lock, [$fileId]);
+                $key = $file['storage_key'] ?? '';
+                if (!MediaStorage::managedKey($key)
+                    || $this->db->one('SELECT id FROM images WHERE file_id = ? LIMIT 1' . $lock, [$fileId])
+                    || $this->db->one('SELECT id FROM image_revisions WHERE file_id = ? LIMIT 1' . $lock, [$fileId])
+                    || (str_starts_with($key, 'users/') && $this->db->one(
+                        'SELECT id FROM users WHERE avatar_filename = ? LIMIT 1' . $lock, [substr($key, 6)]))
+                    || $this->directReference($key)) continue;
+                $this->db->run('DELETE FROM files WHERE id = ?', [$fileId]);
+                $objects[] = $key;
+            }
+            $pdo->commit();
+        } catch (\Throwable $error) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $error;
+        }
+
+        // Commit first so a storage failure leaves retryable orphans, never broken database references.
+        $pending = 0;
+        foreach ($objects as $key) {
+            try {
+                $this->storage->delete($key);
+            } catch (\RuntimeException $error) {
+                error_log($error->getMessage());
+                $pending++;
+            }
+        }
+        return ['removed' => true, 'pending_cleanup' => $pending];
     }
 
     private function directReference(string $key): bool
