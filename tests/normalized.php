@@ -192,17 +192,26 @@ check((int) $shownImage['pages'][0]['id'] === (int) $articleId && $shownImage['m
 $db->exec("UPDATE users SET display_name = 'Editor de teste' WHERE id = 100");
 $upload = $auth->handle('PUT', '/v1/images/Esd', [], $origin, ['data' => $a, 'base_version' => ''], $csrf);
 check($upload->status === 200 && $upload->body['data']['slug'] === 'Esd', 'Envio inicial da imagem falhou.');
+check(count($upload->body['data']['history']) === 1 && $upload->body['data']['history'][0]['url'] === $upload->body['data']['url'],
+    'O cadastro deve registrar a primeira revisão com o arquivo atual.');
+$gallery = $auth->handle('GET', '/v1/admin/images', ['sort' => 'size', 'direction' => 'asc'], $origin);
+check($gallery->status === 200 && in_array('Esd', array_column($gallery->body['data']['items'], 'slug'), true),
+    'A galeria administrativa deve incluir a imagem criada.');
+$galleryImage = array_values(array_filter($gallery->body['data']['items'], static fn ($item) => $item['slug'] === 'Esd'))[0];
+$original = $auth->handle('GET', '/v1/admin/images', ['original' => $galleryImage['id']], $origin);
+check($original->status === 200 && $original->rawBody === $gif && $original->headers['Content-Type'] === 'image/gif',
+    'O visualizador administrativo deve retornar os bytes originais.');
 check(str_contains($mailBody, 'href="https://example.test/i/Esd"'), 'E-mail deve apontar para a página da imagem.');
 $changedImage = $auth->handle('PUT', '/v1/images/Esd', [], $origin, ['data' => $b, 'base_version' => $upload->body['data']['version']], $csrf);
-check($changedImage->status === 200 && $changedImage->body['data']['history'][0]['url'] === $upload->body['data']['url'],
+check($changedImage->status === 200 && count($changedImage->body['data']['history']) === 2 && $changedImage->body['data']['history'][1]['url'] === $upload->body['data']['url'],
     'Substituição deve preservar o arquivo anterior.');
 check(array_slice($subjects, -2) === ['[img][new] Esd', '[img][update] Esd'], 'Envio e substituição devem notificar o admin.');
-$oldImage = $changedImage->body['data']['history'][0];
+$oldImage = $changedImage->body['data']['history'][1];
 check($oldImage['author'] === 'Editor de teste', 'Histórico deve mostrar o autor do arquivo anterior.');
 $restore = $auth->handle('PUT', '/v1/images/Esd', [], $origin,
     ['revision_id' => $oldImage['id'], 'base_version' => $changedImage->body['data']['version']], $csrf);
 check($restore->status === 200 && $restore->body['data']['url'] === $upload->body['data']['url']
-    && count($restore->body['data']['history']) === 2, 'Restaurar deve preservar a versão substituída.');
+    && count($restore->body['data']['history']) === 3, 'Restaurar deve preservar a versão substituída.');
 $cleared = $auth->handle('PUT', '/v1/images/Esd', [], $origin,
     ['clear' => true, 'base_version' => $restore->body['data']['version']], $csrf);
 check($cleared->status === 200 && end($subjects) === '[img][delete] Esd', 'Remoção do arquivo deve notificar o admin.');
@@ -280,7 +289,7 @@ foreach ($linkedArticles as $name => $source) {
 }
 check(count($swap['pages']) === 2, 'O reprocessamento perdeu vínculos.');
 $restoredImage = $auth->handle('PUT', $imageRoute, [], $origin,
-    ['revision_id' => $swap['history'][0]['id'], 'base_version' => $swap['version']], $csrf);
+    ['revision_id' => $swap['history'][1]['id'], 'base_version' => $swap['version']], $csrf);
 check($restoredImage->status === 200, 'Restauração da imagem vinculada falhou.');
 foreach ($linkedArticles as $name => $source) {
     $stored = $db->query("SELECT rendered_html FROM pages WHERE slug = '$name'")->fetchColumn();

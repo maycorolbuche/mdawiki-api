@@ -59,7 +59,7 @@ final class Application
             || ($normalized && $method === 'GET' && preg_match('~^/v1/public-users/[a-f0-9]{32}$~D', $path))
             || ($normalized && $method === 'POST' && in_array($path, ['/v1/profile/photo', '/v1/visits'], true))
             || ($normalized && in_array($method, ['GET', 'PUT'], true) && preg_match('~^/v1/images/[^/]+$~D', $path));
-        $adminRoute = ($this->config['normalized_editor'] ?? false) && in_array($path, ['/v1/admin/files', '/v1/admin/users', '/v1/admin/pages'], true);
+        $adminRoute = ($this->config['normalized_editor'] ?? false) && in_array($path, ['/v1/admin/files', '/v1/admin/users', '/v1/admin/pages', '/v1/admin/images'], true);
         $previewAccountRoute = $previewAccountRoute || $adminRoute;
         if ($normalized && !$previewAccountRoute
             && ($method !== 'GET' || !preg_match('~^/(?:health|v1/(?:home|search|statistics)|v1/pages(?:/[^/]+)?|media/.*)?$~D', $path))) {
@@ -71,7 +71,7 @@ final class Application
                 $dispatch = fn () => (($this->features)())->handle($method, $path, $query, $body, $csrf, $ip);
                 $mediaWrite = $method !== 'GET' && preg_match('~^/v1/(admin/(?:files|users|pages)$|media$|profile/photo$|pages/|images/)~', $path);
                 $response = $mediaWrite ? MediaStorage::withWriteLock($this->config['storage_dir'], $dispatch) : $dispatch();
-                return new Response($response->status,$response->body,$headers+$response->headers);
+                return new Response($response->status,$response->body,$headers+$response->headers,$response->rawBody);
             } catch (Throwable $error) {
                 $id=bin2hex(random_bytes(8));error_log('['.$id.'] '.$error);
                 return new Response(503,['error'=>['code'=>'service_unavailable','message'=>'Falha ao processar a solicitação.','request_id'=>$id,'details'=>ErrorDetails::describe($error,'feature_request',(bool)($this->config['debug'] ?? false),$this->config)]],$headers);
