@@ -5,7 +5,7 @@ namespace MDAWiki;
 
 final class NormalizedPageRebuild
 {
-    public static function run(Database $db, array $config): int
+    public static function run(Database $db, array $config, bool $migrateCategories = false): int
     {
         $config['normalized_editor'] = true;
         $config['normalized_read_only'] = true;
@@ -20,7 +20,7 @@ final class NormalizedPageRebuild
             foreach ($rows as $row) {
                 $after = (int) $row['id'];
                 try {
-                    $pages->rebuildCache($row['slug']);
+                    $pages->rebuildCache($row['slug'], $migrateCategories);
                     $processed++;
                 } catch (\Throwable $error) {
                     $failed++;

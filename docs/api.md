@@ -58,3 +58,5 @@ Com depuração ativa, o 404 de artigo inclui `details.slug` e `details.lookup`:
 As rotas públicas de exportação não dependem de sessão. CORS não substitui autorização: rotas de conta, fonte, histórico e administração verificam sessão e permissão no servidor, além de CSRF nas escritas.
 
 O frontend gera HTML e metatags em build, mantém o snapshot até a API responder e atualiza o conteúdo após montagem. Se a API responder 404, o snapshot é retirado. Se responder 503 ou falhar, mantém-se o snapshot com aviso e retry. Uma URL nova servida pelo `404.html` só recebe status HTTP 200 depois da próxima geração estática.
+
+No editor normalizado, `GET /v1/pages/{slug}/editor` devolve o texto sem a marcação de categorias, a lista atual em `categories` e as sugestões em `category_options`. Envie `categories` como uma lista ordenada de slugs ou nomes em `PUT /v1/pages/{slug}`. Um nome novo cria uma página de categoria vazia. Uma lista vazia remove todos os vínculos. A omissão do campo mantém a compatibilidade com textos legados.
