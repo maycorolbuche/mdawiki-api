@@ -50,7 +50,7 @@ final class WikiRenderer
             return $this->includes($text,[...$stack,$id]);
         },$source);
     }
-    public const CATEGORY_MARKUP = '~{{Categorias?:([^{}]+)}}~iu';
+    public const CATEGORY_MARKUP = '~{{Categorias?:([^{}]*)}}~iu';
 
     public static function withoutCategoryMarkup(string $source): string
     {
@@ -101,7 +101,7 @@ final class WikiRenderer
         preg_match_all('~{{([^{}]+)}}~u',$source,$templates); $meta['templates']=$templates[1];
         preg_match_all('~{{Video:([^|}]+)~iu',$source,$videos); $meta['videos']=$videos[1];
         if (preg_match('~{{{Redirecionar:([^{}]+)}}}~iu',$source,$redirect)) $meta['redirect']=str_replace(' ','_',trim($redirect[1]));
-        $html=preg_replace('~{{Categorias?:[^{}]+}}|{{{Redirecionar:[^{}]+}}}~iu','',$source);
+        $html=preg_replace('~{{Categorias?:[^{}]*}}|{{{Redirecionar:[^{}]+}}}~iu','',$source);
         $html=preg_replace('~/\*.*?\*/~s','',$html);
         // Existing TAGS rules remain data, never PHP/eval. Invalid rules fail saves.
         foreach (['PRE','POS'] as $position) {

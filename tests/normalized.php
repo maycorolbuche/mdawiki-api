@@ -500,3 +500,31 @@ $legacyRevision = array_column($legacyHistory, null, 'id')[1];
 check($legacyRevision['source'] === 'Texto' && $legacyRevision['categories'] === [
     ['key' => 'categoria-historica', 'title' => 'Categoria Histórica'],
 ], 'O histórico deve separar a marcação de categorias nas revisões legadas.');
+
+$migrationPageId = (int) $db->query("SELECT id FROM pages WHERE identifier = 'editor-de-categorias'")->fetchColumn();
+$db->prepare('UPDATE pages SET source = ? WHERE id = ?')
+    ->execute(["Antes\r\n{{Categorias:Atividades do Acervo}}\r\nDepois{{Categoria:}}", $migrationPageId]);
+$revisionMetadata = "SELECT id, revision_number, created_by, created_at FROM page_revisions
+    WHERE page_id = $migrationPageId ORDER BY id";
+$beforeMetadata = $db->query($revisionMetadata)->fetchAll(PDO::FETCH_ASSOC);
+$db->exec("UPDATE page_revisions SET category_ids = NULL WHERE page_id = $migrationPageId AND revision_number = 3");
+$migrationDb = new MDAWiki\Database($db);
+check(MDAWiki\NormalizedCategoryMigration::run($migrationDb) === 0, 'A migração de categorias deve terminar sem falhas.');
+$migratedEditor = $auth->handle('GET', $categoryPage . '/editor', [], $origin)->body['data'];
+check($migratedEditor['source'] === "Antes\r\n\r\nDepois"
+    && array_column($migratedEditor['categories'], 'title') === ['Categoria Nova', 'Atividades do Acervo'],
+    'A migração deve manter o texto restante e combinar os vínculos atuais e legados.');
+$migratedRows = $db->query("SELECT revision_number, source, category_ids FROM page_revisions
+    WHERE page_id = $migrationPageId ORDER BY revision_number")->fetchAll(PDO::FETCH_ASSOC);
+$historicalCategoryId = (string) $db->query("SELECT id FROM pages WHERE identifier = 'categoria-historica'")->fetchColumn();
+check($migratedRows[0]['source'] === 'Texto'
+    && json_decode($migratedRows[0]['category_ids'], true) === [$historicalCategoryId],
+    'A migração deve persistir as categorias extraídas da própria revisão antiga.');
+check($migratedRows[2]['category_ids'] === '[]', 'Revisões legadas sem categorias devem receber a lista vazia.');
+check($beforeMetadata === $db->query($revisionMetadata)->fetchAll(PDO::FETCH_ASSOC),
+    'A migração deve preservar os IDs, autores e datas do histórico.');
+check(MDAWiki\NormalizedCategoryMigration::run($migrationDb) === 0, 'A migração deve poder ser repetida.');
+check($migratedRows === $db->query("SELECT revision_number, source, category_ids FROM page_revisions
+    WHERE page_id = $migrationPageId ORDER BY revision_number")->fetchAll(PDO::FETCH_ASSOC)
+    && $migratedEditor === $auth->handle('GET', $categoryPage . '/editor', [], $origin)->body['data'],
+    'Reexecutar a migração deve manter os vínculos e as revisões já convertidos.');
