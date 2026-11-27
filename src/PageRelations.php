@@ -12,7 +12,7 @@ final class PageRelations
     public function replace(int $pageId, string $source, array $rendered, ?array $categoryIds = null): void
     {
         foreach (['page_categories', 'page_links', 'page_missing_links', 'page_external_links', 'page_redirects', 'page_includes',
-            'page_templates', 'page_headings', 'page_media', 'page_videos'] as $table) {
+            'page_markup_index', 'page_headings', 'page_media', 'page_videos'] as $table) {
             $this->db->run("DELETE FROM {$table} WHERE page_id = ?", [$pageId]);
         }
 
@@ -52,7 +52,7 @@ final class PageRelations
             }
         }
         foreach ($rendered['templates'] as $i => $template) {
-            $this->db->run('INSERT INTO page_templates (page_id, position, template_key, template_source) VALUES (?, ?, ?, ?)',
+            $this->db->run('INSERT INTO page_markup_index (page_id, position, template_key, template_source) VALUES (?, ?, ?, ?)',
                 [$pageId, $i + 1, self::field(Database::id($template)), self::field('{{' . $template . '}}')]);
         }
         foreach ($rendered['headings'] as $i => $heading) {

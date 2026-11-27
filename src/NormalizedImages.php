@@ -198,7 +198,7 @@ final class NormalizedImages
         }
         require_once __DIR__ . '/wiki-presentation.php';
         $templates = $this->db->rows("SELECT p.id, p.slug, t.template_source, t.template_key
-            FROM page_templates t JOIN pages p ON p.id = t.page_id
+            FROM page_markup_index t JOIN pages p ON p.id = t.page_id
             WHERE t.template_key LIKE 'imagem:%' AND p.kind <> 'image'
             AND p.kind <> 'system' ORDER BY p.id, t.position");
         $waiting = [];

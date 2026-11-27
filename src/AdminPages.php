@@ -72,7 +72,7 @@ final class AdminPages
             $this->db->run('DELETE FROM page_links WHERE target_page_id = ?', [$id]);
             foreach (['page_categories', 'page_external_links', 'page_headings', 'page_includes', 'page_links',
                 'page_media', 'page_missing_links', 'page_rebuild_queue', 'page_redirects', 'page_revisions',
-                'page_templates', 'page_videos', 'page_visits'] as $table) {
+                'page_markup_index', 'page_templates', 'page_videos', 'page_visits'] as $table) {
                 $this->db->run("DELETE FROM $table WHERE page_id = ?", [$id]);
             }
             $this->db->run('DELETE FROM pages WHERE id = ?', [$id]);
