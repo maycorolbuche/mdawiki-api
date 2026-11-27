@@ -82,16 +82,49 @@ final class NormalizedPages
         $user = $this->accounts->current(true);
         $page = $this->page($slug);
         $rows = $this->db->rows('SELECT r.revision_number AS id, r.title, COALESCE(r.source, \'\') AS source,
-            r.created_at, COALESCE(NULLIF(u.display_name, \'\'), u.name) AS author, u.avatar_filename AS FOTO, CASE WHEN u.is_active = 1 THEN u.public_id END AS author_profile_id
+            r.category_ids, r.created_at, COALESCE(NULLIF(u.display_name, \'\'), u.name) AS author, u.avatar_filename AS FOTO, CASE WHEN u.is_active = 1 THEN u.public_id END AS author_profile_id
             FROM page_revisions r LEFT JOIN users u ON u.id = r.created_by
             WHERE r.page_id = ? AND r.revision_number < ? AND COALESCE(r.access_level_id, 1) <= ?
             AND COALESCE(r.is_expired, 0) = 0 ORDER BY r.revision_number DESC LIMIT 51',
             [$page['id'], $before, max(1, (int) $user['NIVEL'])]);
-        $revisions = array_map(function (array $row): array {
+        $visibleRows = array_slice($rows, 0, 50);
+        $categoryIds = [];
+        foreach ($visibleRows as &$row) {
+            $row['category_ids'] = $row['category_ids'] === null
+                ? null : json_decode($row['category_ids'], true, flags: JSON_THROW_ON_ERROR);
+            array_push($categoryIds, ...($row['category_ids'] ?? []));
+        }
+        unset($row);
+        $categoryNames = [];
+        foreach (array_chunk(array_values(array_unique($categoryIds)), 500) as $chunk) {
+            $placeholders = implode(',', array_fill(0, count($chunk), '?'));
+            $names = $this->db->rows("SELECT id, identifier AS `key`, COALESCE(title, slug) AS title
+                FROM pages WHERE id IN ($placeholders)", $chunk);
+            $categoryNames += array_column($names, null, 'id');
+        }
+        $revisions = array_map(function (array $row) use ($categoryNames): array {
             $row['author_photo'] = $this->accounts->profile($row)['photo'];
-            unset($row['FOTO']);
+            $categories = [];
+            if ($row['category_ids'] === null) {
+                foreach (WikiRenderer::legacyCategories($row['source']) as $category) {
+                    try {
+                        [, $key] = PageSlugs::fromTitle($category['slug'], '');
+                    } catch (\RuntimeException) {
+                        $key = $category['id'];
+                    }
+                    $categories[$key] = ['key' => $key, 'title' => $category['title']];
+                }
+            } else {
+                foreach ($row['category_ids'] as $id) {
+                    $category = $categoryNames[$id] ?? ['key' => "deleted:$id", 'title' => "Categoria excluída (#$id)"];
+                    $categories[$category['key']] = ['key' => $category['key'], 'title' => $category['title']];
+                }
+            }
+            $row['categories'] = array_values($categories);
+            $row['source'] = WikiRenderer::withoutCategoryMarkup($row['source']);
+            unset($row['FOTO'], $row['category_ids']);
             return $row;
-        }, array_slice($rows, 0, 50));
+        }, $visibleRows);
         return ['title' => $page['title'], 'revisions' => $revisions,
             'next_cursor' => count($rows) > 50 ? (int) end($revisions)['id'] : null,
             'base_version' => $this->version($page)];

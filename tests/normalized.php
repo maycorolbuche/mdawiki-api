@@ -485,3 +485,18 @@ check($omitted->status === 200, 'Salvar apenas o texto deve continuar funcionand
 $updated = $auth->handle('GET', $categoryPage . '/editor', [], $origin)->body['data'];
 check(array_column($updated['categories'], 'title') === ['Categoria Nova'],
     'Omitir categorias deve preservar os vínculos já gravados.');
+
+$categoryHistory = $auth->handle('GET', $categoryPage . '/history', [], $origin)->body['data']['revisions'];
+$byRevision = array_column($categoryHistory, null, 'id');
+check($byRevision[$categorized->body['data']['revision']]['categories'] === [
+    ['key' => 'categoria-nova', 'title' => 'Categoria Nova'],
+], 'O histórico deve mostrar as categorias da revisão, mesmo após alterações.');
+check($byRevision[$cleared->body['data']['revision']]['categories'] === [],
+    'O histórico deve preservar uma lista de categorias vazia.');
+$db->exec("UPDATE page_revisions r JOIN pages p ON p.id = r.page_id
+    SET r.category_ids = NULL WHERE p.identifier = 'editor-de-categorias' AND r.revision_number = 1");
+$legacyHistory = $auth->handle('GET', $categoryPage . '/history', [], $origin)->body['data']['revisions'];
+$legacyRevision = array_column($legacyHistory, null, 'id')[1];
+check($legacyRevision['source'] === 'Texto' && $legacyRevision['categories'] === [
+    ['key' => 'categoria-historica', 'title' => 'Categoria Histórica'],
+], 'O histórico deve separar a marcação de categorias nas revisões legadas.');
