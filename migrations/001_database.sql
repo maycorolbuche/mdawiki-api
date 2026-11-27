@@ -251,6 +251,7 @@ CREATE TABLE IF NOT EXISTS `page_revisions` (
   `slug` varchar(250) COLLATE utf8mb4_unicode_ci NOT NULL,
   `title` varchar(250) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `source` longtext COLLATE utf8mb4_unicode_ci,
+  `category_ids` json DEFAULT NULL,
   `rendered_html` longtext COLLATE utf8mb4_unicode_ci,
   `is_searchable` tinyint(1) DEFAULT NULL,
   `access_level_id` int(11) DEFAULT NULL,
