@@ -440,3 +440,39 @@ check((int) $db->query("SELECT COUNT(*) FROM pages WHERE id = $destinationId")->
     'Hard deletion must remove the page and its revisions.');
 check((int) $db->query("SELECT COUNT(*) FROM page_missing_links WHERE href = '/destino-ausente'")->fetchColumn() === 2,
     'Links from surviving pages must retain their missing destination.');
+
+$categoryPage = '/v1/pages/Editor-De-Categorias';
+$initial = $auth->handle('PUT', $categoryPage, [], $origin, [
+    'title' => 'Editor de categorias',
+    'source' => '{{Categorias:Categoria Histórica}}Texto',
+    'base_version' => '',
+], $csrf);
+check($initial->status === 200, 'Editor antigo deve poder salvar as categorias no texto.');
+$editor = $auth->handle('GET', $categoryPage . '/editor', [], $origin)->body['data'];
+check($editor['source'] === 'Texto' && array_column($editor['categories'], 'title') === ['Categoria Histórica'],
+    'O editor deve separar categorias e texto legado.');
+check(in_array('Categoria Histórica', array_column($editor['category_options'], 'title'), true),
+    'O editor deve sugerir categorias existentes.');
+$categorized = $auth->handle('PUT', $categoryPage, [], $origin, [
+    'title' => $editor['title'], 'source' => $editor['source'],
+    'categories' => ['Categoria Nova', 'Categória-Nova'], 'base_version' => $editor['base_version'],
+], $csrf);
+check($categorized->status === 200, 'O editor deve permitir criar categorias e deduplicar suas variantes.');
+$updated = $auth->handle('GET', $categoryPage . '/editor', [], $origin)->body['data'];
+check(array_column($updated['categories'], 'title') === ['Categoria Nova'], 'Categoria nova não foi vinculada.');
+$rebuilt = $auth->handle('POST', $categoryPage . '/rebuild', [], $origin, [], $csrf);
+check($rebuilt->status === 200, 'Reprocessamento de artigo com vínculo independente falhou.');
+$updated = $auth->handle('GET', $categoryPage . '/editor', [], $origin)->body['data'];
+check(array_column($updated['categories'], 'title') === ['Categoria Nova'], 'Rebuild apagou categorias editadas.');
+$cleared = $auth->handle('PUT', $categoryPage, [], $origin, [
+    'title' => $updated['title'], 'source' => $updated['source'],
+    'categories' => [], 'base_version' => $updated['base_version'],
+], $csrf);
+check($cleared->status === 200 && $cleared->body['data']['revision'] === $categorized->body['data']['revision'] + 1,
+    'Alterar somente categorias deve criar uma revisão.');
+$restored = $auth->handle('POST', $categoryPage . '/restore', [], $origin, [
+    'revision' => $categorized->body['data']['revision'], 'base_version' => $cleared->body['data']['base_version'],
+], $csrf);
+check($restored->status === 200, 'Restauração da revisão com categorias falhou.');
+$updated = $auth->handle('GET', $categoryPage . '/editor', [], $origin)->body['data'];
+check(array_column($updated['categories'], 'title') === ['Categoria Nova'], 'A restauração deve recuperar as categorias da revisão.');
