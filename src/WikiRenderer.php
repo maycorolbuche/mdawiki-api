@@ -50,6 +50,30 @@ final class WikiRenderer
             return $this->includes($text,[...$stack,$id]);
         },$source);
     }
+    public const CATEGORY_MARKUP = '~{{Categorias?:([^{}]+)}}~iu';
+
+    public static function withoutCategoryMarkup(string $source): string
+    {
+        return preg_replace(self::CATEGORY_MARKUP, '', $source);
+    }
+
+    public static function legacyCategories(string $source): array
+    {
+        preg_match_all(self::CATEGORY_MARKUP, $source, $matches);
+        $categories = [];
+        foreach ($matches[1] ?? [] as $values) {
+            foreach (explode(',', $values) as $value) {
+                $value = trim($value);
+                if ($value !== '') {
+                    $id = Database::id($value);
+                    $categories[$id] = ['id' => $id, 'slug' => str_replace(' ', '_', $value),
+                        'title' => str_replace('_', ' ', $value)];
+                }
+            }
+        }
+        return $categories;
+    }
+
     public function render(string $source, string $slug, bool $rawHtml=false, ?int $pageId = null): array
     {
         $rendered = $this->renderDocument($source, $slug, $rawHtml, $pageId);
@@ -73,8 +97,7 @@ final class WikiRenderer
         $source=str_replace(["\r\n","\r"],"\n",$source);
         $source=$this->includes($source,[Database::id($slug)]);
         $meta=['categories'=>[],'links'=>[],'external_links'=>[],'includes'=>[],'templates'=>[],'images'=>[],'videos'=>[],'headings'=>[],'redirect'=>null];
-        preg_match_all('~{{Categorias?:([^{}]+)}}~iu',$source,$categories);
-        foreach ($categories[1] as $values) foreach(explode(',',$values) as $value) { $value=trim($value); if ($value!=='') $meta['categories'][Database::id($value)]=['id'=>Database::id($value),'slug'=>str_replace(' ','_',$value),'title'=>str_replace('_',' ',$value)]; }
+        $meta['categories'] = self::legacyCategories($source);
         preg_match_all('~{{([^{}]+)}}~u',$source,$templates); $meta['templates']=$templates[1];
         preg_match_all('~{{Video:([^|}]+)~iu',$source,$videos); $meta['videos']=$videos[1];
         if (preg_match('~{{{Redirecionar:([^{}]+)}}}~iu',$source,$redirect)) $meta['redirect']=str_replace(' ','_',trim($redirect[1]));
