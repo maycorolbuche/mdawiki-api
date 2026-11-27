@@ -15,7 +15,7 @@ try {
         throw new RuntimeException('Configure DB_DATABASE para a base migrada.');
     }
     $pdo->exec('SET NAMES utf8mb4');
-    exit(NormalizedPageRebuild::run(new Database($pdo), $config) > 0 ? 1 : 0);
+    exit(NormalizedPageRebuild::run(new Database($pdo), $config, in_array('--migrate-categories', $argv, true)) > 0 ? 1 : 0);
 } catch (Throwable $error) {
     fwrite(STDERR, $error->getMessage() . "\n");
     exit(1);

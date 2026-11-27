@@ -217,6 +217,7 @@ $cleared = $auth->handle('PUT', '/v1/images/Esd', [], $origin,
 check($cleared->status === 200 && end($subjects) === '[img][delete] Esd', 'Remoção do arquivo deve notificar o admin.');
 check($auth->handle('GET', '/v1/pages/I/editor', [], $origin)->status === 422, 'Endereço de um caractere deve ser reservado.');
 $change['source'] = 'Sem vínculos';
+$change['categories'] = [];
 $change['base_version'] = $rebuilt->body['data']['base_version'];
 check($auth->handle('PUT', $slug, [], $origin, $change, $csrf)->status === 200, 'Remoção dos vínculos falhou.');
 foreach (['page_categories', 'page_media', 'page_links', 'page_templates', 'page_headings', 'page_external_links', 'page_videos'] as $table) {
@@ -440,3 +441,90 @@ check((int) $db->query("SELECT COUNT(*) FROM pages WHERE id = $destinationId")->
     'Hard deletion must remove the page and its revisions.');
 check((int) $db->query("SELECT COUNT(*) FROM page_missing_links WHERE href = '/destino-ausente'")->fetchColumn() === 2,
     'Links from surviving pages must retain their missing destination.');
+
+$categoryPage = '/v1/pages/Editor-De-Categorias';
+$initial = $auth->handle('PUT', $categoryPage, [], $origin, [
+    'title' => 'Editor de categorias',
+    'source' => '{{Categorias:Categoria Histórica}}Texto',
+    'base_version' => '',
+], $csrf);
+check($initial->status === 200, 'Editor antigo deve poder salvar as categorias no texto.');
+$editor = $auth->handle('GET', $categoryPage . '/editor', [], $origin)->body['data'];
+check($editor['source'] === 'Texto' && array_column($editor['categories'], 'title') === ['Categoria Histórica'],
+    'O editor deve separar categorias e texto legado.');
+check(in_array('Categoria Histórica', array_column($editor['category_options'], 'title'), true),
+    'O editor deve sugerir categorias existentes.');
+$categorized = $auth->handle('PUT', $categoryPage, [], $origin, [
+    'title' => $editor['title'], 'source' => $editor['source'],
+    'categories' => ['Categoria Nova', 'Categória-Nova'], 'base_version' => $editor['base_version'],
+], $csrf);
+check($categorized->status === 200, 'O editor deve permitir criar categorias e deduplicar suas variantes.');
+$updated = $auth->handle('GET', $categoryPage . '/editor', [], $origin)->body['data'];
+check(array_column($updated['categories'], 'title') === ['Categoria Nova'], 'Categoria nova não foi vinculada.');
+$rebuilt = $auth->handle('POST', $categoryPage . '/rebuild', [], $origin, [], $csrf);
+check($rebuilt->status === 200, 'Reprocessamento de artigo com vínculo independente falhou.');
+$updated = $auth->handle('GET', $categoryPage . '/editor', [], $origin)->body['data'];
+check(array_column($updated['categories'], 'title') === ['Categoria Nova'], 'Rebuild apagou categorias editadas.');
+$cleared = $auth->handle('PUT', $categoryPage, [], $origin, [
+    'title' => $updated['title'], 'source' => $updated['source'],
+    'categories' => [], 'base_version' => $updated['base_version'],
+], $csrf);
+check($cleared->status === 200 && $cleared->body['data']['revision'] === $categorized->body['data']['revision'] + 1,
+    'Alterar somente categorias deve criar uma revisão.');
+$restored = $auth->handle('POST', $categoryPage . '/restore', [], $origin, [
+    'revision' => $categorized->body['data']['revision'], 'base_version' => $cleared->body['data']['base_version'],
+], $csrf);
+check($restored->status === 200, 'Restauração da revisão com categorias falhou.');
+$updated = $auth->handle('GET', $categoryPage . '/editor', [], $origin)->body['data'];
+check(array_column($updated['categories'], 'title') === ['Categoria Nova'], 'A restauração deve recuperar as categorias da revisão.');
+$omitted = $auth->handle('PUT', $categoryPage, [], $origin, [
+    'title' => $updated['title'], 'source' => 'Texto atualizado',
+    'base_version' => $updated['base_version'],
+], $csrf);
+check($omitted->status === 200, 'Salvar apenas o texto deve continuar funcionando.');
+$updated = $auth->handle('GET', $categoryPage . '/editor', [], $origin)->body['data'];
+check(array_column($updated['categories'], 'title') === ['Categoria Nova'],
+    'Omitir categorias deve preservar os vínculos já gravados.');
+
+$categoryHistory = $auth->handle('GET', $categoryPage . '/history', [], $origin)->body['data']['revisions'];
+$byRevision = array_column($categoryHistory, null, 'id');
+check($byRevision[$categorized->body['data']['revision']]['categories'] === [
+    ['key' => 'categoria-nova', 'title' => 'Categoria Nova'],
+], 'O histórico deve mostrar as categorias da revisão, mesmo após alterações.');
+check($byRevision[$cleared->body['data']['revision']]['categories'] === [],
+    'O histórico deve preservar uma lista de categorias vazia.');
+$db->exec("UPDATE page_revisions r JOIN pages p ON p.id = r.page_id
+    SET r.category_ids = NULL WHERE p.identifier = 'editor-de-categorias' AND r.revision_number = 1");
+$legacyHistory = $auth->handle('GET', $categoryPage . '/history', [], $origin)->body['data']['revisions'];
+$legacyRevision = array_column($legacyHistory, null, 'id')[1];
+check($legacyRevision['source'] === 'Texto' && $legacyRevision['categories'] === [
+    ['key' => 'categoria-historica', 'title' => 'Categoria Histórica'],
+], 'O histórico deve separar a marcação de categorias nas revisões legadas.');
+
+$migrationPageId = (int) $db->query("SELECT id FROM pages WHERE identifier = 'editor-de-categorias'")->fetchColumn();
+$db->prepare('UPDATE pages SET source = ? WHERE id = ?')
+    ->execute(["Antes\r\n{{Categorias:Atividades do Acervo}}\r\nDepois{{Categoria:}}", $migrationPageId]);
+$revisionMetadata = "SELECT id, revision_number, created_by, created_at FROM page_revisions
+    WHERE page_id = $migrationPageId ORDER BY id";
+$beforeMetadata = $db->query($revisionMetadata)->fetchAll(PDO::FETCH_ASSOC);
+$db->exec("UPDATE page_revisions SET category_ids = NULL WHERE page_id = $migrationPageId AND revision_number = 3");
+$migrationDb = new MDAWiki\Database($db);
+check(MDAWiki\NormalizedCategoryMigration::run($migrationDb) === 0, 'A migração de categorias deve terminar sem falhas.');
+$migratedEditor = $auth->handle('GET', $categoryPage . '/editor', [], $origin)->body['data'];
+check($migratedEditor['source'] === "Antes\r\n\r\nDepois"
+    && array_column($migratedEditor['categories'], 'title') === ['Categoria Nova', 'Atividades do Acervo'],
+    'A migração deve manter o texto restante e combinar os vínculos atuais e legados.');
+$migratedRows = $db->query("SELECT revision_number, source, category_ids FROM page_revisions
+    WHERE page_id = $migrationPageId ORDER BY revision_number")->fetchAll(PDO::FETCH_ASSOC);
+$historicalCategoryId = (string) $db->query("SELECT id FROM pages WHERE identifier = 'categoria-historica'")->fetchColumn();
+check($migratedRows[0]['source'] === 'Texto'
+    && json_decode($migratedRows[0]['category_ids'], true) === [$historicalCategoryId],
+    'A migração deve persistir as categorias extraídas da própria revisão antiga.');
+check($migratedRows[2]['category_ids'] === '[]', 'Revisões legadas sem categorias devem receber a lista vazia.');
+check($beforeMetadata === $db->query($revisionMetadata)->fetchAll(PDO::FETCH_ASSOC),
+    'A migração deve preservar os IDs, autores e datas do histórico.');
+check(MDAWiki\NormalizedCategoryMigration::run($migrationDb) === 0, 'A migração deve poder ser repetida.');
+check($migratedRows === $db->query("SELECT revision_number, source, category_ids FROM page_revisions
+    WHERE page_id = $migrationPageId ORDER BY revision_number")->fetchAll(PDO::FETCH_ASSOC)
+    && $migratedEditor === $auth->handle('GET', $categoryPage . '/editor', [], $origin)->body['data'],
+    'Reexecutar a migração deve manter os vínculos e as revisões já convertidos.');

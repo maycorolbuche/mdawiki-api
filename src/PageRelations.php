@@ -9,21 +9,17 @@ final class PageRelations
     {
     }
 
-    public function replace(int $pageId, string $source, array $rendered): void
+    public function replace(int $pageId, string $source, array $rendered, ?array $categoryIds = null): void
     {
         foreach (['page_categories', 'page_links', 'page_missing_links', 'page_external_links', 'page_redirects', 'page_includes',
             'page_templates', 'page_headings', 'page_media', 'page_videos'] as $table) {
             $this->db->run("DELETE FROM {$table} WHERE page_id = ?", [$pageId]);
         }
 
-        $categories = [];
-        foreach ($rendered['categories'] as $category) {
-            $id = $this->category($category['title']);
-            if ($id !== null && !isset($categories[$id])) {
-                $this->db->run('INSERT INTO page_categories (page_id, category_id, position) VALUES (?, ?, ?)',
-                    [$pageId, $id, count($categories) + 1]);
-                $categories[$id] = true;
-            }
+        $categoryIds ??= $this->categoryIds(array_column($rendered['categories'], 'title'));
+        foreach ($categoryIds as $position => $id) {
+            $this->db->run('INSERT INTO page_categories (page_id, category_id, position) VALUES (?, ?, ?)',
+                [$pageId, $id, $position + 1]);
         }
         foreach ($rendered['links'] as $i => $link) {
             $id = $this->target($link['slug']);
@@ -114,11 +110,31 @@ final class PageRelations
         }
     }
 
+    public function categories(int $pageId): array
+    {
+        return $this->db->rows('SELECT p.id, p.slug, COALESCE(p.title, p.slug) AS title
+            FROM page_categories c JOIN pages p ON p.id = c.category_id
+            WHERE c.page_id = ? ORDER BY c.position, c.id', [$pageId]);
+    }
+
+    public function categoryIds(array $names): array
+    {
+        $ids = [];
+        foreach ($names as $name) {
+            $id = $this->category($name);
+            $ids[$id] = (string) $id;
+        }
+        return array_values($ids);
+    }
+
     private function category(string $title): int
     {
-        $existing = $this->target($title);
+        $existing = NormalizedPageRepository::lookup($this->db, $title);
         if ($existing !== null) {
-            return $existing;
+            if ($existing['kind'] === 'image' || $existing['kind'] === 'system') {
+                throw new HttpError(422, 'invalid_category', 'Informe uma página válida para a categoria.');
+            }
+            return (int) $existing['id'];
         }
         try {
             [$slug, $identifier] = PageSlugs::fromTitle($title, '');

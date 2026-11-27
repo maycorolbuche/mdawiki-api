@@ -26,3 +26,17 @@ Uploads novos aceitam PNG, JPEG, GIF, WebP e SVG sanitizado até 5 MB (20 megapi
 `php tests/run.php` verifica o contrato público. `php tests/features.php` usa SQLite em memória. O CI também executa os fluxos no MySQL 8 com as definições originais das tabelas (incluindo MyISAM, latin1 e SENHA varchar(32)), sem usar dados de produção. Os testes cobrem autenticação, CSRF, permissões, hashes, e-mail simulado, restauração, relações, templates e consultas das listas. Credenciais SMTP e bytes dos registros reais ainda precisam da validação na hospedagem.
 
 Aplique [a migration 002](../migrations/002_drop_pages_legacy_identifier.sql) após a 001 em instalações novas, ou uma vez na base existente antes de publicar a versão correspondente da API. Em produção, pause o tráfego da API durante a troca, pois a versão anterior depende da coluna removida.
+
+### Categorias no editor
+
+Em bases existentes, aplique [a migration 003](../migrations/003_page_revision_categories.sql) antes de publicar a API. O schema 001 de instalações novas já inclui essa coluna. Publique a API antes do frontend.
+
+Após aplicar a migration 003, faça backup da base normalizada e pause as edições durante a conversão. Na raiz da API, com `DB_DATABASE` apontando para essa base, execute:
+
+```sh
+php bin/migrate-page-categories.php
+```
+
+A rotina migra a página atual e todo o seu histórico em uma transação por página. As categorias atuais ficam em `page_categories` e cada revisão recebe seus próprios IDs em `page_revisions.category_ids`. Revisões sem categorias recebem `[]`. A rotina preserva as categorias já registradas, os demais trechos do texto, autores, datas e números de revisão. Categorias válidas que ainda não têm página são criadas pela mesma regra do editor.
+
+A saída informa o progresso e identifica as páginas com falha. O comando continua com as demais páginas e retorna código 1 se houver falhas. Depois de tratar a causa informada, execute novamente para concluir a conversão.
