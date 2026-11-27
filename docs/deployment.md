@@ -31,4 +31,12 @@ Aplique [a migration 002](../migrations/002_drop_pages_legacy_identifier.sql) ap
 
 Em bases existentes, aplique [a migration 003](../migrations/003_page_revision_categories.sql) antes de publicar a API. O schema 001 de instalações novas já inclui essa coluna. Publique a API antes do frontend.
 
-Para remover a marcação de categorias dos artigos existentes, execute `php bin/rebuild-normalized-pages.php --migrate-categories` na base normalizada. O comando combina os vínculos existentes com os encontrados no texto e remove a marcação na mesma transação por página. Ele pode ser executado novamente caso alguma página falhe. As revisões antigas conservam o texto original para permitir a restauração de suas categorias.
+Após aplicar a migration 003, faça backup da base normalizada e pause as edições durante a conversão. Na raiz da API, com `DB_DATABASE` apontando para essa base, execute:
+
+```sh
+php bin/migrate-page-categories.php
+```
+
+A rotina migra a página atual e todo o seu histórico em uma transação por página. As categorias atuais ficam em `page_categories` e cada revisão recebe seus próprios IDs em `page_revisions.category_ids`. Revisões sem categorias recebem `[]`. A rotina preserva as categorias já registradas, os demais trechos do texto, autores, datas e números de revisão. Categorias válidas que ainda não têm página são criadas pela mesma regra do editor.
+
+A saída informa o progresso e identifica as páginas com falha. O comando continua com as demais páginas e retorna código 1 se houver falhas. Depois de tratar a causa informada, execute novamente para concluir a conversão.
