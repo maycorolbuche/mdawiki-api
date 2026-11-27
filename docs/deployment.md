@@ -40,3 +40,9 @@ php bin/migrate-page-categories.php
 A rotina migra a página atual e todo o seu histórico em uma transação por página. As categorias atuais ficam em `page_categories` e cada revisão recebe seus próprios IDs em `page_revisions.category_ids`. Revisões sem categorias recebem `[]`. A rotina preserva as categorias já registradas, os demais trechos do texto, autores, datas e números de revisão. Categorias válidas que ainda não têm página são criadas pela mesma regra do editor.
 
 A saída informa o progresso e identifica as páginas com falha. O comando continua com as demais páginas e retorna código 1 se houver falhas. Depois de tratar a causa informada, execute novamente para concluir a conversão.
+
+### Templates estruturados
+
+Em bases existentes aplique `004_structured_page_templates.sql` antes da API nova, com as edições pausadas durante a troca. O schema 001 já inclui a estrutura para instalações novas. A migration reaproveita o índice anterior como `page_markup_index`, usado pelo reprocessamento quando uma imagem é cadastrada. O novo `page_templates` guarda os cards, com uma linha por tipo e página. `page_revisions.templates` guarda a lista de cada revisão nova.
+
+A migration altera apenas a estrutura. Os códigos legados presentes em páginas e revisões continuam no texto e continuam sendo renderizados. A conversão do acervo será tratada em uma etapa própria. Desambiguação, Mais Links, Referências e os demais templates seguem o fluxo legado.

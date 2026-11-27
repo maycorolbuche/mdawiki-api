@@ -47,6 +47,9 @@ final class WikiRenderer
             $text=$p['CONTEUDO_CODE'] ?? '';
             if ($section==='!') $text=explode('==',$text,2)[0];
             elseif ($section!=='') { $parts=explode('=='.$section.'==',$text,2); $text=explode('==',$parts[1] ?? '',2)[0]; }
+            if (isset($row['id']) && ($section === '' || $section === '!')) {
+                $text = PageTemplates::renderSource((new PageTemplates($this->db))->load((int) $row['id'])) . $text;
+            }
             return $this->includes($text,[...$stack,$id]);
         },$source);
     }

@@ -252,6 +252,7 @@ CREATE TABLE IF NOT EXISTS `page_revisions` (
   `title` varchar(250) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `source` longtext COLLATE utf8mb4_unicode_ci,
   `category_ids` json DEFAULT NULL,
+  `templates` json DEFAULT NULL,
   `rendered_html` longtext COLLATE utf8mb4_unicode_ci,
   `is_searchable` tinyint(1) DEFAULT NULL,
   `access_level_id` int(11) DEFAULT NULL,
@@ -265,7 +266,7 @@ CREATE TABLE IF NOT EXISTS `page_revisions` (
   CONSTRAINT `page_revisions_ibfk_2` FOREIGN KEY (`page_id`) REFERENCES `pages` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS `page_templates` (
+CREATE TABLE IF NOT EXISTS `page_markup_index` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `page_id` bigint(20) unsigned NOT NULL,
   `position` int(11) NOT NULL,
@@ -273,7 +274,17 @@ CREATE TABLE IF NOT EXISTS `page_templates` (
   `template_source` varchar(250) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `page_id` (`page_id`),
-  CONSTRAINT `page_templates_ibfk_1` FOREIGN KEY (`page_id`) REFERENCES `pages` (`id`)
+  CONSTRAINT `page_markup_index_ibfk_1` FOREIGN KEY (`page_id`) REFERENCES `pages` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `page_templates` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `page_id` bigint(20) unsigned NOT NULL,
+  `template` varchar(40) NOT NULL,
+  `meta` json NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `page_template_type` (`page_id`, `template`),
+  CONSTRAINT `page_templates_page_fk` FOREIGN KEY (`page_id`) REFERENCES `pages` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `page_videos` (

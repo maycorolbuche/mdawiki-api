@@ -146,7 +146,7 @@ foreach (['page_media' => 'image_id', 'page_links' => 'target_page_id'] as $tabl
     check($db->query("SELECT $column FROM $table WHERE page_id = $articleId")->fetchAll(PDO::FETCH_COLUMN) === [$table === 'page_media' ? $imageId : $targetId],
         "Vínculo por ID incorreto em $table.");
 }
-foreach (['page_templates', 'page_headings', 'page_external_links', 'page_videos'] as $table) {
+foreach (['page_markup_index', 'page_headings', 'page_external_links', 'page_videos'] as $table) {
     check((int) $db->query("SELECT COUNT(*) FROM $table WHERE page_id = $articleId")->fetchColumn() > 0,
         "Salvamento não preencheu $table.");
 }
@@ -220,7 +220,7 @@ $change['source'] = 'Sem vínculos';
 $change['categories'] = [];
 $change['base_version'] = $rebuilt->body['data']['base_version'];
 check($auth->handle('PUT', $slug, [], $origin, $change, $csrf)->status === 200, 'Remoção dos vínculos falhou.');
-foreach (['page_categories', 'page_media', 'page_links', 'page_templates', 'page_headings', 'page_external_links', 'page_videos'] as $table) {
+foreach (['page_categories', 'page_media', 'page_links', 'page_markup_index', 'page_headings', 'page_external_links', 'page_videos'] as $table) {
     check((int) $db->query("SELECT COUNT(*) FROM $table WHERE page_id = $articleId")->fetchColumn() === 0, "Vínculos antigos em $table.");
 }
 $accountService = new MDAWiki\Accounts(new MDAWiki\Database($db), $session, $authConfig,
@@ -528,3 +528,39 @@ check($migratedRows === $db->query("SELECT revision_number, source, category_ids
     WHERE page_id = $migrationPageId ORDER BY revision_number")->fetchAll(PDO::FETCH_ASSOC)
     && $migratedEditor === $auth->handle('GET', $categoryPage . '/editor', [], $origin)->body['data'],
     'Reexecutar a migração deve manter os vínculos e as revisões já convertidos.');
+
+$templatePage = '/v1/pages/Modelo-Estruturado';
+$personTemplate = ['template' => 'person', 'meta' => ['display_name' => 'Pessoa de Teste',
+    'positions' => [['title' => 'Cargo A', 'start_date' => '2001', 'end_date' => '2003'], ['title' => 'Cargo B']]]];
+$honorTemplate = ['template' => 'adventurer_honor', 'meta' => ['area_code' => 'AM', 'code' => '015', 'icon' => 'Sample', 'is_obsolete' => true]];
+$models = [$personTemplate, $honorTemplate];
+$draft = ['source' => 'Texto sem marcações', 'templates' => $models];
+$previewed = $auth->handle('POST', $templatePage . '/preview', [], $origin, $draft, $csrf);
+check($previewed->status === 200 && str_contains($previewed->body['data']['html'], 'Cargo B')
+    && str_contains($previewed->body['data']['html'], '2001 a 2003'), 'A prévia deve renderizar todos os cargos.');
+$created = $auth->handle('PUT', $templatePage, [], $origin, $draft + ['title' => 'Modelo', 'base_version' => ''], $csrf);
+check($created->status === 200, 'A página deve aceitar templates de tipos diferentes.');
+$article = $auth->handle('GET', $templatePage, [], $origin)->body['data'];
+check(str_contains($article['html'], '015') && str_contains($article['html'], 'Descontinuada')
+    && str_contains($article['html'], 'Cargo A'), 'Os templates devem ser publicados com o artigo.');
+$templateEditor = $auth->handle('GET', $templatePage . '/editor', [], $origin)->body['data'];
+check($templateEditor['source'] === $draft['source']
+    && array_column($templateEditor['templates'], 'template') === ['adventurer_honor', 'person'],
+    'O editor deve receber o texto original e os templates na ordem definida.');
+$duplicate = $auth->handle('PUT', $templatePage, [], $origin,
+    ['title' => 'Modelo', 'source' => $draft['source'], 'base_version' => $templateEditor['base_version'],
+        'templates' => [$honorTemplate, $honorTemplate]], $csrf);
+check($duplicate->status === 422, 'A API deve rejeitar dois cards do mesmo tipo.');
+$removed = $auth->handle('PUT', $templatePage, [], $origin, [
+    'title' => 'Modelo', 'source' => $draft['source'], 'templates' => [],
+    'base_version' => $templateEditor['base_version'],
+], $csrf);
+check($removed->status === 200 && $removed->body['data']['revision'] === 2, 'Remover somente os templates deve gerar revisão.');
+$templateHistory = $auth->handle('GET', $templatePage . '/history', [], $origin)->body['data']['revisions'];
+check(count($templateHistory[1]['templates']) === 2 && $templateHistory[0]['templates'] === [], 'O histórico deve manter snapshots dos templates.');
+$templateRestore = $auth->handle('POST', $templatePage . '/restore', [], $origin, [
+    'revision' => 1, 'base_version' => $removed->body['data']['base_version'],
+], $csrf);
+check($templateRestore->status === 200
+    && count($auth->handle('GET', $templatePage . '/editor', [], $origin)->body['data']['templates']) === 2,
+    'A restauração deve recuperar todos os cards.');

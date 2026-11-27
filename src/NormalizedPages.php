@@ -27,7 +27,8 @@ final class NormalizedPages
     private function version(?array $page): string
     {
         return $page === null ? '' : hash('sha256', serialize([$page['id'], $page['title'], $page['source'], $page['updated_at'], $page['updated_by'],
-            array_column((new PageRelations($this->db))->categories((int) $page['id']), 'id')]));
+            array_column((new PageRelations($this->db))->categories((int) $page['id']), 'id'),
+            (new PageTemplates($this->db))->load((int) $page['id'])]));
     }
 
     private function editorAccount(): array
@@ -51,7 +52,7 @@ final class NormalizedPages
             [$canonical] = $this->newPageAddress($slug);
             return ['slug' => $canonical, 'title' => str_replace(['-', '_'], ' ', $canonical), 'source' => '',
                 'base_version' => '', 'format' => 'wiki', 'exists' => false, 'media' => false,
-                'categories' => [], 'category_options' => $options];
+                'categories' => [], 'category_options' => $options, 'templates' => []];
         }
         $source = $page['source'] ?? '';
         $categories = (new PageRelations($this->db))->categories((int) $page['id']);
@@ -72,6 +73,7 @@ final class NormalizedPages
             'slug' => $page['slug'], 'title' => $page['title'], 'source' => WikiRenderer::withoutCategoryMarkup($source),
             'categories' => $categories,
             'category_options' => $options,
+            'templates' => (new PageTemplates($this->db))->load((int) $page['id']),
             'base_version' => $this->version($page), 'format' => 'wiki',
             'exists' => true, 'media' => false,
         ];
@@ -82,7 +84,7 @@ final class NormalizedPages
         $user = $this->accounts->current(true);
         $page = $this->page($slug);
         $rows = $this->db->rows('SELECT r.revision_number AS id, r.title, COALESCE(r.source, \'\') AS source,
-            r.category_ids, r.created_at, COALESCE(NULLIF(u.display_name, \'\'), u.name) AS author, u.avatar_filename AS FOTO, CASE WHEN u.is_active = 1 THEN u.public_id END AS author_profile_id
+            r.category_ids, r.templates, r.created_at, COALESCE(NULLIF(u.display_name, \'\'), u.name) AS author, u.avatar_filename AS FOTO, CASE WHEN u.is_active = 1 THEN u.public_id END AS author_profile_id
             FROM page_revisions r LEFT JOIN users u ON u.id = r.created_by
             WHERE r.page_id = ? AND r.revision_number < ? AND COALESCE(r.access_level_id, 1) <= ?
             AND COALESCE(r.is_expired, 0) = 0 ORDER BY r.revision_number DESC LIMIT 51',
@@ -122,6 +124,7 @@ final class NormalizedPages
             }
             $row['categories'] = array_values($categories);
             $row['source'] = WikiRenderer::withoutCategoryMarkup($row['source']);
+            $row['templates'] = $row['templates'] === null ? [] : json_decode($row['templates'], true, flags: JSON_THROW_ON_ERROR);
             unset($row['FOTO'], $row['category_ids']);
             return $row;
         }, $visibleRows);
@@ -135,7 +138,9 @@ final class NormalizedPages
         $this->editorAccount();
         $page = $this->page($slug, allowMissing: true);
         $page ??= ['slug' => $this->newPageAddress($slug)[0]];
-        return ['html' => $this->render($page, $body['source'] ?? null)['html']];
+        $templates = array_key_exists('templates', $body) ? PageTemplates::validate($body['templates'])
+            : (isset($page['id']) ? (new PageTemplates($this->db))->load((int) $page['id']) : []);
+        return ['html' => $this->render($page, $body['source'] ?? null, $templates)['html']];
     }
 
     private function newPageAddress(string $slug): array
@@ -171,10 +176,10 @@ final class NormalizedPages
         return $this->page($canonical, true);
     }
 
-    private function render(array $page, mixed $source): array
+    private function render(array $page, mixed $source, array $templates): array
     {
         $this->validateSource($source);
-        return $this->renderer->render($source, $page['slug'], false, isset($page['id']) ? (int) $page['id'] : null);
+        return $this->renderer->render(PageTemplates::renderSource($templates) . $source, $page['slug'], false, isset($page['id']) ? (int) $page['id'] : null);
     }
 
     private function validateSource(mixed $source): void
@@ -211,7 +216,7 @@ final class NormalizedPages
                 throw new HttpError(409, 'edit_conflict', 'Outra edição foi salva. Recarregue a página antes de salvar.');
             }
             if ($restore !== null) {
-                $revision = $this->db->one('SELECT title, COALESCE(source, \'\') AS source, category_ids FROM page_revisions WHERE page_id = ?
+                $revision = $this->db->one('SELECT title, COALESCE(source, \'\') AS source, category_ids, templates FROM page_revisions WHERE page_id = ?
                     AND revision_number = ? AND COALESCE(access_level_id, 1) <= ? AND COALESCE(is_expired, 0) = 0',
                     [$page['id'], $restore, (int) $user['NIVEL']]);
                 if (!$revision) {
@@ -270,16 +275,26 @@ final class NormalizedPages
                 $this->db->run('UPDATE pages SET source = ? WHERE id = ?', [$source, $page['id']]);
                 $page['source'] = $source;
             }
-            $rendered = $this->render($page, $source);
+            $templateStore = new PageTemplates($this->db);
+            $currentTemplates = $templateStore->load((int) $page['id']);
+            $templates = $currentTemplates;
+            if ($restore !== null) {
+                $templates = $body['templates'] === null ? []
+                    : PageTemplates::validate(json_decode($body['templates'], true, flags: JSON_THROW_ON_ERROR));
+            } elseif (array_key_exists('templates', $body)) {
+                $templates = PageTemplates::validate($body['templates']);
+            }
+            $rendered = $this->render($page, $source, $templates);
             $edited = !$rebuild && ($new || $title !== $page['title'] || $source !== ($page['source'] ?? '')
-                || $categoryIds !== $currentIds);
+                || $categoryIds !== $currentIds || $templates !== $currentTemplates);
             if ($edited) {
+                $templateStore->save((int) $page['id'], $currentTemplates, $templates);
                 $number++;
                 $this->db->run('INSERT INTO page_revisions
-                    (page_id, revision_number, slug, title, source, rendered_html, category_ids,
+                    (page_id, revision_number, slug, title, source, rendered_html, category_ids, templates,
                      is_searchable, access_level_id, created_by, is_expired, created_at)
-                     VALUES (?,?,?,?,?,?,?,?,?,?,0,?)',
-                    [$page['id'], $number, $page['slug'], $title, $source, $rendered['html'], json_encode($categoryIds, JSON_THROW_ON_ERROR),
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?)',
+                    [$page['id'], $number, $page['slug'], $title, $source, $rendered['html'], json_encode($categoryIds, JSON_THROW_ON_ERROR), PageTemplates::json($templates),
                      $page['is_searchable'], 1, $user['ID'], $now]);
                 $this->db->run('UPDATE pages SET title = ?, source = ?, updated_at = ?, updated_by = ? WHERE id = ?',
                     [$title, $source, $now, $user['ID'], $page['id']]);
